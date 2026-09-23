@@ -1,0 +1,130 @@
+<!doctype html><html lang=de><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name=theme-color content="#070b14">
+<link rel=manifest href=manifest.json><link rel=apple-touch-icon href=icon-192.png><meta name=apple-mobile-web-app-capable content=yes><title>Smart Lab</title>
+<style>
+:root{--bg:#0a0a14;--p:#12122a;--l:#26264a;--t:#e6e9ff;--m:#8a8fb8;--g:#22e58f;--r:#ff5470;--c:#38bdf8;--y:#fbbf24}
+*{box-sizing:border-box}body{margin:0;padding-top:env(safe-area-inset-top);min-height:100vh;color:var(--t);font:14px system-ui,-apple-system;background:radial-gradient(700px 400px at 5% -5%,#5b2a9066,transparent),radial-gradient(700px 500px at 100% 25%,#1e3a8a55,transparent),var(--bg)}
+header{padding:20px 16px 6px}h1{font:800 46px/1 system-ui;margin:0;letter-spacing:-.02em;background:linear-gradient(90deg,#60a5fa,#a78bfa,#f472b6);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 14px #6366f1aa)}
+.sub{display:flex;align-items:center;gap:10px;color:var(--m);font-size:11px;letter-spacing:.22em;margin-top:12px}.sub:before{content:'';width:46px;height:2px;background:var(--c);box-shadow:0 0 8px var(--c)}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--g);box-shadow:0 0 8px var(--g)}.dot.e{background:var(--r);box-shadow:0 0 8px var(--r)}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px 16px}@media(min-width:900px){.tiles{grid-template-columns:repeat(4,1fr)}}
+.tile{position:relative;aspect-ratio:1/1;border-radius:24px;border:1px solid #ffffff22;padding:12px;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer;overflow:hidden;box-shadow:0 12px 30px #0009,inset 0 1px #ffffff2e;transition:.2s}
+.tile.on{outline:2px solid #ffffffaa;transform:translateY(-3px)}.tile .bd{align-self:flex-end;font-size:9px;font-weight:700;letter-spacing:.16em;padding:3px 8px;border-radius:8px;background:#22e58f22;color:var(--g)}
+.tile svg{width:62px;height:62px;align-self:center;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 0 6px currentColor) drop-shadow(0 0 16px currentColor);pointer-events:none}
+.tile b{font-size:15px;pointer-events:none}.tile small{display:block;color:#ffffffb0;font-size:11px;margin-top:2px;pointer-events:none}
+.t1{background:linear-gradient(150deg,#c0369a,#3b1a4f 78%);color:#ff6ad5}.t2{background:linear-gradient(150deg,#5b52f0,#1e2a6b 82%);color:#8be0ff}
+.t3{background:linear-gradient(150deg,#4b5870,#1a2030 82%);color:#b4b9ff}.t4{background:linear-gradient(150deg,#1d4ed8,#0e1a4a 82%);color:#6ff3ff}
+.bar{height:5px;border-radius:5px;background:var(--r);overflow:hidden;margin-top:7px}.bar i{display:block;height:100%;width:50%;background:var(--g);box-shadow:0 0 8px var(--g)}
+input,button.b{background:#ffffff0d;border:1px solid var(--l);color:var(--t);border-radius:12px;padding:9px 12px}#er{color:var(--y);padding:0 16px 8px;font-size:12px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:4px 16px 8px}.row label{color:var(--m)}
+.pr{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:0 16px 8px}.pr button{border:1px solid var(--l);border-radius:20px;padding:6px 12px;color:var(--t);background:#ffffff0a}
+details{margin:0 16px 10px;background:#ffffff0a;border:1px solid var(--l);border-radius:14px;padding:8px 12px}details label{display:block;margin:6px 0;color:var(--m)}details input{width:120px;margin-left:8px}
+#hot{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;padding:0 16px 12px}
+.hc{background:linear-gradient(160deg,#1a1a3d,#132544);border:1px solid var(--l);border-radius:16px;padding:12px;box-shadow:0 0 20px #6366f11f}.hc b{font-size:16px}.hc small{color:var(--m)}
+main{padding:0 16px calc(24px + env(safe-area-inset-bottom))}
+.w{overflow-x:auto;background:#ffffff08;border:1px solid var(--l);border-radius:18px;backdrop-filter:blur(8px)}table{border-collapse:collapse;width:100%;white-space:nowrap}
+th,td{padding:9px 10px;text-align:right;border-bottom:1px solid #ffffff12}th{color:var(--m);cursor:pointer;font-weight:600}td:first-child,th:first-child{text-align:left}
+tr.hit{box-shadow:inset 3px 0 var(--g);background:#22e58f12}.up{color:var(--g)}.dn{color:var(--r)}
+@keyframes fl{from{background:#38bdf83a}to{background:transparent}}tr.nw{animation:fl 2.5s}
+.sc{display:inline-block;min-width:34px;text-align:center;border-radius:9px;padding:2px 6px;font-weight:800;color:#04121a}
+.f{font-size:10px;border:1px solid var(--y);color:var(--y);border-radius:6px;padding:1px 4px;margin-left:4px}.f.B{border-color:var(--c);color:var(--c)}
+button{background:none;border:0;color:var(--m);cursor:pointer;font-size:14px}button.st{color:var(--y)}
+tr.x td{text-align:left;white-space:normal;color:var(--m)}tr.x a{margin-right:12px}
+aside{background:#ffffff08;border:1px solid var(--l);border-radius:18px;padding:14px}aside div{padding:8px 0;border-bottom:1px solid #ffffff12}a{color:var(--c);text-decoration:none}
+.cd{position:relative;background:linear-gradient(160deg,#ffffff12,#ffffff05);border:1px solid #ffffff1c;border-radius:20px;padding:12px;margin-bottom:10px;backdrop-filter:blur(10px);box-shadow:0 8px 24px #0006}
+.cd.hit{border-color:#22e58f88;box-shadow:0 0 22px #22e58f33,0 8px 24px #0006}.cd.nw{animation:fl 2.5s}
+.ch{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.ch b{font-size:18px}.ag{margin-left:auto;color:var(--m);font-size:12px}
+.ca{display:flex;align-items:center;justify-content:space-between;width:100%;margin:8px 0;padding:10px 12px;border-radius:12px;background:#38bdf814;border:1px dashed #38bdf877;color:var(--c);font:600 13px ui-monospace,monospace}.ca span{color:var(--t);font-family:system-ui}.ca:active{background:#38bdf844}
+.mg{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.mg div{background:#ffffff0a;border-radius:12px;padding:8px;text-align:center;font-weight:700}.mg small{display:block;color:var(--m);font-weight:500;font-size:10px;letter-spacing:.08em;text-transform:uppercase}
+.cf2{display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap}.lk a{display:inline-block;margin:2px 12px 2px 0;font-size:13px}
+.chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:10px}.chips button{white-space:nowrap;border:1px solid var(--l);border-radius:20px;padding:7px 14px;color:var(--t);background:#ffffff0a}.chips button.on{background:linear-gradient(90deg,#6366f1,#ec4899);border-color:transparent}
+.bub{background:linear-gradient(160deg,#2b2f6b,#1a1f4a);border:1px solid #ffffff1c;border-radius:4px 20px 20px 20px;padding:10px 12px;margin-bottom:10px;max-width:520px}.bub small{display:block;color:var(--m);margin-bottom:2px}
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translate(-50%,40px);opacity:0;background:#22e58f;color:#04121a;font-weight:700;padding:10px 16px;border-radius:14px;transition:.25s;z-index:9;pointer-events:none}.toast.on{opacity:1;transform:translate(-50%,0)}
+.em{color:var(--m);padding:16px;text-align:center}@keyframes pu{50%{opacity:.4}}.bd{animation:pu 1.8s infinite}
+@media(min-width:900px){#cards{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.cd{margin:0}}
+.mo{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;z-index:10}.mb{background:var(--p);border:1px solid var(--l);border-radius:18px;padding:16px;width:min(92vw,420px);display:flex;flex-direction:column;gap:10px}.mb input{width:100%;font:600 13px ui-monospace,monospace}.mb small{color:var(--m)}
+.ca{gap:10px;align-items:center}.ca code{flex:1;text-align:left;font:600 12px/1.35 ui-monospace,monospace;word-break:break-all;user-select:all;-webkit-user-select:all}.ca span{white-space:nowrap;font-size:12px}
+</style>
+<header><h1>Smart Lab</h1><div class=sub><span>SOLANA TERMINAL</span><span class=dot id=dt></span><span id=ts></span><span id=cd></span></div></header>
+<div class=tiles>
+<div class="tile t1 on" data-v=scan><span class=bd>LIVE</span><svg viewBox="0 0 24 24"><circle cx=12 cy=12 r=9 /><circle cx=12 cy=12 r=4 /><path d="M12 12l6-6"/></svg><div><b>Scanner</b><small id=k1>0 Tokens</small></div></div>
+<div class="tile t2" data-v=sig><span class=bd>LIVE</span><svg viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg><div><b>Signale</b><small id=k2>0 aktiv</small></div></div>
+<div class="tile t3" data-v=watch><span class=bd>LOKAL</span><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx=12 cy=12 r=3 /></svg><div><b>Watchlist</b><small id=k3>0 ★</small></div></div>
+<div class="tile t4" data-v=feed><span class=bd>LIVE</span><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0112 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 20a2 2 0 004 0"/></svg><div><b>Alarm-Chat</b><small id=k4>Käufer 0%</small><div class=bar><i id=br></i></div></div></div>
+</div>
+<div id=er></div>
+<div class=row><input id=q placeholder="Suche Symbol / Adresse"><label><input id=rk type=checkbox> ohne Risiko</label><button class=b id=nb>🔔 Alarme an</button></div>
+<div class=pr id=pr></div><details><summary>⚙ Filter &amp; Einstellungen</summary><div id=cf></div></details>
+<div id=hot></div>
+<main><div id=tw><div class=chips id=sr></div><div id=cards></div></div><aside id=fa><b>💬 Alarm-Chat</b><div id=fd style="margin-top:10px"></div></aside></main><div class=toast id=toast></div><div class=mo id=mo><div class=mb><b>Adresse manuell kopieren</b><input id=mi readonly onclick="this.select()"><small>Automatisches Kopieren wird hier blockiert. Tippe ins Feld, wähle „Alles auswählen“ und dann „Kopieren“.</small><button class=b data-m=1>Schließen</button></div></div>
+<script>
+const $=s=>document.querySelector(s),X=s=>String(s).replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');
+const F=n=>n>=1e6?'$'+(n/1e6).toFixed(2)+'M':n>=1e3?'$'+(n/1e3).toFixed(1)+'K':'$'+Math.round(n);
+const ld=(k,d)=>{try{return JSON.parse(localStorage[k])}catch(e){return d}},sv=(k,v)=>{try{localStorage[k]=JSON.stringify(v)}catch(e){}};
+const CF=[['liq','Min. Liquidität $'],['vol','Min. Vol 1h $'],['mmin','Min. MCap $'],['mmax','Max. MCap $'],['ratio','Min. Käuferanteil (0-1)'],['score','Min. Score'],['sound','Ton (1/0)']];
+const PR={Konservativ:{liq:3e4,vol:5e4,mmin:1e5,mmax:1e7,ratio:.6,score:75},Ausgewogen:{liq:1e4,vol:2e4,mmin:5e4,mmax:5e6,ratio:.55,score:60},Aggressiv:{liq:5e3,vol:1e4,mmin:2e4,mmax:5e6,ratio:.5,score:60}};
+let C={liq:1e4,vol:2e4,mmin:5e4,mmax:5e6,ratio:.55,score:60,sound:1};Object.assign(C,ld('c',{}));C.score=Math.max(60,+C.score||60);
+let LK={},view='scan',LE='',DEMO=false,R=[],FD=ld('fd',[]),SP={},EX=new Set(),KN=null,bad=0,nxt=0,key='score',dir=-1,W=new Set(ld('w',[])),S=new Set(ld('s',[])),Hh=ld('h',{});
+const fl=r=>{const f=[];if(r.age!=null&&r.age<.25)f.push('BRANDNEU');if(r.mc&&r.liq/r.mc<.03)f.push('DÜNNE LIQ');if(r.b+r.s>=20&&r.ratio<.4)f.push('VERKÄUFER');if(r.c1<-30)f.push('DUMP');if(r.boost)f.push('BOOST');return f};
+const sc=r=>{let s=Math.min(30,r.v1/Math.max(r.liq,1)*10)+Math.max(0,r.ratio-.5)*80+Math.min(20,Math.max(0,r.c5)*2)+(r.boost?5:0);s-=15*r.flags.filter(x=>['DÜNNE LIQ','VERKÄUFER','DUMP'].includes(x)).length;return Math.round(Math.max(0,Math.min(100,s)))};
+const hit=r=>r.liq>=C.liq&&r.v1>=C.vol&&r.mc>=C.mmin&&r.mc<=C.mmax&&r.ratio>=C.ratio&&r.score>=C.score;
+function st(p,bo){const v=p.volume||{},c=p.priceChange||{},t=(p.txns||{}).h1||{},b=t.buys||0,s=t.sells||0,a=p.baseToken.address,mc=p.marketCap||p.fdv||0;
+ const h=Hh[a]=Hh[a]||{mc,t:Date.now()};
+ const r={sym:p.baseToken.symbol,addr:a,url:p.url||'',mc,liq:(p.liquidity||{}).usd||0,v1:v.h1||0,c5:c.m5||0,c1:c.h1||0,b,s,ratio:b+s?b/(b+s):0,boost:bo.has(a),age:p.pairCreatedAt?(Date.now()-p.pairCreatedAt)/36e5:null,since:h.mc?mc/h.mc-1:0};
+ r.flags=fl(r);r.score=sc(r);return r}
+const A='https://api.dexscreener.com',J=async p=>{try{const r=await fetch(A+p);if(!r.ok)throw new Error('HTTP '+r.status);return await r.json()}catch(e){LE=e.message||String(e);throw e}};
+function ping(r,tag){FD.unshift({t:new Date().toTimeString().slice(0,5),tag,sym:r.sym,addr:r.addr,mc:r.mc});FD=FD.slice(0,60);sv('fd',FD);
+ navigator.vibrate&&navigator.vibrate([200,100,200]);
+ if(C.sound)try{const a=new AudioContext(),o=a.createOscillator();o.connect(a.destination);o.frequency.value=880;o.start();o.stop(a.currentTime+.15)}catch(e){}
+ if('Notification' in window&&Notification.permission=='granted'){const b=r.sym+' · MC '+F(r.mc)+' · Score '+r.score;
+  const f=()=>{try{new Notification(tag,{body:b})}catch(e){}};navigator.serviceWorker?navigator.serviceWorker.ready.then(g=>g.showNotification(tag,{body:b})).catch(f):f()}}
+let AD=[],BO=new Set(),FT=0,SPT=0,SVT=0,LT=0;
+async function scan(){let ad=[],bo=new Set(),best={};const fe=Date.now()-FT>(AD.length?2e4:5e3);if(fe)FT=Date.now();
+ if(fe)for(const [p,b] of [['/token-profiles/latest/v1',0],['/token-boosts/latest/v1',1],['/token-boosts/top/v1',1]])try{const j=(await J(p)).filter(x=>x.chainId=='solana');j.forEach(x=>{if(x.links&&x.links.length)LK[x.tokenAddress]=x.links});const a=j.map(x=>x.tokenAddress);ad.push(...a);if(b)a.forEach(x=>bo.add(x))}catch(e){}
+ ad=[...new Set(ad)];if(fe&&ad.length){AD=ad;BO=bo}ad=AD;bo=BO;
+ for(let i=0;i<ad.length;i+=30)try{const ch=ad.slice(i,i+30);for(const p of await J('/tokens/v1/solana/'+ch.join(','))){if(!ch.includes(p.baseToken.address))continue;const a=p.baseToken.address,l=(p.liquidity||{}).usd||0;if(!best[a]||l>((best[a].liquidity||{}).usd||0))best[a]=p}}catch(e){}
+ const spg=Date.now()-SPT>15e3;if(spg)SPT=Date.now();R=Object.values(best).map(p=>st(p,bo));bad=R.length?0:bad+1;const old=KN;R.forEach(r=>{r.nw=!!old&&!old.has(r.addr);if(spg)SP[r.addr]=(SP[r.addr]||[]).concat(r.mc).slice(-30)});KN=new Set([...(old||[]),...R.map(r=>r.addr)]);
+ $('#er').textContent=R.length?'':'Keine Live-Daten ('+(LE||'keine Antwort')+'). Öffne die App im Browser (Safari/Chrome) über deinen Hoster, nicht in der Claude-Vorschau. Es werden nie Fake-Daten angezeigt.';
+ for(const a in Hh)if(Date.now()-Hh[a].t>1728e5)delete Hh[a];for(const a in Hh)if(a.startsWith('DEMO'))delete Hh[a];
+ for(const r of R.filter(x=>x.score>=60)){if(hit(r)&&!S.has(r.addr)){S.add(r.addr);ping(r,'🔔 SIGNAL')}else if(r.since>=1&&r.liq>=C.liq&&!S.has(r.addr+'x2')){S.add(r.addr+'x2');ping(r,'🚀 x2 seit Fund')}}
+ sv('s',[...S].slice(-2000));if(Date.now()-SVT>3e4){SVT=Date.now();sv('h',Hh)}$('#ts').textContent=new Date().toTimeString().slice(0,8);if(Date.now()-LT>4e3)draw()}
+const H=[['sym','Token'],['score','Score'],['mc','MCap'],['v1','Vol 1h'],['liq','Liq'],['c5','5m'],['c1','1h'],['b','Käufe/Verk.'],['ratio','Käufer'],['since','seit Fund'],['age','Alter'],['sp','Trend']];
+const sp=a=>{const v=SP[a]||[];if(v.length<2)return '';const lo=Math.min(...v),hi=Math.max(...v),d=hi-lo||1,pts=v.map((y,i)=>(i*60/(v.length-1)).toFixed(1)+','+(18-(y-lo)/d*16).toFixed(1)).join(' ');return `<svg width=60 height=20><polyline fill=none stroke="${v[v.length-1]>=v[0]?'#22e58f':'#ff5470'}" stroke-width=1.6 points="${pts}"/></svg>`};
+const ex=x=>`<tr class=x><td colspan=12><a target=_blank href="https://dexscreener.com/solana/${X(x.addr)}">DexScreener</a><a target=_blank href="https://rugcheck.xyz/tokens/${X(x.addr)}">RugCheck</a><a target=_blank href="https://solscan.io/token/${X(x.addr)}">Solscan</a><a target=_blank href="https://birdeye.so/token/${X(x.addr)}?chain=solana">Birdeye</a><br>${X(x.addr)}</td></tr>`;
+const P=v=>`<td class="${v>=0?'up':'dn'}">${v.toFixed(0)}%</td>`;
+const ca=a=>a.slice(0,4)+'…'+a.slice(-4),pc=v=>`<span class="${v>=0?'up':'dn'}">${v>=0?'+':''}${v.toFixed(0)}%</span>`;
+function cp(a){const ok=()=>{const t=$('#toast');t.textContent='CA kopiert ✓ '+ca(a);t.className='toast on';setTimeout(()=>t.className='toast',1600)};
+ const man=()=>{$('#mo').style.display='flex';const i=$('#mi');i.value=a;i.focus();i.select();try{i.setSelectionRange(0,a.length)}catch(x){}};
+ let s=false;try{const e=document.createElement('textarea');e.value=a;e.readOnly=true;e.style.cssText='position:fixed;top:0;left:0;font-size:16px;opacity:0';document.body.appendChild(e);e.focus();e.select();e.setSelectionRange(0,a.length);s=document.execCommand('copy');e.remove()}catch(x){}
+ if(s)return ok();
+ if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(a).then(ok,man);else man()}
+const lk=a=>(LK[a]||[]).filter(l=>l.url&&l.url.startsWith('https://')).slice(0,5).map(l=>{const k=(l.type||l.label||'').toLowerCase();return `<a target=_blank href="${X(l.url)}">${k=='telegram'?'✈ Telegram':k=='twitter'?'𝕏':k=='discord'?'Discord':'🌐 '+X(l.label||'Web')}</a>`}).join('');
+const ln=a=>lk(a)+`<a target=_blank href="https://dexscreener.com/solana/${X(a)}">Chart</a><a target=_blank href="https://rugcheck.xyz/tokens/${X(a)}">RugCheck</a>`;
+const card=x=>`<div class="cd ${hit(x)?'hit':''} ${x.nw?'nw':''}"><div class=ch><button data-s="${X(x.addr)}" class="${W.has(x.addr)?'st':''}">${W.has(x.addr)?'★':'☆'}</button><b>${X(x.sym)}</b><span class=sc style="background:hsl(${x.score*1.2},85%,58%)">${x.score}</span>${x.flags.map(f=>`<span class="f ${f=='BOOST'?'B':''}">${X(f)}</span>`).join('')}<span class=ag>${x.age==null?'':x.age<1?Math.round(x.age*60)+' min':x.age.toFixed(1)+' h'}</span></div>
+<button class=ca data-c="${X(x.addr)}"><code>${X(x.addr)}</code><span>⧉ kopieren</span></button>
+<div class=mg><div><small>MCap</small>${F(x.mc)}</div><div><small>Vol 1h</small>${F(x.v1)}</div><div><small>Liq</small>${F(x.liq)}</div><div><small>5m</small>${pc(x.c5)}</div><div><small>1h</small>${pc(x.c1)}</div><div><small>Käufer</small>${(x.ratio*100).toFixed(0)}%</div></div>
+<div class=cf2>${sp(x.addr)}<div class=lk>${ln(x.addr)}</div></div></div>`;
+function draw(){const q=$('#q').value.toLowerCase(),fv=view=='feed';document.querySelectorAll('.tile').forEach(e=>e.classList.toggle('on',e.dataset.v==view));$('#tw').style.display=fv?'none':'';$('#fa').style.display=fv?'':'none';$('#hot').style.display=fv?'none':'';
+ let r=R.filter(x=>x.score>=60&&(x.sym.toLowerCase().includes(q)||x.addr.toLowerCase().includes(q))&&(view!='watch'||W.has(x.addr))&&(view!='sig'||hit(x))&&(!$('#rk').checked||!x.flags.some(f=>['DÜNNE LIQ','VERKÄUFER','DUMP'].includes(f))));
+ r.sort((a,b)=>{const x=a[key]??999,y=b[key]??999;return((x>y)-(x<y))*dir});
+ $('#k1').textContent=R.filter(x=>x.score>=60).length+' Empfehlungen';$('#k2').textContent=R.filter(hit).length+' aktiv';$('#k3').textContent=W.size+' ★ · Top '+Math.max(0,...R.map(x=>x.score));
+ const m=[...R].sort((a,b)=>b.c5-a.c5)[0];const tb=R.reduce((a,x)=>a+x.b,0),tsl=R.reduce((a,x)=>a+x.s,0),br=tb+tsl?tb/(tb+tsl)*100:50;$('#k4').textContent='Käufer '+br.toFixed(0)+'%';$('#br').style.width=br+'%';
+ $('#hot').innerHTML=[...R].filter(x=>x.score>=60).sort((a,b)=>b.score-a.score).slice(0,3).map(x=>`<div class=hc><small>🔥 Top Score</small><br><b>${X(x.sym)}</b> <span class=sc style="background:hsl(${x.score*1.2},85%,58%)">${x.score}</span><br><small>${F(x.mc)} · 5m ${x.c5.toFixed(0)}%</small><br>${sp(x.addr)}<button class=ca data-c="${X(x.addr)}"><code>${X(x.addr)}</code><span>⧉ kopieren</span></button></div>`).join('');
+ $('#sr').innerHTML=[['score','Score'],['c5','5m 🚀'],['v1','Volumen'],['mc','MCap'],['age','Neu']].map(([k,n])=>`<button data-k="${k}" class="${k==key?'on':''}">${n}${k==key?(dir<0?' ▼':' ▲'):''}</button>`).join('');
+ $('#cards').innerHTML=r.slice(0,60).map(card).join('')||`<div class=em>${R.length?'Gerade keine Tokens mit Score ≥ 60 ('+R.length+' gescannt, alle darunter). Das ist normal, der Filter ist streng.':'Warte auf Live-Daten …'}</div>`;
+ $('#fd').innerHTML=FD.map(f=>`<div class=bub><small>${X(f.t)} · ${X(f.tag)}</small><b>${X(f.sym)}</b> · MC ${F(f.mc)}<button class=ca data-c="${X(f.addr)}"><code>${X(f.addr)}</code><span>⧉ kopieren</span></button><div class=lk>${ln(f.addr)}</div></div>`).join('')||'<div class=em>Noch keine Alarme. Sie erscheinen hier wie in einem Chat.</div>';R.forEach(r=>r.nw=false)}
+document.onclick=e=>{if(e.target.id=='mo'||e.target.closest('[data-m]')){$('#mo').style.display='none';return}const vt=e.target.closest('[data-v]');if(vt)view=vt.dataset.v;const d=(e.target.closest('[data-c],[data-s],[data-k],[data-p]')||e.target).dataset;if(d.k){dir=d.k==key?-dir:(d.k=='age'?1:-1);key=d.k}
+ if(d.s){W.has(d.s)?W.delete(d.s):W.add(d.s);sv('w',[...W])}
+ if(d.x){EX.has(d.x)?EX.delete(d.x):EX.add(d.x)}
+ if(d.p){Object.assign(C,PR[d.p]);sv('c',C);document.querySelectorAll('[data-cf]').forEach(i=>i.value=C[i.dataset.cf])}if(d.c){cp(d.c);return}draw()};
+$('#q').oninput=$('#rk').oninput=draw;
+$('#cf').innerHTML=CF.map(([k,n])=>`<label>${n}<input data-cf="${k}" type=number step=any value="${C[k]}"></label>`).join('');
+$('#pr').innerHTML='<b style="color:var(--m);padding:6px">Profil:</b>'+Object.keys(PR).map(k=>`<button data-p="${k}">${k}</button>`).join('');
+$('#cf').onchange=e=>{const k=e.target.dataset.cf;if(k){C[k]=k=='score'?Math.max(60,+e.target.value):+e.target.value;e.target.value=C[k];sv('c',C);draw()}};
+$('#nb').onclick=async()=>{if(!('Notification' in window))return alert('Benachrichtigungen werden hier nicht unterstützt (iPhone: erst zum Home-Bildschirm hinzufügen).');
+ $('#nb').textContent=(await Notification.requestPermission())=='granted'?'🔔 aktiv':'🔕 blockiert'};
+if('Notification' in window&&Notification.permission=='granted')$('#nb').textContent='🔔 aktiv';
+document.addEventListener('touchstart',()=>{LT=Date.now()},{passive:true});
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+(async function lp(){try{await scan()}catch(e){bad++}nxt=Date.now()+Math.min(3000*(1+bad*2),6e4);setTimeout(lp,nxt-Date.now())})();
+setInterval(()=>{$('#cd').textContent=bad?'Verbindung langsam …':'Scan alle 3 s';$('#dt').className='dot'+(bad?' e':'')},1000);
+</script>
