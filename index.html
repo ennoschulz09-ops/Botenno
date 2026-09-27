@@ -290,6 +290,54 @@ pre.raw{white-space:pre-wrap;word-break:break-all;font:11px/1.4 var(--mono);back
   .meter{grid-template-columns:92px 1fr 36px}
   .control{padding:10px}.control .btn{padding:6px 9px;font-size:12px}.seg button{padding:6px 8px;font-size:11px}.explain{font-size:11.5px}
 }
+
+/* ---------- Status-Karte (READY / WAITING / BLOCKED / ERROR / EMERGENCY STOP) ---------- */
+.ctl-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.mstat{font:800 13px var(--mono);letter-spacing:.06em;padding:6px 12px;border-radius:10px;border:1px solid;white-space:nowrap}
+.mstat.READY{color:var(--green);border-color:#22e58f77;background:#22e58f14}
+.mstat.WAITING{color:var(--cyan);border-color:#38bdf877;background:#38bdf812}
+.mstat.BLOCKED{color:var(--orange);border-color:#fb923c88;background:#fb923c14}
+.mstat.ERROR,.mstat.EMERGENCY_STOP{color:#ff8ea1;border-color:#ff547099;background:#ff547018}
+.mstat.PAUSED,.mstat.STOPPED{color:var(--yellow);border-color:#fbbf2477;background:#fbbf2412}
+.ctl-why{font-size:12.5px;color:var(--muted);flex:1;min-width:180px}
+.ov{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.ov button.kv{cursor:pointer;text-align:left;color:inherit}
+.ov button.kv:hover{border-color:var(--line2)}
+.ov .kv .switch{margin-top:2px}
+.ctl-more>summary{cursor:pointer;color:var(--muted);font-size:12.5px;padding:2px 0;list-style-position:inside}
+.ctl-more[open]>summary{margin-bottom:8px}
+.sec-h{margin:2px 0 8px}
+.chain{display:flex;flex-wrap:wrap;gap:4px;align-items:center;font:600 10.5px var(--mono);margin:6px 0}
+.chain span{padding:2px 6px;border-radius:6px;border:1px solid var(--line2);white-space:nowrap}
+.chain .p{color:var(--green);border-color:#22e58f55}
+.chain .x{color:#ff8ea1;border-color:#ff547077;background:#ff547014}
+.chain .n{color:var(--dim)}
+.chain .fin{color:var(--text);border-color:var(--violet);background:#a78bfa18}
+.chain .fin.buy{border-color:var(--green);background:#22e58f1c}
+.chain i{font-style:normal;color:var(--dim)}
+.chain small{font-weight:500;font-size:9.5px;margin-left:3px}
+.chain .fin{white-space:normal}
+.cards2>*,.grid2>*,.grid3>*,.grid4>*{min-width:0}
+.note,.check b,.check small{overflow-wrap:anywhere}
+.check .ic.info{background:#38bdf81a;color:var(--cyan)}
+.bottomnav button{position:relative}
+.bdg{position:absolute;top:0;left:calc(50% + 6px);min-width:16px;height:16px;padding:0 4px;border-radius:9px;background:var(--pink);color:#fff;font:700 10px/16px var(--mono);text-align:center}
+.bdg:empty{display:none}
+.navgrp h3{margin:12px 0 6px}
+.tile .tn{display:none;font:700 10px var(--mono);color:#ffffffcc}
+@media (max-width:1100px){.ov{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:700px){
+  .pills .pill:not(.pm){display:none}
+  .ov{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .tiles{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+  .tile{flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:0;padding:8px 4px;border-radius:14px;text-align:center}
+  .tile svg{width:22px;height:22px}
+  .tile .tb,.tile small,.tile .bb{display:none}
+  .tile b{font-size:11px}
+  .tile .tn{display:block}
+  .ctl-why{flex-basis:100%}
+  body:not(.v-home) #control,body:not(.v-home) #tiles{display:none}
+}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -308,16 +356,17 @@ pre.raw{white-space:pre-wrap;word-break:break-all;font:11px/1.4 var(--mono);back
     <section class="tiles" id="tiles" aria-label="Schnellübersicht"></section>
     <div id="views">
       <section class="view" id="v-scanner" aria-label="Scanner">
+        <h3 class="sec-h">🔥 Top-Kandidaten</h3>
+        <div class="hot" id="hot"></div>
         <div class="toolbar">
           <input type="search" id="q" placeholder="Suche Symbol, Name oder Mint-Adresse" aria-label="Token suchen" autocomplete="off">
-          <label class="switch" id="swRec"><input type="checkbox" id="fRec" class="hidden"><span class="tg"></span>nur Empfehlungen</label>
-          <label class="switch" id="swSafe"><input type="checkbox" id="fSafe" class="hidden"><span class="tg"></span>ohne Risiko</label>
+          <label class="switch" id="swRec" tabindex="0" role="switch" aria-checked="false"><input type="checkbox" id="fRec" class="hidden"><span class="tg"></span>nur Empfehlungen</label>
+          <label class="switch" id="swSafe" tabindex="0" role="switch" aria-checked="false"><input type="checkbox" id="fSafe" class="hidden"><span class="tg"></span>ohne Risiko</label>
           <select id="fAge" aria-label="Filter Token-Alter"><option value="">Alle Alter</option><option value="NEW">NEW (&lt;1h)</option><option value="EARLY">EARLY (&lt;24h)</option><option value="ESTABLISHED">ESTABLISHED (&lt;7d)</option><option value="MATURE">MATURE</option></select>
           <button class="btn" id="btnNotify" data-act="notify">🔔 Alarme an</button>
         </div>
         <details class="panel tight" id="filterBox"><summary>⚙ Filter, Profile &amp; Ansicht</summary><div id="filterForm" style="margin-top:10px"></div></details>
         <div class="chips" id="sortChips" role="toolbar" aria-label="Sortierung"></div>
-        <div class="hot" id="hot"></div>
         <div id="mkInfo" class="note" style="margin:0 0 6px"></div>
         <div class="mwrap"><div class="mhead" id="mkHead" role="row"></div>
         <div id="mkList" role="table" aria-label="Live Market Tabelle"></div></div>
@@ -341,6 +390,7 @@ pre.raw{white-space:pre-wrap;word-break:break-all;font:11px/1.4 var(--mono);back
       <section class="view hidden" id="v-risk" aria-label="Risiko"></section>
       <section class="view hidden" id="v-alerts" aria-label="Alarm-Chat"></section>
       <section class="view hidden" id="v-diagnostics" aria-label="Diagnose"></section>
+      <section class="view hidden" id="v-system" aria-label="System &amp; API Health"></section>
       <section class="view hidden" id="v-logs" aria-label="Logs">
         <div class="toolbar">
           <div class="seg" id="logCats" role="toolbar" aria-label="Log-Filter"></div>
@@ -375,11 +425,13 @@ pre.raw{white-space:pre-wrap;word-break:break-all;font:11px/1.4 var(--mono);back
    ===================================================================== */
 
 /* ============================== KONSTANTEN ============================== */
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.1.0';
 const STRATEGY_VERSION = '1.0.0';
 const DATA_ENGINE_VERSION = '1.0.0';
-const STORAGE_KEY = 'smartlab.v2';
-const STORAGE_VERSION = 2;
+const STORAGE_KEY_V2 = 'smartlab.v2';
+const STORAGE_VERSION = 3;
+/* Storage logisch getrennt: Settings · Runtime · Positionen/Orders · Trades · Logs · Statistiken */
+const STORAGE_KEYS = Object.freeze({ settings: 'smartlab.v3.settings', runtime: 'smartlab.v3.runtime', positions: 'smartlab.v3.positions', trades: 'smartlab.v3.trades', logs: 'smartlab.v3.logs', stats: 'smartlab.v3.stats' });
 const SEC = 1000, MIN = 60 * SEC, HOUR = 60 * MIN, DAY = 24 * HOUR;
 const LAMPORTS_PER_SOL = 1000000000n;
 const BASE_FEE_LAMPORTS = 5000;
@@ -828,31 +880,57 @@ function migrateV1(backend) {
 }
 function createStorage(backend, log) {
   let lastOk = true, lastSaveAt = 0, lastError = '';
+  const lastWritten = {};
+  /* Lädt v3 (getrennte Schlüssel), sonst v2 (ein Schlüssel), sonst v1-Migration. */
   function load() {
-    const rawData = backend.get(STORAGE_KEY);
-    let data = parseJSON(rawData);
-    if (rawData && !data) { log && log.error('STORAGE', 'Gespeicherter Zustand ist beschädigt (JSON) – starte mit sicheren Defaults'); return { data: null, corrupted: true }; }
-    if (!data) { const m = migrateV1(backend); if (m) { log && log.info('STORAGE', 'Daten aus Version 1 migriert (Einstellungen, Watchlist, Alarme)'); return { data: m, migrated: true }; } return { data: null }; }
-    if (data.v !== STORAGE_VERSION) {
-      if (typeof data.v === 'number' && data.v < STORAGE_VERSION) { data.v = STORAGE_VERSION; log && log.info('STORAGE', 'Zustand auf Version ' + STORAGE_VERSION + ' migriert'); }
-      else { log && log.warn('STORAGE', 'Unbekannte Storage-Version ' + data.v + ' – ignoriert'); return { data: null }; }
+    const parts = {}, corrupted = [];
+    for (const [k, key] of Object.entries(STORAGE_KEYS)) {
+      const raw0 = backend.get(key); if (raw0 == null) continue;
+      const d = parseJSON(raw0);
+      if (!d || typeof d !== 'object' || d.v !== STORAGE_VERSION) { corrupted.push(k); continue; }
+      parts[k] = d; lastWritten[k] = raw0;
     }
-    return { data };
+    if (Object.keys(parts).length || corrupted.length) {
+      if (corrupted.length) log && log.error('STORAGE', 'Beschädigte Speicherbereiche: ' + corrupted.join(', ') + ' – Abgleich erforderlich');
+      const data = Object.assign({ v: STORAGE_VERSION }, parts.stats, parts.logs, parts.trades, parts.positions, parts.runtime, parts.settings);
+      data.seqs = { runtime: parts.runtime ? parts.runtime.tradeSeq : null, positions: parts.positions ? parts.positions.tradeSeq : null, trades: parts.trades ? parts.trades.tradeSeq : null };
+      return { data, corrupted };
+    }
+    const raw2 = backend.get(STORAGE_KEY_V2);
+    if (raw2 != null) {
+      const d = parseJSON(raw2);
+      if (!d) { log && log.error('STORAGE', 'Gespeicherter v2-Zustand ist beschädigt (JSON) – Start mit sicheren Defaults'); return { data: null, corrupted: ['v2'] }; }
+      log && log.info('STORAGE', 'Zustand aus Version 2 übernommen (wird getrennt gespeichert)');
+      return { data: d, migrated: 2 };
+    }
+    const m = migrateV1(backend);
+    if (m) { log && log.info('STORAGE', 'Daten aus Version 1 migriert (Einstellungen, Watchlist, Alarme)'); return { data: m, migrated: 1 }; }
+    return { data: null };
   }
-  function save(obj) {
-    let s;
-    try { s = JSON.stringify(obj); } catch (e) { lastOk = false; lastError = 'Serialisierung fehlgeschlagen'; return false; }
-    let ok = backend.set(STORAGE_KEY, s);
-    if (!ok && obj) {
-      // Quota: rotieren und erneut versuchen
-      const slim = { ...obj, logs: [], journal: arr(obj.journal).slice(0, 150), feed: arr(obj.feed).slice(0, 30), hist: {}, auditLog: arr(obj.auditLog).slice(0, 80), orders: arr(obj.orders).slice(0, 80) };
-      ok = backend.set(STORAGE_KEY, JSON.stringify(slim));
-      if (ok) log && log.warn('STORAGE', 'Speicher knapp – ältere Daten rotiert');
+  /* Schreibt nur geänderte Bereiche. Reihenfolge: Settings → Positionen → Trades → Runtime → Logs → Stats. */
+  function save(sections) {
+    let ok = true;
+    for (const k of ['settings', 'positions', 'trades', 'runtime', 'logs', 'stats']) {
+      if (!sections[k]) continue;
+      let str0;
+      try { str0 = JSON.stringify({ v: STORAGE_VERSION, ...sections[k] }); } catch (e) { ok = false; lastError = 'Serialisierung fehlgeschlagen (' + k + ')'; continue; }
+      if (lastWritten[k] === str0) continue;
+      let w = backend.set(STORAGE_KEYS[k], str0);
+      if (!w && (k === 'logs' || k === 'stats' || k === 'trades')) {
+        const slim = k === 'logs' ? { ...sections.logs, logs: [], auditLog: arr(sections.logs.auditLog).slice(0, 80), feed: arr(sections.logs.feed).slice(0, 30), configLog: arr(sections.logs.configLog).slice(0, 30) }
+          : k === 'stats' ? { ...sections.stats, hist: {} } : { ...sections.trades, journal: arr(sections.trades.journal).slice(0, 150) };
+        str0 = JSON.stringify({ v: STORAGE_VERSION, ...slim });
+        w = backend.set(STORAGE_KEYS[k], str0);
+        if (w) log && log.warn('STORAGE', `Speicher knapp – ${k} rotiert`);
+      }
+      if (w) lastWritten[k] = str0; else { ok = false; lastError = 'localStorage nicht verfügbar oder voll'; }
     }
-    lastOk = ok; if (ok) lastSaveAt = Date.now(); else lastError = 'localStorage nicht verfügbar oder voll';
+    if (ok && backend.get(STORAGE_KEY_V2) != null) backend.remove(STORAGE_KEY_V2);
+    lastOk = ok; if (ok) lastSaveAt = Date.now();
     return ok;
   }
-  return { load, save, status: () => ({ ok: lastOk, lastSaveAt, lastError }), clear: () => backend.remove(STORAGE_KEY), backend };
+  function clear() { for (const key of Object.values(STORAGE_KEYS)) backend.remove(key); backend.remove(STORAGE_KEY_V2); for (const k of Object.keys(lastWritten)) delete lastWritten[k]; }
+  return { load, save, status: () => ({ ok: lastOk, lastSaveAt, lastError }), clear, backend };
 }
 
 /* ============================== HTTP / DATA LAYER ==============================
@@ -1179,6 +1257,8 @@ const BLOCKER_DEFS = {
   RECOVERING: [1, 'SYSTEM', 'System im Recovery'],
   SYSTEM_UNHEALTHY: [1, 'SYSTEM', 'System Health zu niedrig'],
   OFFLINE: [1, 'SYSTEM', 'Offline'],
+  RECONCILIATION_REQUIRED: [1, 'SYSTEM', 'Abgleich erforderlich (Reconciliation)'],
+  SECURITY_SOURCES_DOWN: [1, 'SYSTEM', 'Alle Security-Quellen offline'],
   PRICE_MISSING: [2, 'DATA', 'Preis fehlt'],
   DATA_STALE: [2, 'DATA', 'Daten veraltet'],
   DATA_FALLBACK: [2, 'DATA', 'Nur Fallback-Daten'],
@@ -1727,6 +1807,37 @@ const BOT_TRANSITIONS = {
 /* Für manuelle Trades gelten nur die harten Sicherheitsregeln (Manual Override ohne Safety Bypass). */
 const MANUAL_HARD = new Set(['PRICE_MISSING', 'DATA_STALE', 'DATA_FALLBACK', 'DATA_CONFLICT', 'SECURITY_CRITICAL', 'SECURITY_UNKNOWN', 'SECURITY_UNVERIFIED', 'SECURITY_STALE', 'LOW_LIQUIDITY', 'LIQUIDITY_SHOCK']);
 const ALERT_TAGS = { BUY_CANDIDATE: '🔔 BUY CANDIDATE', SCORE: '⭐ SCORE', X2: '🚀 x2 seit Fund', NEW_TOKEN: '🆕 NEUER TOKEN', LIQ_SPIKE: '💧 LIQUIDITY SPIKE', LIQ_COLLAPSE: '⚠️ LIQUIDITY COLLAPSE', VOL_SPIKE: '📈 VOLUME SPIKE', WHALE: '🐋 WHALE ACTIVITY', SECURITY: '🛡 SECURITY RISK', SELL_CANDIDATE: '↘ SELL CANDIDATE', STOP_HIT: '⛔ STOP HIT', TP_HIT: '🎯 TAKE PROFIT', API_FAIL: '📡 API FAILURE', RPC_FAIL: '🛰 RPC FAILURE', WATCH: '👁 WATCHLIST', RISK: '⚠️ RISK', SYSTEM: '⚙ SYSTEM', TRADE: '💱 TRADE', POSITION_DATA: '⚠️ POSITIONSDATEN', LEGACY: '🔔 Alarm' };
+/* Nur diese globalen Blocker bedeuten „BLOCKED“. Kein Kandidat / niedriger Score / kein Konsens → WAITING, nie BLOCKED. */
+const HARD_GLOBAL = new Set(['EMERGENCY_STOP', 'SAFE_MODE', 'OFFLINE', 'SYSTEM_UNHEALTHY', 'FEE_UNKNOWN', 'DAILY_LOSS_LIMIT', 'GLOBAL_PAUSE', 'LOSS_COOLDOWN', 'RECONCILIATION_REQUIRED', 'SECURITY_SOURCES_DOWN', 'LIVE_UNAVAILABLE']);
+const GENESIS = { '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d': 'mainnet-beta', 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG': 'devnet', '4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY': 'testnet' };
+const CHAIN_STEPS = [
+  ['DATA', ['PRICE_MISSING', 'DATA_STALE', 'DATA_CONFLICT', 'DATA_FALLBACK']],
+  ['SECURITY', ['SECURITY_CRITICAL', 'SECURITY_UNKNOWN', 'SECURITY_UNVERIFIED', 'SECURITY_STALE']],
+  ['LIQUIDITY', ['LOW_LIQUIDITY', 'THIN_LIQUIDITY', 'LIQUIDITY_SHOCK']],
+  ['MARKET', ['MCAP_RANGE', 'PAIR_TOO_NEW']],
+  ['VOLUME', ['LOW_VOLUME', 'BUYER_RATIO']],
+  ['MOMENTUM', ['NO_SIGNAL', 'PUMP_DETECTED']],
+  ['RISK', ['RISK_TOO_HIGH']],
+  ['SCORE', ['SCORE_TOO_LOW']],
+  ['CONFIDENCE', ['CONFIDENCE_LOW']],
+  ['CONSENSUS', ['NO_CONSENSUS']]
+];
+/* Kandidaten-Kette: SECURITY PASS → LIQUIDITY PASS → … → FINAL. Rein funktional aus Analyse + Entscheidung. */
+function candidateChain(t) {
+  const A = t.A, D = t.D; if (!A || !D) return null;
+  const steps = CHAIN_STEPS.map(([k, codes]) => {
+    const hit = D.analysisBlockers.find(b => codes.includes(b.code));
+    // Security wird erst nach bestandenen Schnellfiltern geprüft → „nicht erreicht“ statt Fehler
+    const na = !!hit && hit.code === 'SECURITY_UNKNOWN' && !D.fastPass;
+    return { k, ok: !hit, na, code: hit ? hit.code : null, msg: na ? 'nicht geprüft (Schnellfilter nicht bestanden)' : hit ? hit.msg : '' };
+  });
+  const values = { DATA: A.label + (A.dataAge != null ? ' · ' + fmtAge(A.dataAge) : ''), SECURITY: A.sec.status, LIQUIDITY: fmtUsd(A.liq.usd), MARKET: fmtUsd(A.core.mc), VOLUME: fmtUsd(A.vol.h1), MOMENTUM: String(A.price.momentum), RISK: A.risk.total + ' ' + A.risk.level, SCORE: String(A.finalScore), CONFIDENCE: A.confidence.total + '%', CONSENSUS: String(A.strat ? A.strat.weightSum : 0) };
+  steps.forEach(x => { x.value = values[x.k]; });
+  const firstFail = steps.find(x => !x.ok && !x.na);
+  const final = D.decision === 'APPROVED' ? 'BUY – freigegeben' : D.decision === 'BUY_CANDIDATE' ? 'BEREIT – Ausführung wartet: ' + (D.execBlockers[0] ? D.execBlockers[0].msg : '—') : 'NO TRADE';
+  const text = steps.map(x => x.k + ' ' + (x.ok ? 'PASS' : x.na ? '—' : x.code.replace(/_/g, ' '))).join(' → ') + ' → FINAL: ' + final;
+  return { steps, final, text, reason: firstFail ? firstFail.msg : D.decision === 'BUY_CANDIDATE' ? (D.execBlockers[0] || {}).msg || '' : '', decision: D.decision };
+}
 const csvCell = v => { let s = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return /[",\n;]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
 
 function createCore(opts) {
@@ -1741,6 +1852,7 @@ function createCore(opts) {
 
   http.define('dexDisc', { label: 'DexScreener Discovery', limitPerMin: 50, staleMs: 3 * MIN });
   http.define('dexPairs', { label: 'DexScreener Pairs', limitPerMin: 240, staleMs: 45 * SEC });
+  http.define('dexSol', { label: 'DexScreener SOL-Preis', limitPerMin: 10, staleMs: 3 * MIN });
   http.define('gecko', { label: 'GeckoTerminal', limitPerMin: 25, staleMs: 3 * MIN });
   http.define('rugcheck', { label: 'RugCheck', limitPerMin: 20, staleMs: 20 * MIN, timeoutMs: 10000 });
 
@@ -1755,7 +1867,8 @@ function createCore(opts) {
     risk: { buyCount: {}, coinCooldown: {}, stratCooldown: {}, lossCooldownUntil: 0, globalPauseUntil: 0, lossStreak: 0, dayKey: '', dailyPnl: 0, dailyStartEquity: null, dailyTrades: 0, dailyLimitHit: false, reviewRequired: false, buyTimes: [] },
     watchlist: {}, seen: {}, alertMarks: {}, stratMarks: {},
     rpc: { slot: null, prevSlot: null, slotAt: 0, latency: null, endpoint: null },
-    wallet: { status: 'NOT_CONNECTED', pubkey: null, provider: null, balanceLamports: null, balanceAt: 0, error: '' },
+    wallet: { status: 'NOT_CONNECTED', pubkey: null, provider: null, network: null, networkAt: 0, balanceLamports: null, balanceAt: 0, error: '' },
+    tradeSeq: 0, reconciliation: { required: false, issues: [], at: 0 },
     metrics: { perf: { scan: null, analysis: null, exec: null, render: null }, counters: { scans: 0, buySignals: 0, rejected: 0, executed: 0, apiErrors: 0 }, funnel: {}, scanStats: {}, minute: { t: 0, scans: 0, candidates: 0, accepted: 0, rejected: 0, executed: 0 }, rejectReasons: {}, preTradeRejects: {} },
     hist: { equity: [], risk: [], api: [], scanner: [] },
     paramVersions: [], activeParam: 1, configLog: [], auditLog: [], sessions: [], session: null, stratStats: {}, falseSignals: [],
@@ -1926,12 +2039,18 @@ function createCore(opts) {
     const now0 = env.now();
     for (const m of mints) { const t = state.markets.get(tokenIdOf(m)); if (t) t.lastReqAt = now0; }
     const r = await http.request('dexPairs', DEX_API + '/tokens/v1/solana/' + mints.join(','), { cacheMs: noCache ? 0 : 800, noCache: !!noCache, validate: listValidator, keepRaw: S().rawApiLog });
-    const best = {};
+    const best = {}, solRatios = [];
     for (const p of r.data) {
       const sn = normDexPair(p, r.fetchedAt);
+      if (sn && p.quoteToken && p.quoteToken.address === WSOL && sn.priceNative > 0 && sn.priceUsd > 0) solRatios.push(sn.priceUsd / sn.priceNative);
       if (!sn || !mints.includes(sn.mint)) continue;
       const cur = best[sn.mint];
       if (!cur || (sn.liquidityUsd || 0) > (cur.liquidityUsd || 0)) best[sn.mint] = sn;
+    }
+    // SOL/USD = priceUsd / priceNative bei SOL-quotierten Pools (reale Daten, nur Fallback wenn Direktpreis fehlt/alt)
+    if (!r.cached && solRatios.length >= 3 && (!state.sol || state.sol.derived || env.now() - state.sol.at > MIN)) {
+      const med = median(solRatios);
+      if (isNum(med) && med > 1 && med < 100000) state.sol = { usd: m6(med), at: r.fetchedAt, reqAt: r.fetchedAt, chg: state.sol ? state.sol.chg : null, derived: true, n: solRatios.length };
     }
     let applied = 0;
     for (const m of mints) {
@@ -1964,7 +2083,7 @@ function createCore(opts) {
     if (state.scanner.solBusy) return;
     state.scanner.solBusy = true;
     try {
-      const r = await http.request('dexPairs', DEX_API + '/tokens/v1/solana/' + WSOL, { cacheMs: 10 * SEC, validate: listValidator });
+      const r = await http.request('dexSol', DEX_API + '/tokens/v1/solana/' + WSOL, { cacheMs: 10 * SEC, validate: listValidator });
       let best = null;
       for (const p of r.data) {
         const sn = normDexPair(p, r.fetchedAt);
@@ -1972,8 +2091,8 @@ function createCore(opts) {
         if (!sn || sn.mint !== WSOL || (q !== USDC && q !== USDT) || !isNum(sn.priceUsd)) continue;
         if (!best || (sn.liquidityUsd || 0) > (best.liquidityUsd || 0)) best = sn;
       }
-      if (best && (!state.sol || r.fetchedAt >= state.sol.reqAt)) state.sol = { usd: best.priceUsd, at: best.fetchedAt, reqAt: r.fetchedAt, chg: best.chg, liq: best.liquidityUsd };
-    } catch (e) { noteApiError('dexPairs', e); }
+      if (best && (!state.sol || state.sol.derived || r.fetchedAt >= state.sol.reqAt)) state.sol = { usd: best.priceUsd, at: best.fetchedAt, reqAt: r.fetchedAt, chg: best.chg, liq: best.liquidityUsd, derived: false };
+    } catch (e) { noteApiError('dexSol', e); }
     finally { state.scanner.solBusy = false; }
   }
   async function crossCheck() {
@@ -2126,9 +2245,12 @@ function createCore(opts) {
       const rpcs = rpcEndpoints().map(e => conf(e.name));
       const toks = [...state.markets.values()].filter(t => t.snap);
       const freshShare = toks.length ? toks.filter(t => now - t.snap.fetchedAt <= S().staleAfterSec * SEC).length / toks.length : 0;
-      const errs = http.names().map(n => http.snapshot(n)).filter(x => x.total > 0).map(x => x.errorRate || 0);
-      const parts = { dexPairs: conf('dexPairs'), dexDisc: conf('dexDisc'), gecko: S().ffCrossCheck ? conf('gecko') : null, rpc: rpcs.length ? Math.max(...rpcs) : 0, freshness: Math.round(freshShare * 100), errors: Math.round(errs.length ? 100 - avg(errs) * 100 : 50) };
-      const w = { dexPairs: 0.35, dexDisc: 0.05, gecko: 0.1, rpc: 0.15, freshness: 0.2, errors: 0.15 };
+      const crit = ['dexPairs', ...rpcEndpoints().map(e => e.name)].map(n => http.snapshot(n)).filter(x => x && x.total > 0);
+      const dexErr = (http.snapshot('dexPairs') || {}).errorRate;
+      const rpcErr = crit.filter(x => x.kind === 'rpc').map(x => x.errorRate || 0);
+      const errRate = dexErr == null && !rpcErr.length ? null : Math.max(dexErr || 0, rpcErr.length ? Math.min(...rpcErr) : 0);
+      const parts = { dexPairs: conf('dexPairs'), rpc: rpcs.length ? Math.max(...rpcs) : 0, freshness: Math.round(freshShare * 100), errors: errRate == null ? 50 : Math.round(100 - errRate * 100) };
+      const w = { dexPairs: 0.4, rpc: 0.15, freshness: 0.3, errors: 0.15 };
       let tot = 0, ws = 0; for (const [k, wt] of Object.entries(w)) if (parts[k] != null) { tot += parts[k] * wt; ws += wt; }
       val = { score: Math.round(tot / ws), parts };
     }
@@ -2216,6 +2338,9 @@ function createCore(opts) {
     if (!env.online()) add('OFFLINE', 'Keine Netzwerkverbindung');
     const h = systemHealth(); if (h.score < s.minSystemHealth) add('SYSTEM_UNHEALTHY', `System Health ${h.score} < ${s.minSystemHealth}`);
     if (!state.sol || now - state.sol.at > 5 * MIN) add('FEE_UNKNOWN', 'SOL-Preis unbekannt/veraltet → Gebühren nicht berechenbar');
+    if (state.reconciliation.required) add('RECONCILIATION_REQUIRED', 'Abgleich nach Neustart erforderlich – bitte prüfen & bestätigen');
+    const rpcSt = rpcEndpoints().map(e => http.status(e.name));
+    if (rpcSt.length && rpcSt.every(x => x === 'OFFLINE') && (!s.ffRugcheck || http.status('rugcheck') === 'OFFLINE')) add('SECURITY_SOURCES_DOWN', 'Alle Security-Quellen (RPC' + (s.ffRugcheck ? ', RugCheck' : '') + ') OFFLINE');
     if (r.dailyLimitHit) add('DAILY_LOSS_LIMIT', `Tagesverlust-Limit erreicht (${fmtSigned(r.dailyPnl)})`);
     if (r.globalPauseUntil > now) add('GLOBAL_PAUSE', `Globale Pause nach Verlustserie – noch ${fmtAge(r.globalPauseUntil - now)}`);
     if (r.lossCooldownUntil > now) add('LOSS_COOLDOWN', `Loss-Cooldown – noch ${fmtAge(r.lossCooldownUntil - now)}`);
@@ -2385,6 +2510,7 @@ function createCore(opts) {
     pos.entryPrice = sum(pos.entries.map(e => e.price * e.qty)) / sq;
     pos.qty += f.qty; pos.initialQty += f.qty; pos.costUsd += f.size; pos.investedUsd += f.size; pos.feesUsd += f.fees.total;
     pos.slippageUsd += (f.size - f.fees.total) * (1 - f.refPrice / f.price);
+    state.tradeSeq++;
     state.portfolio.cash = m6(state.portfolio.cash - f.size);
     state.portfolio.fees = m6(state.portfolio.fees + f.fees.total);
     setStops(pos, t);
@@ -2490,6 +2616,7 @@ function createCore(opts) {
       pos.qty -= qty; pos.costUsd -= costPortion;
       if (pos.qty <= pos.initialQty * 1e-9) { pos.qty = 0; pos.costUsd = 0; }
       pos.realizedUsd += realized; pos.feesUsd += fees.total; pos.slippageUsd += qty * (p - fillPrice); pos.exitPending = null;
+      state.tradeSeq++;
       state.portfolio.cash = m6(state.portfolio.cash + net); state.portfolio.realized = m6(state.portfolio.realized + realized); state.portfolio.fees = m6(state.portfolio.fees + fees.total);
       const r = state.risk;
       r.coinCooldown[pos.tokenId] = env.now() + S().sellCooldownMin * MIN;
@@ -2626,7 +2753,7 @@ function createCore(opts) {
       if (t.A.signals.some(x => !CONTEXT_SIGNALS.has(x.type))) withSignals++;
       if (t.D.decision === 'APPROVED') approved++;
       if (t.D.decision === 'APPROVED' || t.D.decision === 'BUY_CANDIDATE') cand++;
-      if (t.D.decision === 'REJECTED') { rejected++; const c = t.D.blockers[0] && t.D.blockers[0].code; if (c) reasons[c] = (reasons[c] || 0) + 1; }
+      if (t.D.decision !== 'APPROVED' && t.D.decision !== 'BUY_CANDIDATE') { if (t.D.decision === 'REJECTED') rejected++; const ab = t.D.analysisBlockers.filter(b => !(b.code === 'SECURITY_UNKNOWN' && !t.D.fastPass)); const c = ab[0] && ab[0].code; if (c) reasons[c] = (reasons[c] || 0) + 1; }
       if (t.A.strat) for (const v of t.A.strat.votes) if (v.enabled && v.vote === 'BUY') { const k = v.id + ':' + t.id; if (!state.stratMarks[k] || now - state.stratMarks[k] > 30 * MIN) { state.stratMarks[k] = now; stratStat(v.id, 'signals'); state.metrics.counters.buySignals++; } }
     }
     state.metrics.funnel = funnel; state.metrics.rejectReasons = reasons;
@@ -2691,6 +2818,9 @@ function createCore(opts) {
     const now = env.now(), m = state.metrics.minute, H = state.hist;
     if (!m.t) m.t = now;
     if (now - m.t >= MIN) {
+      // Speicher begrenzen: kurzlebige Markierungen & alte Fund-Daten rotieren
+      for (const [k, v] of Object.entries(state.stratMarks)) if (now - v > 30 * MIN) delete state.stratMarks[k];
+      for (const [k, v] of Object.entries(state.seen)) if (now - v.t > 2 * DAY && !state.markets.has(k)) delete state.seen[k];
       const sc = Math.max(1, m.scans);
       H.scanner.push({ t: now, candidates: m.candidates / sc, accepted: m.accepted / sc, rejected: m.rejected / sc, executed: m.executed, scans: m.scans });
       const apis = {}; for (const n of http.names()) { const x = http.snapshot(n); if (x.total > 0) apis[n] = { lat: x.latency != null ? Math.round(x.latency) : null, fail: x.errorRate != null ? m2(x.errorRate) : null, st: x.status }; }
@@ -2839,11 +2969,72 @@ function createCore(opts) {
     persistNow();
     return { ok: true };
   }
+  /* Master-Status: READY · WAITING · BLOCKED · ERROR · EMERGENCY_STOP (+ Lebenszyklus STOPPED/PAUSED). */
+  function readiness() {
+    const b = state.bot, now = env.now(), ss = state.metrics.scanStats || {};
+    if (b.emergency) return { state: 'EMERGENCY_STOP', reason: 'Not-Aus aktiv' + (b.emergencyReason ? ': ' + b.emergencyReason : ''), hard: [mkBlocker('EMERGENCY_STOP')], soft: [] };
+    if (b.state === 'ERROR') return { state: 'ERROR', reason: 'Technischer Fehler: ' + (b.lastError || 'unbekannt'), hard: [], soft: [] };
+    if (b.state === 'STOPPED') return { state: 'STOPPED', reason: 'Scanner gestoppt – START drücken', hard: [], soft: [] };
+    const gb = globalBlockers({ auto: false });
+    const hard = gb.filter(x => HARD_GLOBAL.has(x.code)), soft = gb.filter(x => !HARD_GLOBAL.has(x.code));
+    if (b.state === 'PAUSED') return { state: 'PAUSED', reason: 'Pausiert – Scanner & Exits laufen, keine neuen Auto-Trades', hard, soft };
+    const fresh = [...state.markets.values()].some(t => t.snap && now - t.snap.fetchedAt < S().staleAfterSec * SEC);
+    if (b.state === 'RECOVERING' || b.state === 'STARTING') {
+      if (!fresh && now - (b.startedAt || now) > 45 * SEC) hard.unshift(mkBlocker('SYSTEM_UNHEALTHY', 'Keine frischen Marktdaten seit Start (' + http.status('dexPairs') + ')'));
+      else if (!hard.length) return { state: 'WAITING', reason: 'Start/Recovery – Datenqualität wird geprüft', hard, soft };
+    }
+    if (hard.length) return { state: 'BLOCKED', reason: hard[0].msg, hard, soft };
+    if ((ss.candidates || 0) > 0) {
+      const wait = [...state.markets.values()].filter(t => t.D && t.D.decision === 'BUY_CANDIDATE').map(t => t.D.execBlockers[0]).filter(Boolean)[0];
+      return { state: 'READY', reason: `${ss.candidates} Kandidat(en) – ${ss.approved ? ss.approved + ' freigegeben' : 'Ausführung wartet: ' + (wait ? wait.msg : '—')}`, hard, soft };
+    }
+    const top = Object.entries(state.metrics.rejectReasons || {}).sort((a, x) => x[1] - a[1])[0];
+    return { state: 'WAITING', reason: 'Kein geeignetes Setup' + (top ? ` – häufigster Grund: ${(BLOCKER_DEFS[top[0]] || [])[2] || top[0]} (${top[1]}×)` : ''), hard, soft };
+  }
+  /* LIVE-Gating: LIVE nur separat, ausdrücklich und wenn ALLE Voraussetzungen erfüllt sind. Auto-Trading bedeutet nie Echtgeld. */
+  function liveReadiness() {
+    const w = state.wallet, s = S(), now = env.now(), h = systemHealth();
+    const hardErr = validateSettings(s, s).errors.filter(e => !e.soft).length;
+    const checks = [
+      { name: 'Wallet verbunden', ok: w.status === 'CONNECTED', detail: w.status === 'CONNECTED' ? `${w.provider} · ${shortAddr(w.pubkey)}` : 'nicht verbunden' },
+      { name: 'Netzwerk mainnet-beta (Genesis-Hash via RPC)', ok: w.network === 'mainnet-beta' && now - w.networkAt < 10 * MIN, detail: w.network ? `${w.network} · ${fmtAge(now - w.networkAt)} alt` : 'nicht verifiziert' },
+      { name: 'Balance verifiziert (RPC)', ok: w.balanceLamports != null && now - w.balanceAt < 5 * MIN, detail: w.balanceLamports != null ? lamportsToSol(BigInt(w.balanceLamports)) + ' SOL' : 'unbekannt' },
+      { name: 'Risikolimits geprüft', ok: hardErr === 0 && s.maxPositionPct <= 5 && s.dailyLossLimitPct <= 10 && s.maxExposurePct <= 30, detail: `Position ≤ 5 % (${s.maxPositionPct}), Tagesverlust ≤ 10 % (${s.dailyLossLimitPct}), Exposure ≤ 30 % (${s.maxExposurePct})` },
+      { name: 'Emergency Stop aus', ok: !state.bot.emergency, detail: state.bot.emergency ? 'aktiv' : 'aus' },
+      { name: 'System Health ausreichend', ok: h.score >= s.minSystemHealth, detail: `${h.score} / min. ${s.minSystemHealth}` },
+      { name: 'Kein offener Abgleich', ok: !state.reconciliation.required, detail: state.reconciliation.required ? 'RECONCILIATION REQUIRED' : 'ok' },
+      { name: 'Swap-/Routing-Provider', ok: false, detail: 'NOT AVAILABLE – nicht integriert (REQUIRES EXTERNAL PROVIDER)' },
+      { name: 'Signatur-Workflow', ok: false, detail: 'vorbereitet, aber deaktiviert – keine Transaktionen werden signiert' }
+    ];
+    return { ready: checks.every(c => c.ok), checks };
+  }
+  /* Vorbereitung Live-Order: alle Prüfungen, die vor einer echten Order bestehen müssten. Bei Unsicherheit NO TRADE. */
+  function preLiveChecks(t, sizeUsd) {
+    const s = S(), now = env.now(), A = t && t.A, w = state.wallet;
+    if (!A) return [{ name: 'Analyse', ok: false, detail: 'keine Daten' }];
+    const es = effectiveSnap(t, now, s), imp = estImpact(sizeUsd, A.liq.usd), fees = estFees(sizeUsd), sol = state.sol && state.sol.usd;
+    const balUsd = w.balanceLamports != null && isNum(sol) ? Number(w.balanceLamports) / 1e9 * sol : null;
+    const eq = equityInfo();
+    return [
+      { name: 'Mint', ok: isMint(t.mint) && !!(t.sec && t.sec.sources.rpc), detail: shortAddr(t.mint) + (t.sec && t.sec.sources.rpc ? ' · on-chain geprüft' : ' · nicht on-chain geprüft') },
+      { name: 'Pool', ok: isMint(A.core.pairAddress), detail: A.core.pairAddress ? shortAddr(A.core.pairAddress) + ' · ' + (A.core.dexId || '—') : 'unbekannt' },
+      { name: 'Route', ok: false, detail: 'kein Routing-Provider (NOT AVAILABLE)' },
+      { name: 'Liquidität', ok: isNum(A.liq.usd) && A.liq.usd >= s.minLiq, detail: fmtUsd(A.liq.usd) + ' / min. ' + fmtUsd(s.minLiq) },
+      { name: 'Slippage / Price Impact', ok: imp != null && imp * 100 <= s.maxSlippagePct, detail: imp != null ? (imp * 100).toFixed(3) + ' % / max. ' + s.maxSlippagePct + ' %' : 'nicht schätzbar' },
+      { name: 'Balance', ok: balUsd != null && fees != null && balUsd >= sizeUsd + fees.total, detail: balUsd != null ? fmtUsd(balUsd) + ' verfügbar' : 'Wallet-Balance unbekannt' },
+      { name: 'Position Size', ok: isNum(sizeUsd) && sizeUsd > 0 && sizeUsd <= eq.equity * s.maxPositionPct / 100, detail: fmtUsd(sizeUsd) + ' / max. ' + fmtUsd(eq.equity * s.maxPositionPct / 100) },
+      { name: 'Risk Limit', ok: A.risk.total <= s.maxRiskScore && A.risk.level !== 'CRITICAL', detail: A.risk.total + ' ' + A.risk.level + ' / max. ' + s.maxRiskScore },
+      { name: 'Security', ok: ['VERIFIED', 'PARTIAL'].includes(A.sec.status) && !A.sec.stale, detail: A.sec.status },
+      { name: 'Datenfrische', ok: !!es.snap && !es.fallback && es.age <= s.snapshotMaxAgeSec * SEC, detail: es.age != null ? fmtAge(es.age) + ' alt (max. ' + s.snapshotMaxAgeSec + ' s)' : 'keine Daten' },
+      { name: 'Duplicate-Schutz', ok: !state.locks.has(t.id) && !state.queue.some(q => q.tokenId === t.id), detail: state.locks.has(t.id) ? 'laufende Order' : 'frei' }
+    ];
+  }
   function setMode(m) {
     if (m === 'LIVE') {
-      log.sec('LIVE-Modus angefragt – NICHT VERFÜGBAR (kein verifizierter Wallet-Adapter / Swap-Provider eingebunden)');
-      audit('USER', 'MODE_LIVE_DENIED', 'REQUIRES EXTERNAL PROVIDER');
-      return { ok: false, error: 'LIVE ist nicht verfügbar (REQUIRES EXTERNAL PROVIDER).' };
+      const lr = liveReadiness();
+      log.sec('LIVE-Modus angefragt – Gating nicht erfüllt: ' + lr.checks.filter(c => !c.ok).map(c => c.name).join(', '));
+      audit('USER', 'MODE_LIVE_DENIED', 'Gating: ' + lr.checks.filter(c => !c.ok).map(c => c.name).join(', '));
+      return { ok: false, error: 'LIVE nicht aktivierbar – Voraussetzungen fehlen (REQUIRES EXTERNAL PROVIDER).', checks: lr.checks };
     }
     if (!['SIMULATION', 'PAPER', 'READ_ONLY'].includes(m)) return { ok: false, error: 'Unbekannter Modus' };
     const from = state.mode; if (from === m) return { ok: true };
@@ -2965,18 +3156,45 @@ function createCore(opts) {
   }
 
   /* ---------- Wallet (nur lesend: Public Key + Balance, keine Signaturen) ---------- */
+  /* Wallet-Adapter (gekapselt): Provider, Verbindungsstatus, Public Key, Netzwerk, Balance, Signatur-Workflow.
+     Private Keys / Seeds / Secret Keys werden NIE gelesen, gespeichert oder geloggt. Signieren ist deaktiviert. */
+  const walletHooked = new WeakSet();
+  const providerName = p => (p.isPhantom ? 'Phantom' : p.isSolflare ? 'Solflare' : p.isBackpack ? 'Backpack' : 'Wallet');
+  function walletReset(status, error) {
+    state.wallet = { status, pubkey: null, provider: null, network: null, networkAt: 0, balanceLamports: null, balanceAt: 0, error: error || '' };
+  }
+  function hookProvider(prov) {
+    if (walletHooked.has(prov) || typeof prov.on !== 'function') return;
+    walletHooked.add(prov);
+    try {
+      prov.on('accountChanged', pk => {
+        const k = pk && typeof pk.toString === 'function' ? pk.toString() : null;
+        if (!isMint(k)) { walletReset('NOT_CONNECTED'); log.info('SYSTEM', 'Wallet: Konto getrennt'); }
+        else { state.wallet.pubkey = k; state.wallet.balanceLamports = null; state.wallet.balanceAt = 0; log.info('SYSTEM', 'Wallet: Konto gewechselt ' + shortAddr(k)); walletBalance(); }
+        emit('bot', {});
+      });
+      prov.on('disconnect', () => { walletReset('NOT_CONNECTED'); log.info('SYSTEM', 'Wallet getrennt (Provider)'); emit('bot', {}); });
+    } catch (e) { /* Provider ohne Events */ }
+  }
+  async function walletNetwork() {
+    try { const g = await rpcCall('getGenesisHash', [], { cacheMs: 10 * MIN }); state.wallet.network = GENESIS[g] || 'unbekannt'; state.wallet.networkAt = env.now(); }
+    catch (e) { state.wallet.network = null; state.wallet.error = 'Netzwerk nicht verifiziert: ' + e.message; }
+  }
   async function walletConnect() {
+    if (state.wallet.status === 'CONNECTING') return { ok: false, error: 'Verbindung läuft bereits' };
     const prov = env.walletProvider ? env.walletProvider() : null;
-    if (!prov || typeof prov.connect !== 'function') { state.wallet.status = 'NO_PROVIDER'; return { ok: false, error: 'Kein Wallet-Provider gefunden (z. B. Phantom-Extension oder Phantom-Browser).' }; }
+    if (!prov || typeof prov.connect !== 'function') { walletReset('NO_PROVIDER'); return { ok: false, error: 'Kein Wallet-Provider gefunden (z. B. Phantom- oder Solflare-Extension bzw. deren In-App-Browser).' }; }
+    state.wallet.status = 'CONNECTING';
     try {
       const r = await prov.connect();
       const pkObj = (r && r.publicKey) || prov.publicKey; const pk = pkObj && typeof pkObj.toString === 'function' ? pkObj.toString() : null;
       if (!isMint(pk)) throw new Error('Wallet lieferte keinen gültigen Public Key');
-      state.wallet = { status: 'CONNECTED', pubkey: pk, provider: prov.isPhantom ? 'Phantom' : 'Wallet', balanceLamports: null, balanceAt: 0, error: '' };
+      state.wallet = { status: 'CONNECTED', pubkey: pk, provider: providerName(prov), network: null, networkAt: 0, balanceLamports: null, balanceAt: 0, error: '' };
+      hookProvider(prov);
       audit('USER', 'WALLET_CONNECT', shortAddr(pk)); log.info('SYSTEM', `Wallet verbunden (nur lesend): ${shortAddr(pk)}`);
-      await walletBalance();
+      await Promise.all([walletBalance(), walletNetwork()]);
       return { ok: true };
-    } catch (e) { state.wallet.status = 'ERROR'; state.wallet.error = str(e && e.message, 120) || 'Verbindung abgelehnt'; return { ok: false, error: state.wallet.error }; }
+    } catch (e) { walletReset('ERROR', str(e && e.message, 120) || 'Verbindung abgelehnt'); return { ok: false, error: state.wallet.error }; }
   }
   async function walletBalance() {
     if (state.wallet.status !== 'CONNECTED') return;
@@ -2986,44 +3204,51 @@ function createCore(opts) {
   function walletDisconnect() {
     const prov = env.walletProvider ? env.walletProvider() : null;
     try { if (prov && prov.disconnect) prov.disconnect(); } catch (e) { /* ignorieren */ }
-    state.wallet = { status: 'NOT_CONNECTED', pubkey: null, provider: null, balanceLamports: null, balanceAt: 0, error: '' };
+    walletReset('NOT_CONNECTED');
     audit('USER', 'WALLET_DISCONNECT', '');
+  }
+  /* Signatur-Workflow: vorbereitet (klare Schnittstelle), aber deaktiviert – es wird nichts signiert. */
+  async function requestSignature() {
+    log.sec('Signatur angefragt – abgelehnt: Signatur-Workflow deaktiviert (kein Live-Provider)');
+    return { ok: false, code: 'SIGNING_DISABLED', error: 'Signieren ist deaktiviert – LIVE ist nicht verfügbar.' };
   }
 
   /* ---------- Diagnose: Warum kauft der Bot nicht? ---------- */
   function diagnostics() {
     const now = env.now(), s = S(), b = state.bot, r = state.risk, h = systemHealth(), eq = equityInfo(), st = state.metrics.scanStats || {};
-    const checks = []; const c = (name, ok, detail, warn) => checks.push({ name, status: ok == null ? 'na' : ok ? 'pass' : warn ? 'warn' : 'fail', detail });
-    const toks = [...state.markets.values()].filter(t => t.A && t.D);
-    c('Bot läuft', b.state === 'RUNNING', `Status ${b.state}`);
-    c('Emergency Stop aus', !b.emergency, b.emergency ? 'AKTIV: ' + b.emergencyReason : 'aus');
-    c('Modus erlaubt Auto-Trading', state.mode === 'SIMULATION', `Modus ${state.mode}${state.mode === 'PAPER' ? ' – nur manuelle Trades' : state.mode === 'READ_ONLY' ? ' – Handel deaktiviert' : ''}`);
-    c('Auto-Trading', b.autoTrading, b.autoTrading ? 'AN' : 'AUS – der Bot analysiert nur (sichere Voreinstellung)', true);
-    c('Safe Mode aus', !b.safeMode, b.safeMode ? 'aktiv – keine neuen Käufe' : 'aus');
-    c('System Health', h.score >= s.minSystemHealth, `${h.score} / min. ${s.minSystemHealth}`);
-    c('Marktdaten (DexScreener)', http.status('dexPairs') === 'ONLINE', `${http.status('dexPairs')} · ${state.markets.size} Tokens im Universe`);
-    const secSrc = rpcEndpoints().some(e => http.status(e.name) === 'ONLINE') || http.status('rugcheck') === 'ONLINE';
-    c('Security-Quellen (RPC/RugCheck)', secSrc, `RPC ${rpcEndpoints().map(e => http.status(e.name)).join('/') || '—'}, RugCheck ${http.status('rugcheck')}`);
-    c('SOL-Preis (Fee Engine)', !!(state.sol && now - state.sol.at < 5 * MIN), state.sol ? `${fmtUsd(state.sol.usd)} · ${fmtAge(now - state.sol.at)} alt` : 'unbekannt');
-    c('Liquidität & Basisfilter', st.fastPass > 0, `${st.fastPass || 0} von ${st.tokens || 0} Tokens bestehen die Schnellfilter`);
-    const secOk = toks.filter(t => t.D.fastPass && ['VERIFIED', 'PARTIAL'].includes(t.A.sec.status)).length;
-    c('Security geprüft & ok', secOk > 0, `${secOk} Kandidaten mit Security VERIFIED/PARTIAL`);
-    c('Signale / Momentum', (st.withSignals || 0) > 0, `${st.withSignals || 0} Tokens mit Kaufsignalen`);
-    const riskOk = toks.filter(t => t.D.fastPass && t.A.risk.total <= s.maxRiskScore && t.A.confidence.total >= s.minConfidence).length;
-    c('Risk & Confidence', riskOk > 0, `${riskOk} Kandidaten mit Risk ≤ ${s.maxRiskScore} und Confidence ≥ ${s.minConfidence}`);
-    c('Score & Strategie-Konsens', (st.candidates || 0) > 0, `${st.candidates || 0} Buy Candidates (Score ≥ ${s.minScore}, Konsens ≥ ${s.consensusMinWeight})`);
-    c('Tagesverlust-Limit', !r.dailyLimitHit, `Heute ${fmtSigned(r.dailyPnl)} / Limit −${s.dailyLossLimitPct} %`);
-    c('Globale Pause', !(r.globalPauseUntil > now), r.globalPauseUntil > now ? `noch ${fmtAge(r.globalPauseUntil - now)} (Serie ${r.lossStreak})` : `Verlustserie ${r.lossStreak}/${s.lossStreakLimit}`);
-    c('Loss-Cooldown', !(r.lossCooldownUntil > now), r.lossCooldownUntil > now ? `noch ${fmtAge(r.lossCooldownUntil - now)}` : 'frei');
-    c('Exposure', eq.exposurePct < s.maxExposurePct, `${eq.exposurePct.toFixed(1)} % / max. ${s.maxExposurePct} %`);
-    c('Offene Positionen', state.positions.length < s.maxOpenPositions, `${state.positions.length} / ${s.maxOpenPositions}`);
+    const rd = readiness();
+    const system = [], trading = [], market = [];
+    const c = (list, name, status, detail) => list.push({ name, status, detail });
+    // System & harte Sicherheitsblocker (rot nur bei echter Blockade)
+    c(system, 'Emergency Stop', b.emergency ? 'fail' : 'pass', b.emergency ? 'AKTIV: ' + b.emergencyReason : 'aus');
+    c(system, 'Bot-Lebenszyklus', b.state === 'RUNNING' ? 'pass' : b.state === 'ERROR' ? 'fail' : 'warn', `Status ${b.state}`);
+    c(system, 'System Health', h.score >= s.minSystemHealth ? 'pass' : 'fail', `${h.score} / min. ${s.minSystemHealth}`);
+    c(system, 'Marktdaten (DexScreener)', http.status('dexPairs') === 'ONLINE' ? 'pass' : http.status('dexPairs') === 'OFFLINE' ? 'fail' : 'warn', `${http.status('dexPairs')} · ${state.markets.size} Tokens im Universe`);
+    const rpcSt = rpcEndpoints().map(e => http.status(e.name));
+    c(system, 'Security-Quellen (RPC/RugCheck)', rpcSt.includes('ONLINE') || http.status('rugcheck') === 'ONLINE' ? 'pass' : rd.hard.some(x => x.code === 'SECURITY_SOURCES_DOWN') ? 'fail' : 'warn', `RPC ${rpcSt.join('/') || '—'}, RugCheck ${http.status('rugcheck')}`);
+    c(system, 'SOL-Preis (Fee Engine)', state.sol && now - state.sol.at < 5 * MIN ? 'pass' : 'fail', state.sol ? `${fmtUsd(state.sol.usd)} · ${fmtAge(now - state.sol.at)} alt${state.sol.derived ? ' · abgeleitet aus SOL-Pools' : ''}` : 'unbekannt');
+    c(system, 'Safe Mode', b.safeMode ? 'fail' : 'pass', b.safeMode ? 'aktiv – keine neuen Käufe' : 'aus');
+    c(system, 'Abgleich (Reconciliation)', state.reconciliation.required ? 'fail' : 'pass', state.reconciliation.required ? state.reconciliation.issues.length + ' offene Punkte' : 'ok');
+    c(system, 'Tagesverlust-Limit', r.dailyLimitHit ? 'fail' : 'pass', `Heute ${fmtSigned(r.dailyPnl)} / Limit −${s.dailyLossLimitPct} %`);
+    c(system, 'Globale Pause', r.globalPauseUntil > now ? 'fail' : 'pass', r.globalPauseUntil > now ? `noch ${fmtAge(r.globalPauseUntil - now)} (Serie ${r.lossStreak})` : `Verlustserie ${r.lossStreak}/${s.lossStreakLimit}`);
+    c(system, 'Loss-Cooldown', r.lossCooldownUntil > now ? 'fail' : 'pass', r.lossCooldownUntil > now ? `noch ${fmtAge(r.lossCooldownUntil - now)}` : 'frei');
+    // Trading-Einstellungen (Hinweise, keine Blockade)
+    c(trading, 'Modus', state.mode === 'SIMULATION' ? 'pass' : 'warn', `${state.mode}${state.mode === 'PAPER' ? ' – nur manuelle Trades' : state.mode === 'READ_ONLY' ? ' – Beobachtung, kein Handel' : ''}`);
+    c(trading, 'Auto-Trading', b.autoTrading ? 'pass' : 'warn', b.autoTrading ? 'AN (nur SIMULATION, nie Echtgeld)' : 'AUS – der Bot analysiert nur (sichere Voreinstellung)');
+    c(trading, 'Exposure', eq.exposurePct < s.maxExposurePct ? 'pass' : 'warn', `${eq.exposurePct.toFixed(1)} % / max. ${s.maxExposurePct} %`);
+    c(trading, 'Offene Positionen', state.positions.length < s.maxOpenPositions ? 'pass' : 'warn', `${state.positions.length} / ${s.maxOpenPositions}`);
     const hourBuys = r.buyTimes.filter(x => now - x < HOUR).length;
-    c('Overtrading-Schutz', hourBuys < s.maxTradesPerHour, `${hourBuys} Käufe in 60 min / Limit ${s.maxTradesPerHour}`);
-    const top = toks.filter(t => t.D.fastPass || t.A.finalScore >= 50).sort((a, b2) => b2.A.finalScore - a.A.finalScore).slice(0, 8).map(t => ({ id: t.id, symbol: t.symbol, score: t.A.finalScore, decision: t.D.decision, blockers: t.D.blockers.slice(0, 4) }));
-    const firstFail = checks.find(x => x.status === 'fail') || checks.find(x => x.status === 'warn');
-    const summary = `Beobachtet ${state.markets.size} Tokens · ${st.fastPass || 0} bestehen Schnellfilter · ${st.withSignals || 0} mit Signalen · ${st.candidates || 0} Buy Candidates. ` +
-      (st.approved && b.autoTrading && b.state === 'RUNNING' && state.mode === 'SIMULATION' ? 'Bot handelt (SIMULATION).' : firstFail ? `Handelt nicht, weil: ${firstFail.name}: ${firstFail.detail}.` : 'Keine Blocker – wartet auf Kandidaten (NO TRADE ist valide).');
-    return { checks, top, funnel: state.metrics.funnel, summary, rejectReasons: state.metrics.rejectReasons, preTradeRejects: state.metrics.preTradeRejects };
+    c(trading, 'Overtrading-Schutz', hourBuys < s.maxTradesPerHour ? 'pass' : 'warn', `${hourBuys} Käufe in 60 min / Limit ${s.maxTradesPerHour}`);
+    // Markt (informativ – „kein Kandidat“ ist NIE ein globaler Block)
+    const toks = [...state.markets.values()].filter(t => t.A && t.D);
+    c(market, 'Tokens analysiert', 'info', `${st.tokens || 0} von ${state.markets.size}`);
+    c(market, 'Schnellfilter bestanden', 'info', `${st.fastPass || 0} (Liquidität, Volumen, MCap, Käuferanteil, Frische)`);
+    c(market, 'Security VERIFIED/PARTIAL', 'info', `${toks.filter(t => t.D.fastPass && ['VERIFIED', 'PARTIAL'].includes(t.A.sec.status)).length} Kandidaten`);
+    c(market, 'Mit Kaufsignal', 'info', `${st.withSignals || 0} Tokens`);
+    c(market, 'Buy Candidates', 'info', `${st.candidates || 0} (Score ≥ ${s.minScore}, Konsens ≥ ${s.consensusMinWeight})`);
+    const chains = toks.filter(t => t.D.fastPass || t.A.finalScore >= 45).sort((a, x) => x.A.finalScore - a.A.finalScore).slice(0, 10).map(t => ({ id: t.id, symbol: t.symbol, score: t.A.finalScore, chain: candidateChain(t) }));
+    const summary = `${rd.state === 'EMERGENCY_STOP' ? 'EMERGENCY STOP' : rd.state}: ${rd.reason}. Beobachtet ${state.markets.size} Tokens · ${st.fastPass || 0} bestehen Schnellfilter · ${st.candidates || 0} Kandidaten.`;
+    return { readiness: rd, system, trading, market, chains, funnel: state.metrics.funnel, summary, rejectReasons: state.metrics.rejectReasons, preTradeRejects: state.metrics.preTradeRejects };
   }
   function botHealth() {
     const now = env.now(), s = S(), sc = state.scanner, r = state.risk;
@@ -3046,24 +3271,25 @@ function createCore(opts) {
   }
 
   /* ---------- Persistenz (versioniert) & Recovery ---------- */
-  let persistTimer = null;
-  function persist() { if (persistTimer) return; persistTimer = env.setTimeout(() => { persistTimer = null; persistNow(); }, 5000); }
+  let persistTimer = null, storageFrozen = false;
+  function persist() { if (persistTimer || storageFrozen) return; persistTimer = env.setTimeout(() => { persistTimer = null; persistNow(); }, 5000); }
   function serialize() {
     const now = env.now();
     const seen = {}; for (const [k, v] of Object.entries(state.seen)) if (now - v.t < 2 * DAY) seen[k] = v;
     const marks = {}; for (const [k, v] of Object.entries(state.alertMarks)) if (now - v < DAY) marks[k] = v;
+    const seq = state.tradeSeq;
     return {
-      v: STORAGE_VERSION, savedAt: now, app: APP_VERSION, settings: state.settings, strategies: state.strategies, mode: state.mode,
-      bot: { desired: state.bot.desired, autoTrading: state.bot.autoTrading, safeMode: state.bot.safeMode, emergency: state.bot.emergency, emergencyReason: state.bot.emergencyReason },
-      risk: state.risk, portfolio: state.portfolio, positions: state.positions, orders: state.orders.slice(0, 150), journal: state.journal.slice(0, 500), feed: state.feed.slice(0, 80),
-      watchlist: state.watchlist, seen, alertMarks: marks, paramVersions: state.paramVersions, activeParam: state.activeParam,
-      configLog: state.configLog.slice(0, 100), auditLog: state.auditLog.slice(0, 300), sessions: state.sessions.slice(0, 50), session: state.session,
-      stratStats: state.stratStats, falseSignals: state.falseSignals.slice(0, 50), hist: state.hist,
-      usedKeys: [...state.usedKeys.entries()].filter(([, v]) => v !== 'pending').slice(-600), logs: log.entries.slice(-200), ui: state.ui
+      settings: { settings: state.settings, strategies: state.strategies, watchlist: state.watchlist, ui: state.ui },
+      positions: { tradeSeq: seq, portfolio: state.portfolio, positions: state.positions, orders: state.orders.slice(0, 150), usedKeys: [...state.usedKeys.entries()].filter(([, v]) => v !== 'pending').slice(-600) },
+      trades: { tradeSeq: seq, journal: state.journal.slice(0, 500) },
+      runtime: { tradeSeq: seq, savedAt: now, app: APP_VERSION, mode: state.mode, bot: { desired: state.bot.desired, autoTrading: state.bot.autoTrading, safeMode: state.bot.safeMode, emergency: state.bot.emergency, emergencyReason: state.bot.emergencyReason }, risk: state.risk, session: state.session, seen, alertMarks: marks, reconciliation: state.reconciliation },
+      logs: { logs: log.entries.slice(-200), auditLog: state.auditLog.slice(0, 300), configLog: state.configLog.slice(0, 100), feed: state.feed.slice(0, 80) },
+      stats: { hist: state.hist, stratStats: state.stratStats, falseSignals: state.falseSignals.slice(0, 50), paramVersions: state.paramVersions, activeParam: state.activeParam, sessions: state.sessions.slice(0, 50) }
     };
   }
   function persistNow() {
     if (persistTimer) { env.clearTimeout(persistTimer); persistTimer = null; }
+    if (storageFrozen) return true;
     const ok = store.save(serialize());
     if (ok !== state.storageOk && !ok) log.error('STORAGE', 'Speichern fehlgeschlagen: ' + store.status().lastError);
     state.storageOk = ok; if (ok) state.lastSaveAt = env.now();
@@ -3110,28 +3336,55 @@ function createCore(opts) {
     const restored = arr(d.logs).filter(e => e && LOG_LEVELS.includes(e.level) && isNum(e.ts)).map(e => ({ ...e, restored: true }));
     log.entries.unshift(...restored);
     if (d.ui && typeof d.ui === 'object') state.ui = d.ui;
+    if (isNum(d.tradeSeq)) state.tradeSeq = d.tradeSeq;
+    if (d.reconciliation && d.reconciliation.required === true) state.reconciliation = { required: true, issues: arr(d.reconciliation.issues).map(x => str(String(x), 200)), at: isNum(d.reconciliation.at) ? d.reconciliation.at : env.now() };
   }
-  function reconcile() {
-    let n = 0;
+  /* Recovery: bekannte Fälle deterministisch & konservativ auflösen, alles Unsichere → RECONCILIATION REQUIRED (keine neuen Käufe bis bestätigt). */
+  function reconcile(loadInfo = {}) {
+    const issues = [];
     for (const o of state.orders) {
       if (TERMINAL.has(o.state)) continue;
       const from = o.state; o.state = 'RECONCILING'; o.history.push({ s: 'RECONCILING', ts: env.now(), note: 'Nach Neustart ungeklärt (' + from + ')' });
       const inPos = f => state.positions.some(p => arr(p[f]).some(e => e.orderId === o.id)) || state.journal.some(j => arr(j[f]).some(e => e.orderId === o.id));
       const filled = o.side === 'BUY' ? inPos('entries') : inPos('exits');
-      transition(o, filled ? 'COMPLETED' : 'CANCELLED', filled ? 'Abgleich: Füllung im Journal gefunden' : 'Abgleich: keine Füllung gefunden → nicht ausgeführt');
+      transition(o, filled ? 'COMPLETED' : 'CANCELLED', filled ? 'Abgleich: Füllung gefunden' : 'Abgleich: keine Füllung gefunden → nicht ausgeführt');
       if (!filled && o.key && state.usedKeys.get(o.key) === 'pending') state.usedKeys.delete(o.key);
-      n++;
+      issues.push(`Order ${o.id} (${o.side} ${o.symbol}) war ${from} → ${filled ? 'COMPLETED' : 'CANCELLED'}`);
     }
     for (const [k, v] of [...state.usedKeys.entries()]) if (v === 'pending') state.usedKeys.delete(k);
-    for (const j of state.journal) if (j.status === 'OPEN' && !state.positions.some(p => p.id === j.id)) { j.status = 'UNRESOLVED'; n++; }
-    if (n) log.warn('SYSTEM', `Recovery: ${n} ungeklärte Einträge abgeglichen (RECONCILING → aufgelöst)`);
-    return n;
+    for (const j of state.journal) if (j.status === 'OPEN' && !state.positions.some(p => p.id === j.id)) { j.status = 'UNRESOLVED'; issues.push(`Journal ${j.id} (${j.symbol}) offen ohne Position → UNRESOLVED`); }
+    for (const p of state.positions) if (!state.journal.some(j => j.id === p.id)) {
+      state.journal.unshift({ id: p.id, tokenId: p.tokenId, symbol: p.symbol, name: p.name || '', mint: p.mint, pair: p.pair, dexId: p.dexId, mode: p.mode, status: 'OPEN', openedAt: p.openedAt, closedAt: null, entries: deepClone(p.entries), exits: deepClone(p.exits), sizeUsd: p.investedUsd, feesUsd: p.feesUsd, slippageUsd: p.slippageUsd, score: p.entryScore, confidence: null, risk: null, signals: [], strategy: p.strategy, auto: null, reason: 'Aus Positionsdaten rekonstruiert (Abgleich)', sources: [], tags: ['RECONCILED'], regime: [], decision: null, paramVersion: p.paramVersion, result: null, exitReason: null, mae2m: null, holdMs: null });
+      issues.push(`Position ${p.symbol} ohne Journal-Eintrag → Eintrag rekonstruiert`);
+    }
+    // Buy-Zähler nie senken: mindestens Anzahl abgeschlossener BUY-Orders der aktuellen Session
+    const sid = state.session ? state.session.id : null;
+    if (sid) {
+      const cnt = {}; for (const o of state.orders) if (o.side === 'BUY' && o.state === 'COMPLETED' && o.key && o.key.endsWith(':' + sid)) cnt[o.tokenId] = (cnt[o.tokenId] || 0) + 1;
+      for (const [id, n] of Object.entries(cnt)) if ((state.risk.buyCount[id] || 0) < n) { state.risk.buyCount[id] = Math.min(n, HARD_LIMITS.MAX_BUYS_PER_COIN); issues.push(`Buy-Zähler ${id.slice(7, 13)}… auf ${n} korrigiert`); }
+    }
+    const sq = loadInfo.seqs;
+    if (sq) { const vals = [sq.runtime, sq.positions, sq.trades].filter(x => x != null); if (vals.length && new Set(vals).size > 1) issues.push(`Speicherbereiche nicht synchron (Runtime ${sq.runtime}, Positionen ${sq.positions}, Trades ${sq.trades})`); }
+    for (const c of loadInfo.corrupted || []) issues.push(`Speicherbereich „${c}“ beschädigt – mit sicheren Defaults ersetzt`);
+    if (issues.length) {
+      state.reconciliation = { required: true, issues: [...state.reconciliation.issues, ...issues].slice(-40), at: env.now() };
+      log.warn('SYSTEM', `RECONCILIATION REQUIRED: ${issues.length} Punkt(e) – neue Käufe blockiert bis zur Bestätigung`);
+    }
+    return issues.length;
+  }
+  function ackReconciliation() {
+    if (!state.reconciliation.required) return { ok: true };
+    audit('USER', 'RECONCILIATION_ACK', state.reconciliation.issues.length + ' Punkte bestätigt', state.reconciliation.issues.slice(0, 5).join('; '));
+    state.reconciliation = { required: false, issues: [], at: env.now() };
+    log.info('SYSTEM', 'Abgleich bestätigt – Handel wieder möglich (alle anderen Regeln gelten weiter)');
+    persistNow();
+    return { ok: true };
   }
   function init(o = {}) {
     const loaded = store.load();
-    state.loadInfo = { migrated: !!loaded.migrated, corrupted: !!loaded.corrupted, hadData: !!loaded.data };
+    state.loadInfo = { migrated: loaded.migrated || 0, corrupted: arr(loaded.corrupted).length > 0, hadData: !!loaded.data };
     hydrate(loaded.data);
-    reconcile();
+    reconcile({ seqs: loaded.data && loaded.data.seqs, corrupted: arr(loaded.corrupted).filter(c => ['runtime', 'positions', 'trades', 'v2'].includes(c)) });
     ensureSession();
     if (!state.paramVersions.length) { state.paramVersions.push({ version: 1, ts: env.now(), params: pickTunable(), status: 'STABLE', note: 'Initiale Parameter', perf: null, tradeCount: 0, basedOn: null }); state.activeParam = 1; }
     for (const p of state.positions) ensureToken(p.mint, 'Position');
@@ -3140,7 +3393,7 @@ function createCore(opts) {
     dayRollover();
     if (state.bot.emergency) { state.bot.state = 'EMERGENCY_STOP'; if (S().keepScannerOnEstop && o.autoStart !== false) startScanner(); }
     else if (o.autoStart !== false && state.bot.desired !== 'STOPPED') { setBotState('STARTING', 'Systemstart'); state.bot.startedAt = env.now(); startScanner(); setBotState('RECOVERING', 'Datenqualität wird geprüft'); }
-    log.info('SYSTEM', `Smart Lab v${APP_VERSION} initialisiert · Modus ${state.mode} · Auto-Trading ${state.bot.autoTrading ? 'AN' : 'AUS'}${state.loadInfo.migrated ? ' · v1-Daten migriert' : ''}`);
+    log.info('SYSTEM', `Smart Lab v${APP_VERSION} initialisiert · Modus ${state.mode} · Auto-Trading ${state.bot.autoTrading ? 'AN' : 'AUS'}${state.loadInfo.migrated ? ' · Daten aus v' + state.loadInfo.migrated + ' migriert' : ''}`);
     persistNow();
   }
 
@@ -3187,6 +3440,7 @@ function createCore(opts) {
   }
   function factoryReset() {
     stopScanner();
+    storageFrozen = true; // nach Reset nichts mehr zurückschreiben
     store.clear(); for (const k of ['c', 'w', 's', 'h', 'fd']) opts.backend.remove(k);
     return { ok: true };
   }
@@ -3200,7 +3454,7 @@ function createCore(opts) {
     state, log, http, env, on, init, S, HARD_LIMITS,
     start, pause, stop, emergencyStop, releaseEmergency, setMode, setAutoTrading, setSafeMode,
     executeBuy, executeSell, execCheck: (t, o) => execCheck(t, t.A, o), globalBlockers, buildCtx, estFees, estImpact, equityInfo, portfolioRisk, positionCorrelations,
-    systemHealth, diagnostics, botHealth, rpcEndpoints, fetchOhlcv, fetchCandlesForBacktest, walletConnect, walletDisconnect, walletBalance,
+    systemHealth, diagnostics, botHealth, readiness, candidateChain, liveReadiness, preLiveChecks, ackReconciliation, requestSignature, rpcEndpoints, fetchOhlcv, fetchCandlesForBacktest, walletConnect, walletDisconnect, walletBalance, walletNetwork,
     updateSettings, updateStrategies, rollbackTo, addWatch, removeWatch, updateWatch, select, exportData, importSettings, resetSettings, resetPortfolio,
     newSession, factoryReset, persistNow, enqueueSecurity, clearFeed: () => { state.feed = []; persist(); },
     _t: { scanOnce, updateSolPrice, applySnapshot, applyAlt, fetchChunk, reconcile, analyzeAll, startScanner, stopScanner, timers, managePositions, closePosition, processQueue, enqueue, checkSecurity, ensureToken, maybeAutoTrade, setBotState }
@@ -3503,6 +3757,105 @@ const SELF_TESTS = [
     assert(fns.every(f => !String(f).includes('Math.random')), 'Math.random in Handelslogik gefunden');
     return 'Terminalzustände final, keine Zufallslogik';
   }],
+  ['Status', 'Normaler Scan liefert Analyse & Entscheidungen', async () => {
+    const H = makeTestHarness(); const core = await testCore(H);
+    for (let i = 1; i <= 4; i++) { const m = tMint(i); H.market[m] = H.pair(m); core._t.ensureToken(m, 'Test'); }
+    const r = await core._t.scanOnce();
+    assert(!r.error && !r.skipped, 'Scan fehlgeschlagen: ' + (r.error || 'skipped'));
+    const toks = [...core.state.markets.values()].filter(t => t.A && t.D);
+    assert(toks.length === 4, `${toks.length} statt 4 Tokens analysiert`);
+    assert(toks.every(t => core.candidateChain(t).text.includes('FINAL:')), 'Kandidaten-Kette fehlt');
+    return '4 Tokens gescannt, Kette pro Kandidat vorhanden';
+  }],
+  ['Status', 'Kein Kandidat / niedriger Score → WAITING, nicht BLOCKED', async () => {
+    const H = makeTestHarness(); const core = await testCore(H, { minScore: 99 });
+    const t = await prepToken(core, H, 1);
+    core._t.setBotState('STARTING'); core._t.setBotState('RUNNING');
+    core._t.analyzeAll();
+    const rd = core.readiness();
+    assert(t.D.blockers.some(b => b.code === 'SCORE_TOO_LOW'), 'SCORE_TOO_LOW erwartet');
+    assert(rd.state === 'WAITING', 'Status ' + rd.state + ': ' + rd.reason);
+    assert(core.candidateChain(t).text.includes('SCORE TOO LOW') && core.candidateChain(t).final === 'NO TRADE', 'Kette falsch: ' + core.candidateChain(t).text);
+    return 'WAITING · ' + core.candidateChain(t).text.split(' → ').slice(-2).join(' → ');
+  }],
+  ['Status', 'Kein Konsens → WAITING, nicht BLOCKED', async () => {
+    const H = makeTestHarness(); const core = await testCore(H, { consensusMinWeight: 5 });
+    const t = await prepToken(core, H, 1);
+    core._t.setBotState('STARTING'); core._t.setBotState('RUNNING');
+    core._t.analyzeAll();
+    assert(t.D.blockers.some(b => b.code === 'NO_CONSENSUS'), 'NO_CONSENSUS erwartet');
+    assert(core.readiness().state === 'WAITING', 'Status ' + core.readiness().state);
+    return 'NO_CONSENSUS → WAITING';
+  }],
+  ['Status', 'Kandidat vorhanden → READY; harter Block → BLOCKED', async () => {
+    const H = makeTestHarness(); const core = await testCore(H);
+    await prepToken(core, H, 1);
+    core._t.setBotState('STARTING'); core._t.setBotState('RUNNING');
+    core._t.analyzeAll();
+    const r1 = core.readiness();
+    assert(r1.state === 'READY', 'erwartet READY, ist ' + r1.state + ': ' + r1.reason);
+    core.setSafeMode(true);
+    const r2 = core.readiness(); assert(r2.state === 'BLOCKED' && r2.hard[0].code === 'SAFE_MODE', 'Safe Mode nicht BLOCKED');
+    core.setSafeMode(false); core.state.risk.dailyLimitHit = true;
+    assert(core.readiness().state === 'BLOCKED', 'Tageslimit nicht BLOCKED');
+    core.state.risk.dailyLimitHit = false; await core.emergencyStop('Test');
+    assert(core.readiness().state === 'EMERGENCY_STOP', 'Emergency nicht erkannt');
+    return 'READY → BLOCKED (Safe Mode, Tageslimit) → EMERGENCY STOP';
+  }],
+  ['Chaos', 'RPC- & RugCheck-Ausfall → Security Unknown, BLOCKED', async () => {
+    const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1);
+    H.rpcFail = true; H.rugFail = true; core._t.setBotState('STARTING'); core._t.setBotState('RUNNING');
+    for (let i = 0; i < 6; i++) { H.env.advance(3.5 * MIN); await core._t.updateSolPrice(true); t.sec = await core._t.checkSecurity(t.mint); await core._t.fetchChunk([t.mint], true); } // > 10 min: RugCheck-Cache abgelaufen
+    assert(t.sec.status === 'UNKNOWN', 'Security ' + t.sec.status);
+    const rd = core.readiness();
+    assert(rd.hard.some(b => b.code === 'SECURITY_SOURCES_DOWN'), 'SECURITY_SOURCES_DOWN fehlt: ' + rd.hard.map(b => b.code).join(','));
+    const r = await core.executeBuy(t.id, { sizeUsd: 20 }); assert(!r.ok, 'Kauf trotz RPC-Ausfall');
+    return 'RPC OFFLINE → ' + codes(r).slice(0, 2).join(', ');
+  }],
+  ['Chaos', 'Inkonsistenter Speicher → RECONCILIATION REQUIRED', async () => {
+    const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1);
+    assert((await core.executeBuy(t.id, { sizeUsd: 20 })).ok, 'Buy fehlgeschlagen');
+    const tr = JSON.parse(H.backend.get(STORAGE_KEYS.trades)); tr.tradeSeq = 999; H.backend.set(STORAGE_KEYS.trades, JSON.stringify(tr));
+    const core2 = createCore({ env: H.env, backend: H.backend }); core2.init({ autoStart: false });
+    assert(core2.state.reconciliation.required, 'Abgleich nicht angefordert');
+    core2._t.setBotState('STARTING'); core2._t.setBotState('RUNNING');
+    await core2._t.updateSolPrice(true); const t2 = core2.state.markets.get(t.id); await core2._t.fetchChunk([t.mint], true); t2.sec = await core2._t.checkSecurity(t.mint);
+    const b = await core2.executeBuy(t.id, { sizeUsd: 20 });
+    assert(codes(b).includes('RECONCILIATION_REQUIRED'), 'Kauf trotz offenem Abgleich: ' + codes(b).join(','));
+    assert(core2.readiness().state === 'BLOCKED', 'Status nicht BLOCKED');
+    core2.ackReconciliation();
+    assert(!core2.state.reconciliation.required && !core2.globalBlockers({}).some(x => x.code === 'RECONCILIATION_REQUIRED'), 'Bestätigung wirkt nicht');
+    return 'Seq-Konflikt erkannt, Käufe blockiert bis Bestätigung';
+  }],
+  ['System', 'Live-Gating: LIVE nur mit allen Voraussetzungen, Auto ≠ Echtgeld', async () => {
+    const H = makeTestHarness(); const core = await testCore(H);
+    const lr = core.liveReadiness();
+    assert(!lr.ready && lr.checks.find(c => c.name === 'Wallet verbunden').ok === false && lr.checks.find(c => /Routing/.test(c.name)).ok === false, 'Gating unvollständig');
+    const r = core.setMode('LIVE'); assert(!r.ok && Array.isArray(r.checks) && core.state.mode === 'SIMULATION', 'LIVE aktiviert');
+    assert(core.setAutoTrading(true).ok && core.state.mode === 'SIMULATION', 'Auto-Trading verändert Modus');
+    const sig = await core.requestSignature(); assert(!sig.ok && sig.code === 'SIGNING_DISABLED', 'Signatur nicht blockiert');
+    const w = await core.walletConnect(); assert(!w.ok && core.state.wallet.status === 'NO_PROVIDER', 'Wallet ohne Provider verbunden');
+    return `${lr.checks.filter(c => !c.ok).length} Gating-Checks offen, Signieren deaktiviert`;
+  }],
+  ['Daten', 'SOL-Preis-Fallback aus SOL-quotierten Pools', async () => {
+    const H = makeTestHarness(); H.fail = url => (url.endsWith('/tokens/v1/solana/' + WSOL) ? { status: 500, body: 'x' } : null);
+    const core = await testCore(H);
+    assert(!core.state.sol, 'Direktpreis sollte fehlen');
+    const ms = [1, 2, 3].map(tMint); ms.forEach(m => { H.market[m] = H.pair(m); core._t.ensureToken(m, 'Test'); });
+    await core._t.fetchChunk(ms, true);
+    assert(core.state.sol && core.state.sol.derived && Math.abs(core.state.sol.usd - 0.001 / 0.0000066) < 0.01, 'abgeleiteter SOL-Preis falsch: ' + JSON.stringify(core.state.sol));
+    return 'SOL ≈ ' + fmtUsd(core.state.sol.usd) + ' aus ' + core.state.sol.n + ' Pools';
+  }],
+  ['System', 'Storage logisch getrennt (Settings/Runtime/Positionen/Trades/Logs/Stats)', async () => {
+    const H = makeTestHarness(); const core = await testCore(H);
+    core.persistNow();
+    const missing = Object.values(STORAGE_KEYS).filter(k => H.backend.get(k) == null);
+    assert(!missing.length, 'fehlende Bereiche: ' + missing.join(', '));
+    const before = H.backend.get(STORAGE_KEYS.trades);
+    core.updateSettings({ minScore: 70 });
+    assert(H.backend.get(STORAGE_KEYS.trades) === before && JSON.parse(H.backend.get(STORAGE_KEYS.settings)).settings.minScore === 70, 'Bereiche nicht getrennt');
+    return Object.keys(STORAGE_KEYS).length + ' Bereiche, nur geänderte werden geschrieben';
+  }],
   ['System', 'Backtest ohne Look-Ahead', async () => {
     const c = []; let p = 1;
     for (let i = 0; i < 300; i++) { const o = p; p = p * (1 + Math.sin(i / 7) * 0.02 + (i % 50 === 25 ? 0.12 : 0)); c.push({ t: i * MIN, o, h: Math.max(o, p) * 1.01, l: Math.min(o, p) * 0.99, c: p, v: 1000 + (i % 50 === 25 ? 9000 : 0) }); }
@@ -3538,8 +3891,8 @@ const env = {
   walletProvider: () => (window.phantom && window.phantom.solana) || (window.solana && window.solana.isPhantom ? window.solana : null)
 };
 const core = createCore({ env, backend: createLocalBackend() });
-const UI = { view: 'scanner', sort: 'score', dir: -1, q: '', onlyRec: false, safeOnly: false, age: '', maxRisk: 100, minConf: 0, detailTab: 'overview', chartTf: 'live', logCat: 'ALL', logQ: '', logPaused: false, hq: '', hMode: '', hRes: '', rankBy: 'opportunity', kbQ: '', lastTouch: 0, tests: null, testsRunning: false, bt: null, btBusy: false };
-const UI_PERSIST = ['view', 'sort', 'dir', 'onlyRec', 'safeOnly', 'age', 'maxRisk', 'minConf', 'detailTab', 'chartTf', 'logCat', 'rankBy'];
+const UI = { alertsSeenAt: 0, view: 'scanner', sort: 'score', dir: -1, q: '', onlyRec: false, safeOnly: false, age: '', maxRisk: 100, minConf: 0, detailTab: 'overview', chartTf: 'live', logCat: 'ALL', logQ: '', logPaused: false, hq: '', hMode: '', hRes: '', rankBy: 'opportunity', kbQ: '', lastTouch: 0, tests: null, testsRunning: false, bt: null, btBusy: false };
+const UI_PERSIST = ['alertsSeenAt', 'view', 'sort', 'dir', 'onlyRec', 'safeOnly', 'age', 'maxRisk', 'minConf', 'detailTab', 'chartTf', 'logCat', 'rankBy'];
 const $ = id => { const e = document.getElementById(id); if (!e) domMissing(id); return e; };
 const missingDom = new Set();
 function domMissing(id) { if (!missingDom.has(id)) { missingDom.add(id); core.log.warn('UI', `DOM-Element #${id} nicht gefunden`); } }
@@ -3574,6 +3927,7 @@ function loadUi() {
   if (['live', '1m', '5m', '15m'].includes(u.chartTf)) UI.chartTf = u.chartTf;
   if (LOG_CATS.some(c => c[0] === u.logCat)) UI.logCat = u.logCat;
   if (['opportunity', 'risk', 'confidence', 'execution'].includes(u.rankBy)) UI.rankBy = u.rankBy;
+  if (isNum(u.alertsSeenAt)) UI.alertsSeenAt = u.alertsSeenAt;
 }
 function spark(t, w = 60, h = 20) {
   const v = t.hist.slice(-90).map(x => x.p); if (v.length < 2) return '';
@@ -3698,20 +4052,23 @@ async function confirmDialog(title, text, o = {}) {
 const VIEWS = [
   ['scanner', '📡', 'Scanner'], ['signals', '⚡', 'Signale'], ['markets', '🌐', 'Markt'], ['watchlist', '👁', 'Watchlist'], ['positions', '💼', 'Positionen'],
   ['orders', '🧾', 'Orders'], ['history', '📜', 'History'], ['backtest', '🧪', 'Backtest'], ['analytics', '📊', 'Analytics'], ['risk', '🛡', 'Risiko'],
-  ['alerts', '💬', 'Alarm-Chat'], ['diagnostics', '🩺', 'Diagnose'], ['logs', '📋', 'Logs'], ['settings', '⚙', 'Einstellungen'], ['knowledge', '📚', 'Wissen']
+  ['alerts', '💬', 'Alarm-Chat'], ['diagnostics', '🩺', 'Diagnose'], ['system', '🖥', 'System & API'], ['logs', '📋', 'Logs'], ['settings', '⚙', 'Einstellungen'], ['knowledge', '📚', 'Wissen']
 ];
+const NAV_GROUPS = [['Trading', ['scanner', 'signals', 'positions', 'watchlist', 'orders', 'history', 'markets']], ['Analyse', ['analytics', 'risk', 'backtest', 'alerts']], ['System & Diagnose', ['diagnostics', 'system', 'logs', 'settings', 'knowledge']]];
 const BOTTOM = [['scanner', '📡', 'Scanner'], ['signals', '⚡', 'Signale'], ['positions', '💼', 'Positionen'], ['alerts', '💬', 'Alarme'], ['more', '☰', 'Mehr']];
 function buildNav() {
   setHTML($('sidebar'), html`${VIEWS.map(([id, ic, name]) => html`<button data-act="view" data-view="${id}" id="nv-${id}" aria-label="${name}"><i aria-hidden="true">${ic}</i><span>${name}</span><span class="cnt" id="nc-${id}"></span></button>`)}
     <div class="sidefoot" id="sideFoot"></div>`);
-  setHTML($('bottomnav'), html`${BOTTOM.map(([id, ic, name]) => html`<button data-act="${id === 'more' ? 'more' : 'view'}" data-view="${id}" id="bn-${id}" aria-label="${name}"><i aria-hidden="true">${ic}</i>${name}</button>`)}`);
+  setHTML($('bottomnav'), html`${BOTTOM.map(([id, ic, name]) => html`<button data-act="${id === 'more' ? 'more' : 'view'}" data-view="${id}" id="bn-${id}" aria-label="${name}"><i aria-hidden="true">${ic}</i>${name}<span class="bdg" id="bd-${id}"></span></button>`)}`);
 }
 function showView(v, focus) {
   if (!VIEWS.some(x => x[0] === v)) return;
   UI.view = v; saveUi();
+  document.body.classList.toggle('v-home', v === 'scanner');
   for (const [id] of VIEWS) { const s = document.getElementById('v-' + id); if (s) s.classList.toggle('hidden', id !== v); }
   renderNav();
   renderView(true);
+  if (v === 'alerts') { UI.alertsSeenAt = Date.now(); saveUi(); }
   if (focus) { const c = document.getElementById('center'); if (c) { c.focus({ preventScroll: true }); window.scrollTo({ top: 0, behavior: 'auto' }); } }
 }
 function renderNav() {
@@ -3720,20 +4077,21 @@ function renderNav() {
   for (const [id] of BOTTOM) { const b = document.getElementById('bn-' + id); if (b) b.classList.toggle('on', id === UI.view || (id === 'more' && !BOTTOM.some(x => x[0] === UI.view))); }
   const counts = { scanner: st.markets.size, signals: ss.candidates || 0, watchlist: Object.keys(st.watchlist).length, positions: st.positions.length, orders: st.orders.filter(o => !TERMINAL.has(o.state)).length || '', alerts: st.feed.length || '' };
   for (const [id, n] of Object.entries(counts)) setText(document.getElementById('nc-' + id), n === 0 ? '0' : n);
+  const unread = st.feed.filter(e => e.ts > UI.alertsSeenAt).length;
+  setText(document.getElementById('bd-signals'), ss.candidates ? String(ss.candidates) : '');
+  setText(document.getElementById('bd-positions'), st.positions.length ? String(st.positions.length) : '');
+  setText(document.getElementById('bd-alerts'), unread && UI.view !== 'alerts' ? (unread > 99 ? '99+' : String(unread)) : '');
+  const rd = core.readiness();
+  setText(document.getElementById('bd-more'), rd.state === 'BLOCKED' || rd.state === 'ERROR' || core.state.reconciliation.required ? '!' : '');
   setText(document.getElementById('sideFoot'), `Smart Lab v${APP_VERSION} · Strategy ${STRATEGY_VERSION} · Data ${DATA_ENGINE_VERSION}`);
 }
 
 /* ---------- Top Bar, Banner, Control Panel, Tiles ---------- */
+const MS_TEXT = { READY: 'BOT READY', WAITING: 'BOT WAITING', BLOCKED: 'BOT BLOCKED', ERROR: 'BOT ERROR', EMERGENCY_STOP: 'EMERGENCY STOP', PAUSED: 'BOT PAUSED', STOPPED: 'BOT STOPPED' };
+const MS_CLS = { READY: 'ok', WAITING: 'info', BLOCKED: 'warn', ERROR: 'bad', EMERGENCY_STOP: 'bad', PAUSED: 'warn', STOPPED: 'warn' };
 function masterStatus() {
-  const b = core.state.bot;
-  if (b.emergency) return { cls: 'bad', text: 'BOT EMERGENCY STOP', why: b.emergencyReason };
-  if (b.state === 'ERROR') return { cls: 'bad', text: 'BOT ERROR', why: b.lastError || '' };
-  if (b.state === 'STOPPED') return { cls: 'warn', text: 'BOT STOPPED', why: 'Scanner gestoppt' };
-  if (b.state === 'PAUSED') return { cls: 'warn', text: 'BOT PAUSED', why: 'keine neuen Auto-Trades' };
-  if (b.state === 'RECOVERING' || b.state === 'STARTING') return { cls: 'warn', text: 'BOT RECOVERING', why: 'warte auf ausreichende Datenqualität' };
-  const gb = core.globalBlockers({ auto: false });
-  if (gb.length) return { cls: 'warn', text: 'BOT BLOCKED', why: gb[0].msg };
-  return { cls: 'ok', text: 'BOT RUNNING', why: b.autoTrading ? 'Auto-Trading an' : 'analysiert (Auto-Trading aus)' };
+  const rd = core.readiness();
+  return { state: rd.state, cls: MS_CLS[rd.state] || '', text: MS_TEXT[rd.state] || rd.state, why: rd.reason, rd };
 }
 const RANKS = { ONLINE: 0, UNKNOWN: 1, DEGRADED: 2, STALE: 3, OFFLINE: 4 };
 function bestRpcStatus() { const s = core.rpcEndpoints().map(e => core.http.status(e.name)); return s.length ? s.sort((a, b) => RANKS[a] - RANKS[b])[0] : 'OFFLINE'; }
@@ -3745,13 +4103,13 @@ function renderTop() {
   const pnl = st.portfolio.realized + unreal;
   const pr = core.portfolioRisk(); const rpc = bestRpcStatus(); const w = st.wallet;
   const pills = [
-    [ms.cls, '', ms.text, ms.why],
-    ['info', 'Modus', st.mode.replace('_', ' '), 'Handelsmodus · LIVE nicht verfügbar'],
-    [b.autoTrading ? 'ok' : '', 'Auto', b.autoTrading ? 'AN' : 'AUS', 'Auto-Trading (nur SIMULATION)'],
-    [w.status === 'CONNECTED' ? 'ok' : '', 'Wallet', w.status === 'CONNECTED' ? shortAddr(w.pubkey) : w.status === 'NO_PROVIDER' ? 'kein Provider' : w.status === 'ERROR' ? 'Fehler' : 'nicht verbunden', 'nur lesend, keine Signaturen'],
+    [ms.cls + ' pm', '', ms.text, ms.why],
+    ['info pm', 'Modus', st.mode.replace('_', ' '), 'Handelsmodus · LIVE separat & nur mit erfülltem Gating'],
+    [b.autoTrading ? 'ok' : '', 'Auto', b.autoTrading ? 'AN' : 'AUS', 'Auto-Trading (nur SIMULATION, nie Echtgeld)'],
+    [(w.status === 'CONNECTED' ? 'ok' : '') + ' pm', 'Wallet', w.status === 'CONNECTED' ? shortAddr(w.pubkey) : w.status === 'NO_PROVIDER' ? 'kein Provider' : w.status === 'ERROR' ? 'Fehler' : 'nicht verbunden', 'nur lesend, keine Signaturen'],
     [stCls(rpc), 'RPC', rpc + (st.rpc.latency != null && rpc === 'ONLINE' ? ' ' + st.rpc.latency + 'ms' : ''), st.rpc.slot ? 'Slot ' + st.rpc.slot + ' · ' + (st.rpc.endpoint || '') : 'kein verifizierter Slot'],
     [h.score >= 80 ? 'ok' : h.score >= S.minSystemHealth ? 'warn' : 'bad', 'Health', String(h.score), 'System Health 0–100 (APIs, RPC, Frische, Fehler)'],
-    [pnl > 0.005 ? 'ok' : pnl < -0.005 ? 'bad' : '', 'PnL', fmtSigned(pnl) + (unknown ? '*' : ''), 'SIMULIERT · fee-adjusted' + (unknown ? ' · * Position ohne aktuellen Preis' : '')],
+    [(pnl > 0.005 ? 'ok' : pnl < -0.005 ? 'bad' : '') + ' pm', 'PnL', fmtSigned(pnl) + (unknown ? '*' : ''), 'SIMULIERT · fee-adjusted' + (unknown ? ' · * Position ohne aktuellen Preis' : '')],
     ['', 'Pos', `${st.positions.length}/${S.maxOpenPositions}`, 'offene Positionen'],
     [pr.score >= 60 ? 'bad' : pr.score >= 35 ? 'warn' : 'ok', 'Risk', String(pr.score), 'Portfolio Risk'],
     ['', '', `${fmtTime(now)} · Scan ${st.scanner.lastAt ? fmtAge(now - st.scanner.lastAt) : '—'}`, 'Uhrzeit · letzter Scan']
@@ -3776,13 +4134,18 @@ function renderBanner() {
   if (b.state === 'STOPPED' && st.positions.length) msgs.push(`■ Bot gestoppt – ${st.positions.length} offene Position(en) werden NICHT überwacht.`);
   if (b.safeMode) msgs.push('🛡 Safe Mode aktiv – Analyse läuft, keine neuen Käufe.' + (b.safeAuto ? ' Automatisch nach Fehlern aktiviert; nach Prüfung in der Steuerung deaktivieren.' : ''));
   if (st.risk.reviewRequired) msgs.push(`⚠️ Verlustserie (${st.risk.lossStreak}) – kontrollierter Review empfohlen (Analytics/History). Hinweis in Risiko-Ansicht bestätigen.`);
+  if (st.reconciliation.required) { msgs.push(html`⚖️ RECONCILIATION REQUIRED – ${st.reconciliation.issues.length} ungeklärte Punkt(e) nach Neustart. Neue Käufe sind blockiert, bis du den Abgleich prüfst. <button class="btn sm warn" data-act="reconcile">Abgleich prüfen</button>`); bad = true; }
   if (!st.storageOk) msgs.push('💾 Speichern fehlgeschlagen – Zustand wird nicht dauerhaft gesichert (privater Modus/Speicher voll?).');
   const el = $('banner'); if (!el) return;
   el.hidden = !msgs.length; el.classList.toggle('bad', bad);
   patch(el, html`${msgs.map(m => html`<div>${m}</div>`)}`);
 }
 function buildControl() {
+  const mobile = window.matchMedia('(max-width:700px)').matches;
   setHTML($('control'), html`
+    <div class="ctl-top"><span class="mstat" id="cStatus" role="status">–</span><div class="ctl-why" id="cWhy" aria-live="polite"></div></div>
+    <div class="ov" id="cOverview"></div>
+    <details class="ctl-more" id="cCtlBox" ${mobile ? '' : raw('open')}><summary>Steuerung: Start · Pause · Stop · Safe Mode · Modus</summary>
     <div class="ctl-row">
       <button class="btn ok" data-act="start" id="cStart">▶ START</button>
       <button class="btn warn" data-act="pause" id="cPause">⏸ PAUSE</button>
@@ -3792,24 +4155,33 @@ function buildControl() {
         <button data-act="mode" data-mode="SIMULATION" id="mSIMULATION">SIMULATION</button>
         <button data-act="mode" data-mode="PAPER" id="mPAPER">PAPER</button>
         <button data-act="mode" data-mode="READ_ONLY" id="mREAD_ONLY">READ ONLY</button>
-        <button data-act="live" class="na" id="mLIVE" title="Nicht verfügbar – erfordert externen Wallet-/Swap-Provider">LIVE</button>
+        <button data-act="live" class="na" id="mLIVE" title="Nur mit erfülltem Live-Gating – derzeit nicht verfügbar">LIVE</button>
       </div>
-      <button class="switch" data-act="auto" id="cAuto" role="switch" aria-checked="false"><span class="tg"></span>Auto-Trading</button>
-    </div>
-    <div class="explain" id="cExplain" aria-live="polite"></div>`);
+    </div></details>`);
 }
 function renderControl() {
-  const b = core.state.bot;
-  const s = $('cStart'), p = $('cPause'), x = $('cStop'), sf = $('cSafe'), au = $('cAuto');
+  const b = core.state.bot, st = core.state;
+  const s = $('cStart'), p = $('cPause'), x = $('cStop'), sf = $('cSafe');
   if (!s) return;
   s.disabled = b.emergency || b.state === 'RUNNING' || b.state === 'RECOVERING' || b.state === 'STARTING';
   p.disabled = !['RUNNING', 'RECOVERING'].includes(b.state);
   x.disabled = b.state === 'STOPPED';
   sf.classList.toggle('on', b.safeMode); sf.setAttribute('aria-pressed', String(b.safeMode));
-  for (const m of ['SIMULATION', 'PAPER', 'READ_ONLY']) { const el = $('m' + m); if (el) { el.classList.toggle('on', core.state.mode === m); el.setAttribute('aria-pressed', String(core.state.mode === m)); } }
-  au.classList.toggle('on', b.autoTrading); au.setAttribute('aria-checked', String(b.autoTrading));
-  const d = core.diagnostics();
-  patch($('cExplain'), html`<b>${masterStatus().text}</b> · ${d.summary}`);
+  for (const m of ['SIMULATION', 'PAPER', 'READ_ONLY']) { const el = $('m' + m); if (el) { el.classList.toggle('on', st.mode === m); el.setAttribute('aria-pressed', String(st.mode === m)); } }
+  const ms = masterStatus(), cs = $('cStatus');
+  if (cs) { cs.className = 'mstat ' + ms.state; setText(cs, ms.text); }
+  const soft = ms.rd.soft.filter(x2 => !['AUTO_TRADING_OFF', 'PAPER_MANUAL', 'BOT_NOT_RUNNING', 'RECOVERING'].includes(x2.code));
+  patch($('cWhy'), html`${ms.why}${soft.length ? html` <span class="dim">· Hinweis: ${soft.map(x2 => x2.msg).join(' · ')}</span>` : ''}`);
+  const eq = core.equityInfo(), w = st.wallet;
+  const unreal = st.positions.reduce((a, q) => a + (isNum(q.pnlUsd) ? q.pnlUsd : 0), 0), pnl = st.portfolio.realized + unreal;
+  const walletTxt = w.status === 'CONNECTED' ? shortAddr(w.pubkey) : w.status === 'NO_PROVIDER' ? 'kein Provider' : w.status === 'CONNECTING' ? 'verbinde …' : w.status === 'ERROR' ? 'Fehler' : 'nicht verbunden';
+  patch($('cOverview'), html`
+    <div class="kv"><small>Modus</small><b>${st.mode.replace('_', ' ')}</b></div>
+    <button class="kv" data-act="auto" role="switch" aria-checked="${b.autoTrading}" title="Auto-Trading – nur SIMULATION, nie Echtgeld"><small>Auto-Trading</small><span class="switch ${b.autoTrading ? 'on' : ''}"><span class="tg"></span>${b.autoTrading ? 'AN' : 'AUS'}</span></button>
+    <button class="kv" data-act="walletModal"><small>Wallet (lesend)</small><b>${walletTxt}${w.balanceLamports != null ? ' · ' + Number(lamportsToSol(BigInt(w.balanceLamports))).toFixed(3) + ' SOL' : ''}</b></button>
+    <div class="kv"><small>Portfolio</small><b>${fmtUsd(eq.equity)}<em class="lbl SIMULATED">SIM</em></b></div>
+    <div class="kv"><small>PnL (fee-adj.)</small><b class="${cls(pnl)}">${fmtSigned(pnl)}</b></div>
+    <button class="kv" data-act="view" data-view="positions"><small>Positionen</small><b>${st.positions.length}/${core.S().maxOpenPositions} · ${fmtUsd(eq.exposure)}</b></button>`);
 }
 const TILE_ICONS = {
   t1: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 12l6-6"/></svg>',
@@ -3819,10 +4191,10 @@ const TILE_ICONS = {
 };
 function buildTiles() {
   setHTML($('tiles'), html`
-    <button class="tile t1" data-act="view" data-view="scanner" id="tl-scanner"><span class="tb" id="tb1">–</span>${raw(TILE_ICONS.t1)}<div><b>Scanner</b><small id="k1">–</small></div></button>
-    <button class="tile t2" data-act="view" data-view="signals" id="tl-signals"><span class="tb" id="tb2">–</span>${raw(TILE_ICONS.t2)}<div><b>Signale</b><small id="k2">–</small></div></button>
-    <button class="tile t3" data-act="view" data-view="watchlist" id="tl-watchlist"><span class="tb">LOKAL</span>${raw(TILE_ICONS.t3)}<div><b>Watchlist</b><small id="k3">–</small></div></button>
-    <button class="tile t4" data-act="view" data-view="alerts" id="tl-alerts"><span class="tb" id="tb4">–</span>${raw(TILE_ICONS.t4)}<div><b>Alarm-Chat</b><small id="k4">–</small><div class="bb"><i id="kbar"></i></div></div></button>`);
+    <button class="tile t1" data-act="view" data-view="scanner" id="tl-scanner"><span class="tb" id="tb1">–</span>${raw(TILE_ICONS.t1)}<div><b>Scanner</b><small id="k1">–</small><i class="tn" id="kn1"></i></div></button>
+    <button class="tile t2" data-act="view" data-view="signals" id="tl-signals"><span class="tb" id="tb2">–</span>${raw(TILE_ICONS.t2)}<div><b>Signale</b><small id="k2">–</small><i class="tn" id="kn2"></i></div></button>
+    <button class="tile t3" data-act="view" data-view="watchlist" id="tl-watchlist"><span class="tb">LOKAL</span>${raw(TILE_ICONS.t3)}<div><b>Watchlist</b><small id="k3">–</small><i class="tn" id="kn3"></i></div></button>
+    <button class="tile t4" data-act="view" data-view="alerts" id="tl-alerts"><span class="tb" id="tb4">–</span>${raw(TILE_ICONS.t4)}<div><b>Alarm-Chat</b><small id="k4">–</small><i class="tn" id="kn4"></i><div class="bb"><i id="kbar"></i></div></div></button>`);
 }
 function renderTiles() {
   const st = core.state, ss = st.metrics.scanStats || {}, dex = core.http.status('dexPairs');
@@ -3837,6 +4209,7 @@ function renderTiles() {
   const br = tb + tsl ? tb / (tb + tsl) * 100 : null;
   setText($('k4'), br == null ? 'Käufer — (keine Daten)' : `Käufer ${br.toFixed(0)} % (1h)`);
   const kb = $('kbar'); if (kb) kb.style.width = (br == null ? 50 : br) + '%';
+  setText($('kn1'), String(toks.length)); setText($('kn2'), String(ss.candidates || 0)); setText($('kn3'), Object.keys(st.watchlist).length + ' ★'); setText($('kn4'), br == null ? '—' : br.toFixed(0) + '%');
   for (const [v, id] of [['scanner', 'tl-scanner'], ['signals', 'tl-signals'], ['watchlist', 'tl-watchlist'], ['alerts', 'tl-alerts']]) { const el = document.getElementById(id); if (el) el.classList.toggle('on', UI.view === v); }
 }
 
@@ -3880,7 +4253,7 @@ function renderScanner() {
   const st = core.state, S = core.S(), now = Date.now();
   patch($('sortChips'), html`${SORTS.map(([k, n]) => html`<button data-act="sort" data-k="${k}" class="${k === UI.sort ? 'on' : ''}" aria-pressed="${k === UI.sort}">${n}${k === UI.sort ? (UI.dir < 0 ? ' ▼' : ' ▲') : ''}</button>`)}`);
   patch($('mkHead'), html`${HEAD.map(([n, k, c]) => (k ? html`<button class="${(c || '') + (UI.sort === k ? ' on' : '')}" data-act="sort" data-k="${k}">${n}${UI.sort === k ? (UI.dir < 0 ? ' ▼' : ' ▲') : ''}</button>` : html`<span class="${c || ''}">${n}</span>`))}`);
-  for (const [id, v] of [['swRec', UI.onlyRec], ['swSafe', UI.safeOnly]]) { const el = document.getElementById(id); if (el) el.classList.toggle('on', v); }
+  for (const [id, v] of [['swRec', UI.onlyRec], ['swSafe', UI.safeOnly]]) { const el = document.getElementById(id); if (el) { el.classList.toggle('on', v); el.setAttribute('aria-checked', String(v)); } }
   const all = [...st.markets.values()].filter(t => t.A && t.D);
   const q = UI.q.trim().toLowerCase();
   const getter = (SORTS.find(s => s[0] === UI.sort) || SORTS[0])[2];
@@ -3924,6 +4297,11 @@ function renderFilterForm() {
     <p class="note">Filter- und Profilwerte gelten auch für die Kaufentscheidung (Decision Engine). „Ansicht“-Filter betreffen nur die Anzeige. Harte Sicherheitsgrenzen bleiben immer aktiv.</p>`);
 }
 
+/* Kandidaten-Kette: SECURITY PASS → LIQUIDITY PASS → SCORE TOO LOW → FINAL: NO TRADE */
+function chainHtml(ch) {
+  if (!ch) return '';
+  return html`<div class="chain" aria-label="Entscheidungskette">${ch.steps.map(x => html`<span class="${x.ok ? 'p' : x.na ? 'n' : 'x'}" title="${x.value || ''}${x.msg ? ' · ' + x.msg : ''}">${x.k} ${x.ok ? 'PASS' : x.na ? '—' : x.code.replace(/_/g, ' ')}${x.value ? html` <small class="dim">${x.value}</small>` : ''}</span><i>→</i>`)}<span class="fin ${ch.decision === 'APPROVED' || ch.decision === 'BUY_CANDIDATE' ? 'buy' : ''}">FINAL: ${ch.final}</span></div>`;
+}
 /* ---------- Signale (Buy Candidates, Watch, Rejection Engine) ---------- */
 function signalCard(t) {
   const A = t.A, D = t.D;
@@ -3934,6 +4312,7 @@ function signalCard(t) {
     <div style="margin-top:8px">${A.signals.length ? A.signals.map(s => html`<span class="sig" title="${s.reason}">${SIGNAL_NAMES[s.type]} <i>${s.strength}</i></span>`) : html`<span class="mut">Keine Signale</span>`}</div>
     ${votes.length ? html`<div class="note">Strategien: ${votes.map(v => html`<span class="chip ${v.vote === 'BUY' ? 'ok' : ''} ${v.shadow ? 'vio' : ''}" title="${v.reasons.join('; ')}">${v.name}${v.shadow ? ' (Shadow)' : ''}: ${v.vote === 'BUY' ? 'BUY' : '—'} ${v.strength}</span> `)} · Konsens ${A.strat.weightSum}</div>` : ''}
     <div style="margin-top:6px">${D.blockers.slice(0, 5).map(b => html`<span class="blk p${b.prio}" title="${b.cat} · Priorität ${b.prio}">${b.code}</span>`)}</div>
+    ${chainHtml(core.candidateChain(t))}
     <div class="note">${D.reason}</div>
     <div class="row" style="margin-top:8px"><button class="btn sm" data-act="select" data-id="${t.id}">Details & Trace</button><button class="btn sm pri" data-act="buy" data-id="${t.id}">💱 Simulate Buy</button></div></div>`;
 }
@@ -3943,8 +4322,10 @@ function renderSignals(sec) {
   const watch = toks.filter(t => t.D.decision === 'WATCH').sort((a, b) => b.A.finalScore - a.A.finalScore).slice(0, 12);
   const rr = Object.entries(core.state.metrics.rejectReasons || {}).sort((a, b) => b[1] - a[1]).slice(0, 10);
   const pre = Object.entries(core.state.metrics.preTradeRejects || {}).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const ms = masterStatus();
   patch(sec, html`<h2>⚡ Signale & Kandidaten</h2>
-    <p class="note">APPROVED = alle Prüfungen bestanden · CANDIDATE = Analyse positiv, Ausführung blockiert (z. B. Auto-Trading aus) · WATCH = Filter & Security ok, aber kein Konsens/Score. Ein erkannter Token ist kein Kaufgrund.</p>
+    <div class="panel tight"><div class="ctl-top"><span class="mstat ${ms.state}">${ms.text}</span><div class="ctl-why">${ms.why}</div></div></div>
+    <p class="note">APPROVED = alle Prüfungen bestanden · CANDIDATE = Analyse positiv, Ausführung wartet (z. B. Auto-Trading aus) · WATCH = Filter & Security ok, aber kein Konsens/Score. Kein Kandidat ist kein Fehler (WAITING), sondern eine valide NO-TRADE-Entscheidung.</p>
     <h3>Buy Candidates (${cand.length})</h3>
     ${cand.length ? html`<div class="cards2">${cand.map(signalCard)}</div>` : html`<div class="empty">Keine validen Kandidaten. NO TRADE ist eine vollwertige Entscheidung.</div>`}
     <h3>Watch (${watch.length})</h3>
@@ -4162,20 +4543,25 @@ function renderRisk(sec) {
   const w = st.wallet;
   const dd = pf.peakEquity > 0 ? (pf.peakEquity - eq.equity) / pf.peakEquity * 100 : 0;
   patch(sec, html`<h2>🛡 Risiko</h2>
-    <div class="grid4">${kv('Portfolio Risk', pr.score)}${kv('Open Exposure', fmtUsd(eq.exposure) + ' (' + eq.exposurePct.toFixed(1) + '%)')}${kv('Max. Exposure', S.maxExposurePct + '%')}${kv('Max. Position', S.maxPositionPct + '% = ' + fmtUsd(eq.equity * S.maxPositionPct / 100))}${kv('Drawdown aktuell', dd.toFixed(2) + '%')}${kv('Max Drawdown', (pf.maxDD || 0).toFixed(2) + '%')}${kv('Verlustserie', r.lossStreak + ' / ' + S.lossStreakLimit)}${kv('Globale Pause', r.globalPauseUntil > now ? 'noch ' + fmtAge(r.globalPauseUntil - now) : 'nein')}${kv('Loss-Cooldown', r.lossCooldownUntil > now ? 'noch ' + fmtAge(r.lossCooldownUntil - now) : 'frei')}${kv('Tages-PnL / Limit', fmtSigned(r.dailyPnl) + ' / −' + S.dailyLossLimitPct + '%')}${kv('Execution Risk (Ø Exit-Impact)', posT.length ? avg(st.positions.map(p => p.exitImpactPct).filter(isNum)).toFixed(2) + '%' : '—', 'ESTIMATED')}${kv('Data Risk (Ø Confidence)', posT.length ? Math.round(avg(posT.map(t => t.A.confidence.total))) + '%' : '—')}${kv('Security Risk', posT.length ? posT.filter(t => t.A.sec.status !== 'VERIFIED').length + ' nicht VERIFIED' : '—')}${kv('Käufe letzte Stunde', r.buyTimes.filter(x => now - x < HOUR).length + ' / ' + S.maxTradesPerHour)}${kv('Offene Positionen', st.positions.length + ' / ' + S.maxOpenPositions)}${kv('Tageslimit erreicht', r.dailyLimitHit ? 'JA – Auto-Trading aus' : 'nein')}</div>
+    <div class="grid4">${kv('Portfolio Risk', pr.score)}${kv('Open Exposure', fmtUsd(eq.exposure) + ' (' + eq.exposurePct.toFixed(1) + '%)')}${kv('Max. Exposure', S.maxExposurePct + '%')}${kv('Max. Position', S.maxPositionPct + '% = ' + fmtUsd(eq.equity * S.maxPositionPct / 100))}${kv('Drawdown aktuell', dd.toFixed(2) + '%')}${kv('Max Drawdown', (pf.maxDD || 0).toFixed(2) + '%')}${kv('Verlustserie', r.lossStreak + ' / ' + S.lossStreakLimit)}${kv('Globale Pause', r.globalPauseUntil > now ? 'noch ' + fmtAge(r.globalPauseUntil - now) : 'nein')}${kv('Loss-Cooldown', r.lossCooldownUntil > now ? 'noch ' + fmtAge(r.lossCooldownUntil - now) : 'frei')}${kv('Tages-PnL / Limit', fmtSigned(r.dailyPnl) + ' / −' + S.dailyLossLimitPct + '%')}${kv('Execution Risk (Ø Exit-Impact)', isNum(avg(st.positions.map(p => p.exitImpactPct).filter(isNum))) ? avg(st.positions.map(p => p.exitImpactPct).filter(isNum)).toFixed(2) + '%' : '—', 'ESTIMATED')}${kv('Data Risk (Ø Confidence)', posT.length ? Math.round(avg(posT.map(t => t.A.confidence.total))) + '%' : '—')}${kv('Security Risk', posT.length ? posT.filter(t => t.A.sec.status !== 'VERIFIED').length + ' nicht VERIFIED' : '—')}${kv('Käufe letzte Stunde', r.buyTimes.filter(x => now - x < HOUR).length + ' / ' + S.maxTradesPerHour)}${kv('Offene Positionen', st.positions.length + ' / ' + S.maxOpenPositions)}${kv('Tageslimit erreicht', r.dailyLimitHit ? 'JA – Auto-Trading aus' : 'nein')}</div>
     ${r.reviewRequired ? html`<div class="panel" style="margin-top:12px"><b class="warn">Review nach Verlustserie empfohlen.</b> <span class="mut">Prüfe History & Analytics. Der Bot wird nach Verlusten nicht aggressiver (keine Revenge-Logik, kein Martingale).</span> <button class="btn sm" data-act="ackReview">Review erledigt</button></div>` : ''}
     <h3>Risk-Graph: Exposure, Drawdown, Portfolio Risk</h3><div class="chartbox small"><canvas data-chart="risk" aria-label="Risikoverlauf"></canvas></div>
     <div class="grid2" style="margin-top:12px"><div class="panel"><h3 style="margin-top:0">Critical Limits (unveränderlich)</h3><table class="tbl">
       <tr><td>MAX_BUYS_PER_COIN</td><td class="r num">${Math.min(S.maxBuysPerCoin, 2)} (hart ≤ ${HARD_LIMITS.MAX_BUYS_PER_COIN})</td></tr><tr><td>SELL_COOLDOWN</td><td class="r num">${S.sellCooldownMin} min (≥ ${HARD_LIMITS.MIN_SELL_COOLDOWN_MIN})</td></tr><tr><td>LOSS_COOLDOWN</td><td class="r num">${S.lossCooldownMin} min (≥ ${HARD_LIMITS.MIN_LOSS_COOLDOWN_MIN})</td></tr><tr><td>LOSS_STREAK_LIMIT</td><td class="r num">${S.lossStreakLimit} (≤ ${HARD_LIMITS.MAX_LOSS_STREAK_LIMIT})</td></tr><tr><td>GLOBAL_PAUSE</td><td class="r num">${S.globalPauseMin} min (≥ ${HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN})</td></tr><tr><td>Nachkauf nur im Gewinn</td><td class="r num">≥ +${PYRAMID_MIN_PNL_PCT}%</td></tr><tr><td>Min. Trades für Optimierung</td><td class="r num">${HARD_LIMITS.MIN_TRADES_FOR_TUNING}</td></tr></table></div>
     <div class="panel"><h3 style="margin-top:0">Aktive Cooldowns</h3>${cool.length ? html`<table class="tbl">${cool.map(([id, v, k]) => html`<tr><td>${(tok(id) || { symbol: shortAddr(mintOfId(id)) }).symbol}</td><td>${k}</td><td class="r num">${fmtAge(v - now)}</td></tr>`)}</table>` : html`<div class="empty">Keine Coin-Cooldowns.</div>`}
       <h3>Korrelation offener Positionen</h3>${corr.length ? html`<table class="tbl">${corr.map(c => html`<tr><td>${c.a} ↔ ${c.b}</td><td class="r num ${c.r != null && c.r >= S.correlationLimit ? 'bad' : ''}">${c.r == null ? 'zu wenig Daten' : c.r.toFixed(2)}</td></tr>`)}</table>` : html`<div class="empty">Weniger als 2 Positionen.</div>`}</div></div>
-    <div class="panel"><h3 style="margin-top:0">Wallet (nur lesend)</h3><p class="note">Verbindung nur zur Anzeige von Public Key und SOL-Balance (per RPC verifiziert). Keine Private Keys, keine Signaturen, keine Live-Orders.</p>
-      <div class="grid4">${kv('Status', w.status)}${kv('Adresse', w.pubkey ? shortAddr(w.pubkey) : '—')}${kv('Balance', w.balanceLamports != null ? lamportsToSol(BigInt(w.balanceLamports)) + ' SOL' : '—', w.balanceLamports != null ? 'LIVE' : 'UNKNOWN')}${kv('Stand', w.balanceAt ? fmtTime(w.balanceAt) : '—')}</div>
-      ${w.error ? html`<p class="note bad">${w.error}</p>` : ''}
-      <div class="row" style="margin-top:8px">${w.status === 'CONNECTED' ? html`<button class="btn sm" data-act="walletBal">↻ Balance</button><button class="btn sm bad" data-act="walletOff">Trennen</button>` : html`<button class="btn sm" data-act="wallet">Wallet verbinden (lesend)</button>`}</div></div>`);
+    ${walletPanel()}`);
   drawCharts(sec);
 }
 
+/* Wallet-Panel (gekapselter Adapter): Provider, Status, Public Key, Netzwerk, Balance, Signatur-Workflow */
+function walletPanel() {
+  const w = core.state.wallet;
+  return html`<div class="panel"><h3 style="margin-top:0">Wallet (nur lesend · vorbereitet für später)</h3><p class="note">Nur Public Key, Netzwerk und SOL-Balance (per RPC verifiziert). Private Keys, Seed Phrases und Secret Keys werden nie abgefragt, gespeichert oder geloggt. Signieren ist deaktiviert.</p>
+    <div class="grid4">${kv('Status', w.status)}${kv('Provider', w.provider || '—')}${kv('Adresse', w.pubkey ? shortAddr(w.pubkey) : '—')}${kv('Netzwerk (RPC)', w.network || '—', w.network ? 'LIVE' : 'UNKNOWN')}${kv('Balance', w.balanceLamports != null ? lamportsToSol(BigInt(w.balanceLamports)) + ' SOL' : '—', w.balanceLamports != null ? 'LIVE' : 'UNKNOWN')}${kv('Stand', w.balanceAt ? fmtTime(w.balanceAt) : '—')}${kv('Signatur-Workflow', 'deaktiviert')}${kv('Live-Gating', core.liveReadiness().ready ? 'erfüllt' : 'nicht erfüllt')}</div>
+    ${w.error ? html`<p class="note bad">${w.error}</p>` : ''}
+    <div class="row" style="margin-top:8px">${w.status === 'CONNECTED' ? html`<button class="btn sm" data-act="walletBal">↻ Balance & Netzwerk</button><button class="btn sm bad" data-act="walletOff">Trennen</button>` : html`<button class="btn sm" data-act="wallet">Wallet verbinden (lesend)</button>`}<button class="btn sm" data-act="live">LIVE-Gating ansehen</button></div></div>`;
+}
 /* ---------- Alarm-Chat ---------- */
 function renderAlerts(sec) {
   const f = core.state.feed;
@@ -4186,29 +4572,48 @@ function renderAlerts(sec) {
       <div class="lk"><a href="#" data-act="select" data-id="${e.tokenId}">🔍 Details</a>${linkHtml([['DexScreener', LINKS.dexscreener(null, e.mint)], ['RugCheck', LINKS.rugcheck(e.mint)], ['Solscan', LINKS.solscanToken(e.mint)]])}</div>` : ''}</div>`) : html`<div class="empty">Noch keine Alarme. Sie erscheinen hier wie in einem Chat.</div>`}`);
 }
 
-/* ---------- Diagnose, Health, Metriken, Tests ---------- */
+/* ---------- Diagnose: Warum kauft der Bot nicht? (global vs. je Kandidat getrennt) ---------- */
+const CHECK_LABEL = { pass: 'OK', fail: 'BLOCK', warn: 'HINWEIS', info: 'INFO', na: 'N/A' };
+const checkRows = list => html`${list.map(x => html`<div class="check"><span class="ic ${x.status}">${CHECK_LABEL[x.status]}</span><div><b>${x.name}</b><small>${x.detail}</small></div></div>`)}`;
 function renderDiagnostics(sec) {
-  const st = core.state, d = core.diagnostics(), h = core.systemHealth(), now = Date.now(), perf = st.metrics.perf, c = st.metrics.counters;
+  const d = core.diagnostics(), rd = d.readiness, ms = masterStatus();
+  const rr = Object.entries(d.rejectReasons || {}).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  patch(sec, html`<h2>🩺 Diagnose – Warum kauft der Bot nicht?</h2>
+    <div class="panel"><div class="ctl-top"><span class="mstat ${ms.state}">${ms.text}</span><div class="ctl-why">${rd.reason}</div></div>
+      ${rd.hard.length ? html`<h3>Harte Blocker (global)</h3>${rd.hard.map(b => html`<div class="check"><span class="ic fail">P${b.prio}</span><div><b>${b.code}</b><small>${b.msg}</small></div></div>`)}` : ''}
+      ${rd.soft.length ? html`<h3>Hinweise (kein Block)</h3>${rd.soft.map(b => html`<div class="check"><span class="ic warn">INFO</span><div><b>${b.code}</b><small>${b.msg}</small></div></div>`)}` : ''}
+      <p class="note">READY = System gesund und Kandidat vorhanden · WAITING = System gesund, aktuell kein geeignetes Setup (kein Fehler) · BLOCKED = echte harte Sicherheits-/Systemblockade · ERROR = technischer Fehler · EMERGENCY STOP = Not-Aus. Niedriger Score, kein Konsens oder kein Kandidat lösen nie BLOCKED aus.</p></div>
+    <div class="grid2"><div class="panel"><h3 style="margin-top:0">System & Sicherheit (global)</h3>${checkRows(d.system)}</div>
+      <div><div class="panel"><h3 style="margin-top:0">Trading-Einstellungen</h3>${checkRows(d.trading)}</div><div class="panel"><h3 style="margin-top:0">Markt (informativ)</h3>${checkRows(d.market)}</div></div></div>
+    <div class="panel"><h3 style="margin-top:0">Kandidaten im Detail (je Token, kein globaler Block)</h3>
+      <p class="note">Je Stufe: PASS · Ablehnungsgrund · „—“ = nicht erreicht. Werte stehen klein daneben (Security, Liquidität, MCap, Volumen, Momentum, Risk, Score, Confidence, Konsens).</p>
+      ${d.chains.length ? d.chains.map(c => html`<div class="card" style="margin-bottom:8px;padding:10px"><div class="ch"><a href="#" data-act="select" data-id="${c.id}"><b>${c.symbol}</b></a>${decChip(c.chain.decision)}${scoreChip(c.score)}${c.chain.reason ? html`<span class="ag">${c.chain.reason}</span>` : ''}</div>
+        ${chainHtml(c.chain)}</div>`) : html`<div class="empty">Noch keine analysierten Kandidaten.</div>`}</div>
+    <div class="grid2"><div class="panel"><h3 style="margin-top:0">Candidate Pipeline (aktueller Scan)</h3>${PIPELINE.map((p, i) => { const n = d.funnel[p] || 0, first = d.funnel.DISCOVERY || 1; return html`<div class="meter"><span>${i + 1}. ${p.replace('_', ' ')}</span>${bar(n / first * 100, 'var(--pink)')}<span class="num r">${n}</span></div>`; })}</div>
+      <div class="panel"><h3 style="margin-top:0">Häufigste NO-TRADE-Gründe</h3>${rr.length ? html`<div class="tw"><table class="tbl">${rr.map(([c, n]) => html`<tr><td><span class="blk">${c}</span></td><td class="mut">${(BLOCKER_DEFS[c] || [])[2] || ''}</td><td class="r num">${n}</td></tr>`)}</table></div>` : html`<div class="empty">—</div>`}</div></div>
+    <p><button class="btn" data-act="view" data-view="system">🖥 System & API Health, Metriken, Selbsttest →</button></p>`);
+}
+/* ---------- System & API Health (tiefe Diagnose, Metriken, Tests) ---------- */
+function renderSystem(sec) {
+  const st = core.state, h = core.systemHealth(), now = Date.now(), perf = st.metrics.perf, c = st.metrics.counters;
   const names = core.http.names().map(n => core.http.snapshot(n));
   const closed = st.journal.filter(j => j.status === 'CLOSED' && j.result);
   const wr = closed.length ? closed.filter(j => j.result.win).length / closed.length : null;
   const selT = selTok();
-  patch(sec, html`<h2>🩺 Diagnose</h2>
-    <div class="panel"><b>${d.summary}</b></div>
-    <div class="grid2"><div class="panel"><h3 style="margin-top:0">Warum kauft der Bot nicht?</h3>${d.checks.map(x => html`<div class="check"><span class="ic ${x.status}">${x.status === 'pass' ? 'OK' : x.status === 'fail' ? 'BLOCK' : x.status === 'warn' ? 'HINWEIS' : 'N/A'}</span><div><b>${x.name}</b><small>${x.detail}</small></div></div>`)}</div>
-    <div><div class="panel"><h3 style="margin-top:0">Candidate Pipeline (aktueller Scan)</h3>${PIPELINE.map((p, i) => { const n = d.funnel[p] || 0, first = d.funnel.DISCOVERY || 1; return html`<div class="meter"><span>${i + 1}. ${p.replace('_', ' ')}</span>${bar(n / first * 100, 'var(--pink)')}<span class="num r">${n}</span></div>`; })}</div>
-    <div class="panel"><h3 style="margin-top:0">Top-Kandidaten & Blocker</h3>${d.top.length ? d.top.map(t => html`<div class="check"><span class="ic ${t.decision === 'APPROVED' ? 'pass' : t.decision === 'REJECTED' ? 'fail' : 'warn'}">${t.score}</span><div><a href="#" data-act="select" data-id="${t.id}"><b>${t.symbol}</b></a> ${decChip(t.decision)}<small>${t.blockers.map(b => b.code).join(' · ') || 'keine Blocker'}</small></div></div>`) : html`<div class="empty">Keine Kandidaten.</div>`}</div></div></div>
+  const optional = new Set(['gecko', 'rugcheck', 'dexDisc', 'dexSol']);
+  patch(sec, html`<h2>🖥 System & API Health</h2>
     <div class="grid2"><div class="panel"><h3 style="margin-top:0">Bot Health</h3>${core.botHealth().map(x => html`<div class="check"><span class="ic ${x.status === 'OK' ? 'pass' : x.status === 'DEGRADED' ? 'warn' : 'fail'}">${x.status}</span><div><b>${x.name}</b><small>${x.detail}</small></div></div>`)}</div>
     <div class="panel"><h3 style="margin-top:0">System Health ${h.score}/100</h3>${Object.entries(h.parts).map(([k, v]) => html`<div class="meter"><span>${k}</span>${bar(v == null ? 0 : v, v >= 80 ? 'var(--green)' : v >= 50 ? 'var(--yellow)' : 'var(--red)')}<span class="num r">${v == null ? '—' : v}</span></div>`)}
+      <p class="note">Zählt nur kritische Quellen (DexScreener Pairs, RPC, Datenfrische, Fehlerrate). Optionale Quellen (GeckoTerminal, RugCheck, Discovery) senken die Health nicht, werden unten aber als DEGRADED/OFFLINE angezeigt.</p>
       <h3>Network Health (Solana RPC)</h3><div class="grid2">${kv('Status', bestRpcStatus())}${kv('Slot', st.rpc.slot != null ? fmtNum(st.rpc.slot) : '—', st.rpc.slot ? (now - st.rpc.slotAt < 30000 ? 'LIVE' : 'STALE') : 'UNKNOWN')}${kv('Latenz', st.rpc.latency != null ? st.rpc.latency + ' ms' : '—')}${kv('Endpoint', st.rpc.endpoint || '—')}${kv('Slot-Fortschritt', st.rpc.prevSlot != null && st.rpc.slot != null ? '+' + (st.rpc.slot - st.rpc.prevSlot) : '—')}${kv('Verbindung', navigator.onLine ? 'online' : 'offline')}</div></div></div>
     <div class="panel tw"><h3 style="margin-top:0">API Health Center</h3><table class="tbl"><thead><tr><th>Quelle</th><th>Status</th><th class="r">Latenz</th><th>Letzter Erfolg</th><th>Letzter Fehler</th><th class="r">Fehlerrate</th><th class="r">Rate Limit</th><th>Backoff / Reset</th><th class="r">Datenalter</th><th>Letzte Meldung</th></tr></thead><tbody>
-      ${names.map(x => html`<tr><td>${x.label}</td><td class="st-${x.status}"><b>${x.status}</b></td><td class="r num">${x.latency != null ? Math.round(x.latency) + ' ms' : '—'}</td><td class="num">${x.lastSuccess ? fmtTime(x.lastSuccess) : '—'}</td><td class="num">${x.lastFailure ? fmtTime(x.lastFailure) : '—'}</td><td class="r num">${x.errorRate != null ? (x.errorRate * 100).toFixed(0) + '%' : '—'}</td><td class="r num">${x.used}/${x.limitPerMin}/min${x.rateLimited ? ' · ' + x.rateLimited + '× limitiert' : ''}</td><td class="num">${x.backoffUntil > now ? 'noch ' + fmtAge(x.backoffUntil - now) : x.resetAt ? fmtTime(x.resetAt) : '—'}</td><td class="r num">${x.dataAge != null ? fmtAge(x.dataAge) : '—'}</td><td class="mut">${x.lastError || ''}</td></tr>`)}
-    </tbody></table></div>
+      ${names.map(x => html`<tr><td>${x.label}${optional.has(x.name) ? html` <span class="chip">optional</span>` : ''}</td><td class="st-${x.status}"><b>${x.status}</b></td><td class="r num">${x.latency != null ? Math.round(x.latency) + ' ms' : '—'}</td><td class="num">${x.lastSuccess ? fmtTime(x.lastSuccess) : '—'}</td><td class="num">${x.lastFailure ? fmtTime(x.lastFailure) : '—'}</td><td class="r num">${x.errorRate != null ? (x.errorRate * 100).toFixed(0) + '%' : '—'}</td><td class="r num">${x.used}/${x.limitPerMin}/min${x.rateLimited ? ' · ' + x.rateLimited + '× limitiert' : ''}</td><td class="num">${x.backoffUntil > now ? 'noch ' + fmtAge(x.backoffUntil - now) : x.resetAt ? fmtTime(x.resetAt) : '—'}</td><td class="r num">${x.dataAge != null ? fmtAge(x.dataAge) : '—'}</td><td class="mut">${x.lastError || ''}</td></tr>`)}
+    </tbody></table><p class="note">SOL-Preis: ${st.sol ? fmtUsd(st.sol.usd) + ' · ' + fmtAge(now - st.sol.at) + ' alt · ' + (st.sol.derived ? 'abgeleitet aus ' + st.sol.n + ' SOL-Pools (priceUsd / priceNative)' : 'SOL/USDC-Pool') : 'unbekannt'}</p></div>
     <div class="grid2"><div class="panel"><h3 style="margin-top:0">API-Latenz (ms)</h3><div class="chartbox small"><canvas data-chart="apiLat"></canvas></div><h3>API-Fehlerrate (%)</h3><div class="chartbox small"><canvas data-chart="apiFail"></canvas></div></div>
     <div class="panel"><h3 style="margin-top:0">Scanner-Graph (Ø je Scan / Minute)</h3><div class="chartbox small"><canvas data-chart="scanner"></canvas></div>
       <h3>Metriken</h3><div class="grid3">${kv('Scans/s', (st.scanner.scansWindow.length / 10).toFixed(2))}${kv('Scans gesamt', c.scans)}${kv('Tokens gescannt', st.markets.size)}${kv('Kandidaten', (st.metrics.scanStats || {}).fastPass || 0)}${kv('Buy-Signale', c.buySignals)}${kv('Abgelehnt (Pre-Trade)', c.rejected)}${kv('Ausgeführt', c.executed)}${kv('Win Rate', wr != null ? (wr * 100).toFixed(0) + '%' : '—')}${kv('PnL realisiert', fmtSigned(st.portfolio.realized), 'SIMULATED')}${kv('Drawdown max', (st.portfolio.maxDD || 0).toFixed(2) + '%')}${kv('Offene Positionen', st.positions.length)}${kv('API-Fehler', c.apiErrors)}${kv('Verspätete Antworten verworfen', st.scanner.lateIgnored)}${kv('Übersprungene Scans', st.scanner.skipped)}${kv('Security-Queue', st.secQueue.length)}</div>
       <h3>Performance</h3><div class="grid3">${kv('Scan', perf.scan != null ? perf.scan + ' ms' : '—')}${kv('Analyse', perf.analysis != null ? perf.analysis + ' ms' : '—')}${kv('Decision/Exec', perf.exec != null ? perf.exec + ' ms' : '—')}${kv('Render', perf.render != null ? perf.render + ' ms' : '—')}${kv('API Ø', names.length ? Math.round(avg(names.map(x => x.latency).filter(isNum)) || 0) + ' ms' : '—')}${kv('Requests aktiv', core.http.inflightCount())}</div></div></div>
-    <div class="panel"><h3 style="margin-top:0">Selbsttest & Chaos-Tests</h3><p class="note">Laufen gegen isolierte Instanzen mit Mock-Netzwerk (Testdaten werden nie im Scanner angezeigt): Token-ID, Buy-Limit, Cooldowns, globale Pause, Duplicate Orders, Stale Data, API-Ausfall, fehlender Preis, Security Unknown, Kill Switch, Race Conditions, Rate Limits, Reload-Recovery, Timer.</p>
+    <div class="panel"><h3 style="margin-top:0">Selbsttest & Chaos-Tests</h3><p class="note">Laufen gegen isolierte Instanzen mit Mock-Netzwerk (Testdaten werden nie im Scanner angezeigt): normaler Scan, kein Kandidat, niedriger Score, kein Konsens, harter Block, API-/RPC-Ausfall, Stale Data, Duplicate Scan/Order, 2-Buy-Limit, Cooldown, Verlustserie, Emergency Stop, Reload-Recovery, Abgleich, Simulation und Live-Gating.</p>
       <button class="btn pri" data-act="runTests" ${UI.testsRunning ? raw('disabled') : ''}>${UI.testsRunning ? '⏳ läuft …' : '▶ Selbsttest starten'}</button>
       ${UI.tests ? html`<p><b class="${UI.tests.every(x => x.ok) ? 'ok' : 'bad'}">${UI.tests.filter(x => x.ok).length}/${UI.tests.length} bestanden</b></p>${UI.tests.map(x => html`<div class="check"><span class="ic ${x.ok ? 'pass' : 'fail'}">${x.ok ? 'PASS' : 'FAIL'}</span><div><b>[${x.group}] ${x.name}</b><small>${x.detail} · ${x.ms} ms</small></div></div>`)}` : ''}</div>
     ${core.S().debugMode ? html`<div class="panel"><h3 style="margin-top:0">Debug: Decision Trace ${selT ? '· ' + selT.symbol : ''}</h3>${selT && selT.D ? html`<pre class="raw">${JSON.stringify({ decision: selT.D.decision, blockers: selT.D.blockers, trace: selT.D.trace, components: selT.A.components, risk: selT.A.risk, confidence: selT.A.confidence }, null, 2)}</pre>` : html`<p class="mut">Token auswählen.</p>`}
@@ -4357,21 +4762,23 @@ function tabPlan(t) {
     ${pos ? html`<p class="note info">Offene Position: ${fmtUsd(pos.costUsd)} · Entry ${fmtPrice(pos.entryPrice)} · PnL ${isNum(pos.pnlUsd) ? fmtSigned(pos.pnlUsd) : 'n/v'}</p>` : ''}
     <h3>Blocker (manuell)</h3>${ex.blockers.length ? ex.blockers.map(b => html`<div class="check"><span class="ic fail">P${b.prio}</span><div><b>${b.code}</b><small>${b.msg}</small></div></div>`) : html`<p class="ok">Keine Ausführungs-Blocker für einen manuellen Sim-Kauf (harte Regeln werden beim Kauf erneut geprüft).</p>`}
     <h3>Blocker (Auto-Bot)</h3>${autoB.length ? autoB.slice(0, 8).map(b => html`<span class="blk p${b.prio}" title="${b.msg}">${b.code}</span>`) : html`<p class="ok">Keine – Token wäre für den Bot freigegeben.</p>`}
-    <div class="row" style="margin-top:10px"><button class="btn pri" data-act="buy" data-id="${t.id}">💱 Sim-Kauf vorbereiten</button></div>`;
+    <div class="row" style="margin-top:10px"><button class="btn pri" data-act="buy" data-id="${t.id}">💱 Sim-Kauf vorbereiten</button></div>
+    <h3>Live-Order-Precheck (Vorbereitung, derzeit nicht ausführbar)</h3>${core.preLiveChecks(t, sz && sz.size > 0 ? sz.size : 20).map(c => html`<div class="check"><span class="ic ${c.ok ? 'pass' : 'fail'}">${c.ok ? 'OK' : 'NEIN'}</span><div><b>${c.name}</b><small>${c.detail}</small></div></div>`)}
+    <p class="note">Vor einer echten Order müssten alle Punkte bestehen. Route/Provider fehlt → NO TRADE im Live-Modus. Simulation bleibt davon unberührt.</p>`;
 }
 function tabWhy(t) {
   const A = t.A, D = t.D; if (!A) return '';
   const facts = [['Preis', fmtPrice(A.core.price), A.labels.price], ['Market Cap', fmtUsd(A.core.mc), A.labels.price], ['Liquidität', fmtUsd(A.liq.usd), A.labels.liquidity], ['Volumen 1h', fmtUsd(A.vol.h1), A.labels.volume], ['Käufer 1h', A.tx.ratio1 != null ? (A.tx.ratio1 * 100).toFixed(0) + '%' : '—', A.labels.volume], ['Security', A.sec.status, A.labels.security], ['Pair-Alter', fmtAge(A.core.pairAge), A.core.pairAge != null ? 'LIVE' : 'UNKNOWN']];
   const risks = [...(t.sec ? t.sec.flags.map(f => f.msg) : []), ...A.pump.flags, ...A.vol.anomalies, ...A.conflicts.map(c => `Datenkonflikt ${c.field} (${c.diffPct.toFixed(1)} %)`), ...Object.entries(A.risk.factors).filter(([, v]) => v != null && v >= 60).map(([k, v]) => `${RISK_NAMES[k]} ${v}`)];
   const sentence = D.decision === 'APPROVED' ? `Der Bot würde ${t.symbol} kaufen: ${D.reason}.` : D.decision === 'BUY_CANDIDATE' ? `Die Analyse für ${t.symbol} ist positiv, aber die Ausführung ist blockiert: ${D.execBlockers.slice(0, 2).map(b => b.msg).join('; ')}.` : `Der Bot handelt ${t.symbol} nicht. Wichtigste Gründe: ${D.blockers.slice(0, 3).map(b => b.msg).join('; ')}.`;
-  return html`<div class="panel tight"><b>${sentence}</b><p class="note">Regelbasierte Erklärung aus gemessenen Daten – keine externe KI, keine erfundenen Werte.</p></div>
+  return html`<div class="panel tight"><b>${sentence}</b>${chainHtml(core.candidateChain(t))}<p class="note">Regelbasierte Erklärung aus gemessenen Daten – keine externe KI, keine erfundenen Werte. Dies ist eine Entscheidung für diesen Token, kein globaler Bot-Block.</p></div>
     <h3>Fakten</h3><table class="tbl">${facts.map(f => html`<tr><td>${f[0]}</td><td class="num">${f[1]}</td><td>${lbl(f[2])}</td></tr>`)}</table>
     <h3>Signale</h3>${A.signals.length ? A.signals.map(s => html`<span class="sig" title="${s.reason}">${SIGNAL_NAMES[s.type]} <i>${s.strength}</i></span>`) : html`<p class="mut">keine</p>`}
     <h3>Risiken</h3>${risks.length ? html`<ul class="list-plain">${risks.map(r => html`<li>${r}</li>`)}</ul>` : html`<p class="mut">Keine auffälligen Risiken gemessen (keine Garantie).</p>`}
     <h3>Unbekannt / nicht genug Daten</h3><ul class="list-plain">${A.unknowns.map(u => html`<li class="mut">${u}</li>`)}</ul>
     <h3>Blocker (nach Priorität)</h3>${D.blockers.length ? D.blockers.map(b => html`<div class="check"><span class="ic fail">P${b.prio}</span><div><b>${b.code}</b> <span class="chip">${b.cat}</span><small>${b.msg}</small></div></div>`) : html`<p class="ok">Keine Blocker.</p>`}
     <h3>Decision Trace</h3><ul class="trace">${D.trace.map(x => html`<li><span class="ic">${x.ok === true ? '✅' : x.ok === false ? '❌' : '·'}</span><b>${x.stage}</b><span>${x.detail}</span></li>`)}</ul>
-    <h3>Strategie-Stimmen</h3><table class="tbl"><tr><th>Strategie</th><th>Stimme</th><th class="r">Stärke</th><th class="r">Gewicht</th><th>Begründung</th></tr>${(A.strat ? A.strat.votes : []).map(v => html`<tr><td>${v.name}${v.shadow ? html` <span class="chip vio">Shadow</span>` : ''}</td><td class="${v.vote === 'BUY' ? 'ok' : 'mut'}">${v.vote}</td><td class="r num">${v.strength}</td><td class="r num">${v.weight}</td><td class="mut">${v.why || ''}${v.reasons.length ? ' – ' + v.reasons.join('; ') : ''}</td></tr>`)}</table>`;
+    <h3>Strategie-Stimmen</h3><div class="tw"><table class="tbl"><tr><th>Strategie</th><th>Stimme</th><th class="r">Stärke</th><th class="r">Gewicht</th><th>Begründung</th></tr>${(A.strat ? A.strat.votes : []).map(v => html`<tr><td>${v.name}${v.shadow ? html` <span class="chip vio">Shadow</span>` : ''}</td><td class="${v.vote === 'BUY' ? 'ok' : 'mut'}">${v.vote}</td><td class="r num">${v.strength}</td><td class="r num">${v.weight}</td><td class="mut">${v.why || ''}${v.reasons.length ? ' – ' + v.reasons.join('; ') : ''}</td></tr>`)}</table></div>`;
 }
 const TAB_RENDER = { overview: tabOverview, risk: tabRisk, plan: tabPlan, why: tabWhy };
 function emptyDetail() {
@@ -4547,7 +4954,7 @@ const CHARTS = {
 function drawCharts(root) { (root || document).querySelectorAll('canvas[data-chart]').forEach(cv => { const f = CHARTS[cv.dataset.chart]; if (f) { try { const [s, o] = f(); drawSeries(cv, s, o); } catch (e) { core.log.warn('UI', 'Chart-Fehler: ' + e.message); } } }); }
 
 /* ---------- Render-Steuerung (DOM Batching, nur geänderte Bereiche) ---------- */
-const VIEW_RENDER = { scanner: renderScanner, signals: renderSignals, markets: renderMarkets, watchlist: renderWatchlist, positions: renderPositions, orders: renderOrders, history: renderHistory, backtest: renderBacktest, analytics: renderAnalytics, risk: renderRisk, alerts: renderAlerts, diagnostics: renderDiagnostics, logs: renderLogs, settings: renderSettings, knowledge: renderKnowledge };
+const VIEW_RENDER = { system: renderSystem, scanner: renderScanner, signals: renderSignals, markets: renderMarkets, watchlist: renderWatchlist, positions: renderPositions, orders: renderOrders, history: renderHistory, backtest: renderBacktest, analytics: renderAnalytics, risk: renderRisk, alerts: renderAlerts, diagnostics: renderDiagnostics, logs: renderLogs, settings: renderSettings, knowledge: renderKnowledge };
 const STATIC_VIEWS = new Set(['settings', 'backtest', 'knowledge']);
 const LIVE_INPUTS = new Set(['q', 'hq', 'lq', 'kbq']);
 function renderView(force) {
@@ -4653,7 +5060,12 @@ async function openSell(posId, frac) {
 /* ---------- Aktionen (zentraler, einmalig registrierter Event-Handler) ---------- */
 const ACTIONS = {
   view: el => { const v = el.dataset.view; if (v === 'more') return ACTIONS.more(); showView(v, true); },
-  more: () => openModal({ title: 'Navigation', body: html`<div class="grid2">${VIEWS.map(([id, ic, n]) => html`<button class="btn" data-act="navgo" data-view="${id}">${ic} ${n}</button>`)}</div>` }),
+  more: () => {
+    const ms = masterStatus(), h = core.systemHealth(), dex = core.http.status('dexPairs');
+    return openModal({ title: 'Mehr', body: html`<div class="ctl-top"><span class="mstat ${ms.state}">${ms.text}</span><div class="ctl-why">${ms.why}</div></div>
+      <p class="note">Health ${h.score} · DexScreener ${dex} · RPC ${bestRpcStatus()} · RugCheck ${core.http.status('rugcheck')}</p>
+      ${NAV_GROUPS.map(([g, ids]) => html`<div class="navgrp"><h3>${g}</h3><div class="grid2">${ids.map(id => { const v = VIEWS.find(x => x[0] === id); return html`<button class="btn" data-act="navgo" data-view="${id}">${v[1]} ${v[2]}</button>`; })}</div></div>`)}` });
+  },
   navgo: el => { closeModal(null); showView(el.dataset.view, true); },
   select: el => { closeCtx(); if (el.dataset.id) selectToken(el.dataset.id); },
   star: el => { const id = el.dataset.id; closeCtx(); if (core.state.watchlist[id]) { core.removeWatch(id); toast('INFO', 'Von Watchlist entfernt'); } else { const r = core.addWatch(id); toast(r.ok ? 'SUCCESS' : 'ERROR', r.ok ? 'Zur Watchlist hinzugefügt ★' : r.error); } scheduleRender(true); },
@@ -4670,12 +5082,28 @@ const ACTIONS = {
   stop: async () => { if (core.state.positions.length && !(await confirmDialog('Bot stoppen?', `${core.state.positions.length} offene Position(en) werden bei gestopptem Bot nicht überwacht (keine Stops/TPs).`, { danger: true, confirmLabel: 'Stoppen' }))) return; core.stop(); toast('WARNING', 'Bot gestoppt', 'Scanner aus, Timer gelöscht, Requests abgebrochen'); scheduleRender(true); },
   safe: () => { core.setSafeMode(!core.state.bot.safeMode); toast('INFO', 'Safe Mode ' + (core.state.bot.safeMode ? 'AN' : 'AUS')); scheduleRender(true); },
   mode: el => { const r = core.setMode(el.dataset.mode); toast(r.ok ? 'INFO' : 'ERROR', r.ok ? 'Modus: ' + el.dataset.mode.replace('_', ' ') : r.error); scheduleRender(true); },
-  live: () => openModal({ title: 'LIVE-Modus nicht verfügbar', body: html`<p><b>REQUIRES EXTERNAL PROVIDER.</b> Echte Orders würden einen verifizierten Wallet-Adapter mit Signatur-Freigabe, einen Swap-/Routing-Provider, echte Transaktionsbestätigungen und Reconciliation benötigen.</p><p>Das ist in einer statischen HTML-Datei nicht sicher umsetzbar. Statt eine Funktion vorzutäuschen, bleibt LIVE deaktiviert. Private Keys oder Seeds werden nie verarbeitet.</p><p class="note">Nutze SIMULATION (Auto-Trading virtuell), PAPER (manuell virtuell) oder READ ONLY (nur Analyse).</p>` }).then(() => core.setMode('LIVE')),
+  live: async () => {
+    const lr = core.liveReadiness();
+    const r = await openModal({ title: 'LIVE-Gating', body: html`<p>LIVE muss separat und ausdrücklich aktiviert werden. <b>Auto-Trading bedeutet nie Echtgeldhandel.</b> Alle Voraussetzungen müssen erfüllt sein:</p>
+      ${lr.checks.map(c => html`<div class="check"><span class="ic ${c.ok ? 'pass' : 'fail'}">${c.ok ? 'OK' : 'FEHLT'}</span><div><b>${c.name}</b><small>${c.detail}</small></div></div>`)}
+      <p class="note">${lr.ready ? 'Alle Voraussetzungen erfüllt.' : 'LIVE ist derzeit nicht aktivierbar (REQUIRES EXTERNAL PROVIDER). Es wird keine Funktion vorgetäuscht. Private Keys oder Seeds werden nie verarbeitet.'}</p>
+      <label class="fld" style="margin-top:8px">Zur ausdrücklichen Bestätigung „LIVE“ eingeben<input id="liveConfirm" autocomplete="off" ${lr.ready ? '' : raw('disabled')}></label>`,
+      actions: [{ id: 'close', label: 'Schließen' }, { id: 'wallet', label: 'Wallet verbinden (lesend)' }, { id: 'go', label: 'LIVE aktivieren', cls: 'bad', disabled: !lr.ready }],
+      collect: () => (document.getElementById('liveConfirm') || {}).value });
+    if (r.id === 'wallet') { await ACTIONS.wallet(); return; }
+    if (r.id === 'go') { if ((r.data || '').trim() !== 'LIVE') { toast('WARNING', 'Nicht bestätigt'); return; } const res = core.setMode('LIVE'); toast(res.ok ? 'CRITICAL' : 'ERROR', res.ok ? 'LIVE aktiv' : res.error); }
+  },
+  walletModal: () => openModal({ title: 'Wallet', body: walletPanel() }),
+  reconcile: async () => {
+    const rc = core.state.reconciliation;
+    const r = await openModal({ title: 'Abgleich (Reconciliation)', body: html`<p>Nach dem Neustart wurden Punkte gefunden, die nicht eindeutig waren. Sie wurden konservativ aufgelöst (keine Füllung ohne Nachweis, Buy-Zähler nie gesenkt). Bitte prüfen und bestätigen – bis dahin sind neue Käufe blockiert, Exits laufen weiter.</p><ul class="list-plain">${rc.issues.map(x => html`<li>${x}</li>`)}</ul>`, actions: [{ id: 'close', label: 'Später' }, { id: 'ack', label: 'Geprüft – bestätigen', cls: 'pri' }] });
+    if (r.id === 'ack') { core.ackReconciliation(); toast('SUCCESS', 'Abgleich bestätigt'); scheduleRender(true); }
+  },
   auto: async () => {
     const b = core.state.bot;
     if (b.autoTrading) { core.setAutoTrading(false); toast('INFO', 'Auto-Trading AUS'); scheduleRender(true); return; }
     const S = core.S();
-    if (!(await confirmDialog('Auto-Trading aktivieren?', `Der Bot führt im Modus ${core.state.mode} virtuelle Trades mit echten Marktdaten aus.`, { confirmLabel: 'Aktivieren', extra: html`<ul class="list-plain"><li>Max. ${Math.min(S.maxBuysPerCoin, 2)} Käufe pro Coin, Nachkauf nur im Gewinn</li><li>Max. ${S.maxOpenPositions} Positionen, Exposure ≤ ${S.maxExposurePct} %, Position ≤ ${S.maxPositionPct} %</li><li>Cooldowns: ${S.sellCooldownMin} min nach Verkauf, ${S.lossCooldownMin} min nach Verlust, Pause nach ${S.lossStreakLimit} Verlusten</li><li>Tagesverlust-Limit ${S.dailyLossLimitPct} % → Auto-Trading aus</li></ul>` }))) return;
+    if (!(await confirmDialog('Auto-Trading aktivieren?', `Der Bot führt im Modus ${core.state.mode} virtuelle Trades mit echten Marktdaten aus. Auto-Trading bedeutet nie Echtgeldhandel – LIVE ist separat gesperrt.`, { confirmLabel: 'Aktivieren', extra: html`<ul class="list-plain"><li>Max. ${Math.min(S.maxBuysPerCoin, 2)} Käufe pro Coin, Nachkauf nur im Gewinn</li><li>Max. ${S.maxOpenPositions} Positionen, Exposure ≤ ${S.maxExposurePct} %, Position ≤ ${S.maxPositionPct} %</li><li>Cooldowns: ${S.sellCooldownMin} min nach Verkauf, ${S.lossCooldownMin} min nach Verlust, Pause nach ${S.lossStreakLimit} Verlusten</li><li>Tagesverlust-Limit ${S.dailyLossLimitPct} % → Auto-Trading aus</li></ul>` }))) return;
     const r = core.setAutoTrading(true); toast(r.ok ? 'SUCCESS' : 'ERROR', r.ok ? 'Auto-Trading AN (SIMULATION)' : r.error); scheduleRender(true);
   },
   estop: async () => {
@@ -4706,9 +5134,9 @@ const ACTIONS = {
   clearFeed: () => { core.clearFeed(); renderView(true); },
   logsPause: () => { UI.logPaused = !UI.logPaused; renderLogs(); },
   logCat: el => { UI.logCat = el.dataset.k; saveUi(); renderLogs(); },
-  wallet: async () => { const r = await core.walletConnect(); toast(r.ok ? 'SUCCESS' : 'WARNING', r.ok ? 'Wallet verbunden (nur lesend)' : 'Wallet nicht verbunden', r.error || ''); renderView(true); },
-  walletOff: () => { core.walletDisconnect(); renderView(true); },
-  walletBal: async () => { await core.walletBalance(); renderView(true); },
+  wallet: async () => { closeModal(null); const r = await core.walletConnect(); toast(r.ok ? 'SUCCESS' : 'WARNING', r.ok ? 'Wallet verbunden (nur lesend)' : 'Wallet nicht verbunden', r.error || ''); scheduleRender(true); renderView(true); },
+  walletOff: () => { core.walletDisconnect(); closeModal(null); renderView(true); scheduleRender(true); },
+  walletBal: async () => { await Promise.all([core.walletBalance(), core.walletNetwork()]); closeModal(null); renderView(true); scheduleRender(true); },
   ackReview: () => { core.state.risk.reviewRequired = false; core.persistNow(); renderView(true); renderBanner(); },
   wlAdd: () => { const i = document.getElementById('wlAdd'); const v = i ? i.value.trim() : ''; const r = core.addWatch(v); toast(r.ok ? 'SUCCESS' : 'ERROR', r.ok ? 'Zur Watchlist hinzugefügt' : r.error); if (r.ok) renderView(true); },
   wlRemove: el => { core.removeWatch(el.dataset.id); renderView(true); }
@@ -4759,6 +5187,7 @@ document.addEventListener('change', e => {
   if (el.id === 'fAge') { UI.age = el.value; saveUi(); renderScanner(); }
   if (el.id === 'fRec') { UI.onlyRec = el.checked; saveUi(); renderScanner(); }
   if (el.id === 'fSafe') { UI.safeOnly = el.checked; saveUi(); renderScanner(); }
+  if (el.id === 'fRec' || el.id === 'fSafe') { const lb = el.closest('label'); if (lb) lb.setAttribute('aria-checked', String(el.checked)); }
   if (el.id === 'hMode' || el.id === 'hRes') { UI[el.id] = el.value; renderHistory(); }
 });
 let inputTimer = null;
@@ -4811,7 +5240,8 @@ function boot() {
   showView(UI.view);
   renderAll(true);
   setInterval(() => { renderTop(); if (UI.view === 'risk' || UI.view === 'positions') renderNav(); }, 1000);
-  if (core.state.loadInfo.migrated) toast('INFO', 'Daten aus Version 1 übernommen', 'Einstellungen, Watchlist und Alarme wurden migriert');
+  if (core.state.loadInfo.migrated) toast('INFO', `Daten aus Version ${core.state.loadInfo.migrated} übernommen`, 'Einstellungen, Watchlist, Positionen und Alarme wurden migriert');
+  if (core.state.reconciliation.required) toast('WARNING', 'Abgleich erforderlich', 'Neue Käufe blockiert, bis der Abgleich bestätigt ist');
   if (core.state.loadInfo.corrupted) toast('WARNING', 'Gespeicherter Zustand war beschädigt', 'Start mit sicheren Defaults');
   core.log.info('UI', 'UI initialisiert');
 }
