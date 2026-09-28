@@ -479,9 +479,9 @@ const MIN_ORDER_USD = 5;
 const HARD_LIMITS = Object.freeze({
   MAX_BUYS_PER_COIN: 2,
   MIN_SELL_COOLDOWN_MIN: 15,
-  MIN_LOSS_COOLDOWN_MIN: 10,
+  MIN_LOSS_COOLDOWN_MIN: 0,
   MAX_LOSS_STREAK_LIMIT: 3,
-  MIN_GLOBAL_PAUSE_MIN: 5,
+  MIN_GLOBAL_PAUSE_MIN: 0,
   MIN_TRADES_FOR_TUNING: 20,
   MAX_EXPOSURE_PCT: 50,
   MAX_POSITION_PCT: 20
@@ -726,9 +726,9 @@ const SETTINGS_SCHEMA = [
   { k: 'requireVerifiedSecurity', s: 'Risiko', l: 'Nur VERIFIED Security (RPC + RugCheck)', t: 'bool', def: false },
   { k: 'maxBuysPerCoin', s: 'Risiko', l: 'Max. Käufe pro Coin', t: 'int', def: 2, min: 1, max: HARD_LIMITS.MAX_BUYS_PER_COIN, hard: true },
   { k: 'sellCooldownMin', s: 'Risiko', l: 'Coin-Cooldown nach Verkauf', t: 'int', def: 15, min: HARD_LIMITS.MIN_SELL_COOLDOWN_MIN, max: 1440, u: 'min', hard: true },
-  { k: 'lossCooldownMin', s: 'Risiko', l: 'Loss-Cooldown (global) nach Verlust', t: 'int', def: 10, min: HARD_LIMITS.MIN_LOSS_COOLDOWN_MIN, max: 1440, u: 'min', hard: true },
+  { k: 'lossCooldownMin', s: 'Risiko', l: 'Loss-Cooldown (global) nach Verlust', t: 'int', def: 0, min: HARD_LIMITS.MIN_LOSS_COOLDOWN_MIN, max: 1440, u: 'min', hard: true },
   { k: 'lossStreakLimit', s: 'Risiko', l: 'Verlustserie bis globale Pause', t: 'int', def: 3, min: 1, max: HARD_LIMITS.MAX_LOSS_STREAK_LIMIT, hard: true },
-  { k: 'globalPauseMin', s: 'Risiko', l: 'Globale Pause nach Verlustserie', t: 'int', def: 5, min: HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN, max: 1440, u: 'min', hard: true },
+  { k: 'globalPauseMin', s: 'Risiko', l: 'Globale Pause nach Verlustserie', t: 'int', def: 0, min: HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN, max: 1440, u: 'min', hard: true },
   { k: 'maxTradesPerHour', s: 'Risiko', l: 'Overtrading-Limit (Käufe/Stunde)', t: 'int', def: 6, min: 1, max: 30 },
   { k: 'correlationLimit', s: 'Risiko', l: 'Korrelations-Grenze (Konzentration)', t: 'num', def: 0.85, min: 0.5, max: 1, step: 0.01 },
   { k: 'consensusMinWeight', s: 'Risiko', l: 'Min. Strategie-Konsens (Summe Gewichte)', t: 'num', def: 1.5, min: 0.5, max: 5, step: 0.1 },
@@ -3606,21 +3606,19 @@ const SELF_TESTS = [
     const r2 = await core.executeBuy(t.id, { sizeUsd: 20 }); assert(!codes(r2).includes('COOLDOWN_ACTIVE'), 'Cooldown nach 15 min noch aktiv');
     return 'Cooldown aktiv direkt nach Verkauf, frei nach 15 min';
   }],
-  ['Trading', 'Loss-Cooldown & globale Pause nach 3 Verlusten', async () => {
+  ['Trading', 'Loss-Cooldown & globale Pause deaktiviert (Wartezeit 0)', async () => {
+    assert(HARD_LIMITS.MIN_LOSS_COOLDOWN_MIN === 0 && HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN === 0, 'Cooldown-Grenzen nicht auf 0 gesetzt');
     const H = makeTestHarness(); const core = await testCore(H);
     for (let i = 1; i <= 3; i++) {
       const t = await prepToken(core, H, i);
       const b = await core.executeBuy(t.id, { sizeUsd: 20 }); assert(b.ok, `Buy ${i} fehlgeschlagen: ` + codes(b).join(','));
       const s = await core.executeSell(core.state.positions[0].id, 'ALL', 'MANUAL'); assert(s.ok, 'Sell fehlgeschlagen');
-      if (i < 3) { const blocked = await core.executeBuy((await prepToken(core, H, 7)).id, { sizeUsd: 20 }); assert(codes(blocked).includes('LOSS_COOLDOWN'), 'Loss-Cooldown fehlt'); H.env.advance(10 * MIN + SEC); await core._t.updateSolPrice(true); }
+      if (i < 3) { const probe = await core.executeBuy((await prepToken(core, H, 7)).id, { sizeUsd: 20 }); assert(!codes(probe).includes('LOSS_COOLDOWN'), 'Loss-Cooldown blockiert trotz Wartezeit 0: ' + codes(probe).join(',')); }
     }
     assert(core.state.risk.lossStreak === 3, 'Verlustserie ' + core.state.risk.lossStreak);
     const t8 = await prepToken(core, H, 8);
-    assert(codes(await core.executeBuy(t8.id, { sizeUsd: 20 })).includes('GLOBAL_PAUSE'), 'globale Pause fehlt');
-    H.env.advance(5 * MIN + SEC); await core._t.updateSolPrice(true); await core._t.fetchChunk([t8.mint], true); t8.sec = await core._t.checkSecurity(t8.mint);
-    const after = await core.executeBuy(t8.id, { sizeUsd: 20 });
-    assert(!codes(after).includes('GLOBAL_PAUSE') && codes(after).includes('LOSS_COOLDOWN'), 'Pause/Loss-Cooldown-Zeiten falsch: ' + codes(after).join(','));
-    return '3 Verluste → GLOBAL_PAUSE 5 min, Loss-Cooldown 10 min';
+    assert(!codes(await core.executeBuy(t8.id, { sizeUsd: 20 })).includes('GLOBAL_PAUSE'), 'globale Pause blockiert trotz Wartezeit 0');
+    return '3 Verluste gezählt · Loss-Cooldown/Global-Pause blockieren mit Wartezeit 0 nicht mehr';
   }],
   ['Trading', 'Duplicate Order Protection (Doppelklick, parallele Signale)', async () => {
     const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1);
