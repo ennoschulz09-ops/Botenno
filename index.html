@@ -223,6 +223,20 @@ small{font-size:11px}
 .ctx{position:fixed;z-index:65;background:var(--panel2);border:1px solid var(--line2);border-radius:12px;padding:6px;min-width:220px;box-shadow:0 14px 40px #000c}
 .ctx[hidden]{display:none}
 .ctx button,.ctx a{display:block;width:100%;text-align:left;padding:8px 10px;border-radius:8px;font-size:13px;color:var(--text)}
+
+/* ---------- Login-Gate ---------- */
+.login-gate{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px;background:radial-gradient(700px 420px at 5% -5%,#5b2a9040,transparent),radial-gradient(700px 520px at 100% 20%,#1e3a8a30,transparent),var(--bg)}
+body.authed .login-gate{display:none}
+body:not(.authed) #topbar,body:not(.authed) #banner,body:not(.authed) .layout,body:not(.authed) #backdrop,body:not(.authed) #bottomnav,body:not(.authed) #toasts,body:not(.authed) #modal,body:not(.authed) #ctx,body:not(.authed) .skip{display:none!important}
+.login-card{background:var(--panel);border:1px solid var(--line2);border-radius:18px;padding:28px 24px;width:min(94vw,380px);box-shadow:0 20px 60px #000c;display:flex;flex-direction:column;gap:4px}
+.login-card h2{margin:0 0 2px;font-size:19px;background:linear-gradient(90deg,#60a5fa,#a78bfa,#f472b6);-webkit-background-clip:text;background-clip:text;color:transparent}
+.login-card .note{margin:0 0 14px}
+.login-card label{font-size:12px;color:var(--muted);margin:8px 0 4px;display:block}
+.login-card input{width:100%}
+.login-submit{width:100%;margin-top:16px;padding:11px 12px;font-size:14px}
+.login-err{color:var(--red);font-size:12px;margin:8px 0 0;min-height:14px}
+.who{flex:none;display:inline-flex;align-items:center;gap:8px}
+.who .lo{color:var(--cyan);font-size:11px;text-decoration:underline}
 .ctx button:hover,.ctx a:hover{background:#ffffff10;text-decoration:none}
 .ctx hr{border:0;border-top:1px solid var(--line2);margin:4px 0}
 
@@ -342,10 +356,23 @@ pre.raw{white-space:pre-wrap;word-break:break-all;font:11px/1.4 var(--mono);back
 </style>
 </head>
 <body>
+<div class="login-gate" id="loginGate" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+  <form class="login-card" id="loginForm" novalidate autocomplete="off">
+    <h2 id="loginTitle">Smart Lab Anmeldung</h2>
+    <p class="note">Bitte melde dich an, um den Bot zu öffnen.</p>
+    <label for="loginUser">Anmeldename</label>
+    <input type="text" id="loginUser" name="username" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" required aria-required="true">
+    <label for="loginPass">Passwort</label>
+    <input type="password" id="loginPass" name="password" autocomplete="current-password" required aria-required="true">
+    <p class="login-err" id="loginErr" role="alert" aria-live="assertive" hidden></p>
+    <button type="submit" class="btn pri login-submit">Anmelden</button>
+  </form>
+</div>
 <a class="skip" href="#center">Zum Inhalt springen</a>
 <header class="topbar" id="topbar">
   <div class="brand"><h1>Smart Lab</h1><span class="ver" id="verBanner" title="Versionen">v–</span></div>
   <div class="pills" id="tbPills" aria-live="polite"></div>
+  <div class="who pill ok" id="whoami" hidden>Angemeldet: <b>Enno</b><button type="button" class="lo" id="btnLogout">Logout</button></div>
   <button class="estop" id="btnEstop" data-act="estop" aria-label="Emergency Stop: alle neuen Käufe sofort blockieren">⛔ EMERGENCY STOP</button>
 </header>
 <div id="banner" class="banner" role="status" hidden></div>
@@ -5227,8 +5254,11 @@ window.addEventListener('unhandledrejection', e => { core.log.error('UI', 'Unbeh
 window.addEventListener('pagehide', () => { try { core.persistNow(); } catch (e) { /* */ } });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { try { core.persistNow(); } catch (e) { /* */ } } else scheduleRender(true); });
 
-/* ---------- Bootstrap (System Initialization) ---------- */
-function boot() {
+/* ---------- App-Start (läuft erst nach erfolgreichem Login) ---------- */
+let appStarted = false;
+function startApp() {
+  if (appStarted) return;
+  appStarted = true;
   core.init({ autoStart: true });
   loadUi();
   buildNav(); buildControl(); buildTiles();
@@ -5244,6 +5274,74 @@ function boot() {
   if (core.state.reconciliation.required) toast('WARNING', 'Abgleich erforderlich', 'Neue Käufe blockiert, bis der Abgleich bestätigt ist');
   if (core.state.loadInfo.corrupted) toast('WARNING', 'Gespeicherter Zustand war beschädigt', 'Start mit sicheren Defaults');
   core.log.info('UI', 'UI initialisiert');
+}
+
+/* ---------- Login-Gate ----------
+   Rein clientseitige Zugriffssperre für diese lokale Anwendung – kein Ersatz für eine
+   echte Server-Authentifizierung: Wer den Quelltext oder die Browser-Konsole einsehen
+   kann, kann diese Sperre technisch umgehen (z. B. JS patchen). Für produktive
+   Hochsicherheit wäre ein Backend mit serverseitiger Prüfung nötig.
+   Damit die Zugangsdaten trotzdem nicht im Klartext im Quelltext/Git-Verlauf stehen,
+   wird nur ein SHA-256-Hash von "Kontext:Benutzername:Passwort" hinterlegt und beim
+   Login-Versuch derselbe Hash über die Web Crypto API berechnet und verglichen – das
+   Passwort selbst wird nie gespeichert. Der authentifizierte Zustand lebt nur im
+   Arbeitsspeicher (kein localStorage) – ein Reload verlangt daher immer erneut den
+   Login, bevor Scanner/Bot initialisiert werden. */
+const AUTH_HASH_CTX = 'smartlab-login-v1:';
+const AUTH_HASH = '5298afe5df9d0982e4be65ef596f85c566c371522d90465b6a028b87809ab774';
+let authed = false;
+
+async function sha256Hex(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function attemptLogin(user, pass) {
+  const errEl = document.getElementById('loginErr');
+  const passEl = document.getElementById('loginPass');
+  const submitBtn = document.querySelector('#loginForm button[type=submit]');
+  const fail = msg => {
+    if (errEl) { errEl.textContent = msg; errEl.hidden = false; }
+    if (passEl) { passEl.value = ''; passEl.focus(); }
+    return false;
+  };
+  if (!user || !pass) return fail('Anmeldename oder Passwort ist falsch.');
+  if (!(window.crypto && window.crypto.subtle)) return fail('Login in dieser Umgebung nicht möglich (kein sicherer Kontext für Web Crypto). Bitte über https oder lokal per file:// öffnen.');
+  if (submitBtn) submitBtn.disabled = true;
+  let hash;
+  try { hash = await sha256Hex(AUTH_HASH_CTX + user + ':' + pass); }
+  finally { if (submitBtn) submitBtn.disabled = false; }
+  if (hash !== AUTH_HASH) return fail('Anmeldename oder Passwort ist falsch.');
+  if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
+  if (passEl) passEl.value = '';
+  authed = true;
+  document.body.classList.add('authed');
+  const who = document.getElementById('whoami'); if (who) who.hidden = false;
+  startApp();
+  return true;
+}
+
+function doLogout() {
+  if (!authed) return;
+  authed = false;
+  document.body.classList.remove('authed');
+  const who = document.getElementById('whoami'); if (who) who.hidden = true;
+  const userEl = document.getElementById('loginUser'), passEl = document.getElementById('loginPass'), errEl = document.getElementById('loginErr');
+  if (passEl) passEl.value = '';
+  if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
+  if (userEl) userEl.focus();
+}
+
+function boot() {
+  const form = document.getElementById('loginForm');
+  if (form) form.addEventListener('submit', e => {
+    e.preventDefault();
+    attemptLogin(document.getElementById('loginUser').value, document.getElementById('loginPass').value);
+  });
+  const logoutBtn = document.getElementById('btnLogout');
+  if (logoutBtn) logoutBtn.addEventListener('click', doLogout);
+  const userEl = document.getElementById('loginUser');
+  if (userEl) userEl.focus();
 }
 boot();
 })();
