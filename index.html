@@ -146,7 +146,7 @@ small{font-size:11px}
 .hot{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}
 .hc{background:linear-gradient(160deg,#1a1a3d,#132544);border:1px solid var(--line2);border-radius:16px;padding:10px 12px;cursor:pointer;min-width:0}
 .hc b{font-size:15px}.hc small{color:var(--muted)}
-.mhead,.mrow{display:grid;grid-template-columns:28px minmax(120px,1.5fr) 96px 58px 58px 70px 70px 76px 52px 90px 50px 48px 104px 64px 28px;gap:6px;align-items:center;padding:7px 8px}
+.mhead,.mrow{display:grid;grid-template-columns:28px minmax(120px,1.5fr) 96px 78px 58px 58px 70px 70px 76px 52px 90px 50px 48px 104px 64px 28px;gap:6px;align-items:center;padding:7px 8px}
 .mwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .mhead{font-size:11px;color:var(--muted);border-bottom:1px solid var(--line2);background:#0a0f1df0}
 .mhead button{color:var(--muted);font-size:11px;text-align:inherit}.mhead button.on{color:var(--text)}
@@ -235,6 +235,16 @@ body:not(.authed) #topbar,body:not(.authed) #banner,body:not(.authed) .layout,bo
 .login-card input{width:100%}
 .login-submit{width:100%;margin-top:16px;padding:11px 12px;font-size:14px}
 .login-err{color:var(--red);font-size:12px;margin:8px 0 0;min-height:14px}
+/* ---------- Einfache Ansicht vs. Analyse-Daten ---------- */
+body:not(.pro) .an{display:none!important}
+.px{font-family:var(--mono)}.mcv{color:var(--violet);font-family:var(--mono);white-space:nowrap}
+.pxmc{display:flex;flex-direction:column;gap:1px}.pxmc .mcv{font-size:.86em}.px .pl{font:500 .74em system-ui,sans-serif;color:var(--muted)}
+@media (min-width:901px){body:not(.pro) .mhead,body:not(.pro) .mrow{grid-template-columns:28px minmax(110px,1.5fr) 100px 84px 58px 58px 96px 50px 104px 28px}}
+@media (max-width:900px){body:not(.pro) .mrow .cal{grid-template-columns:2fr 1.45fr 1fr 1fr .9fr}}
+@media (max-width:700px){body:not(.pro) .ov>:last-child{grid-column:span 2}}
+body:not(.pro) .ov{grid-template-columns:repeat(5,minmax(0,1fr))}
+@media (max-width:1100px){body:not(.pro) .ov{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:700px){body:not(.pro) .ov{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .who{flex:none;display:inline-flex;align-items:center;gap:8px}
 .who .lo{color:var(--cyan);font-size:11px;text-decoration:underline}
 .ctx button:hover,.ctx a:hover{background:#ffffff10;text-decoration:none}
@@ -255,9 +265,9 @@ pre.raw{white-space:pre-wrap;word-break:break-all;font:11px/1.4 var(--mono);back
 .kb{border-bottom:1px solid #ffffff10;padding:10px 0}.kb b{display:block}.kb p{margin:4px 0 0;color:var(--muted);font-size:13px}
 
 /* ---------- Responsive ---------- */
-@media (max-width:1859px){.mhead,.mrow{grid-template-columns:28px minmax(110px,1.5fr) 92px 54px 54px 68px 68px 90px 46px 46px 96px 28px}.c-bs,.c-spark,.c-mom{display:none!important}}
+@media (max-width:1859px){.mhead,.mrow{grid-template-columns:28px minmax(110px,1.5fr) 92px 74px 54px 54px 68px 68px 90px 46px 46px 96px 28px}.c-bs,.c-spark,.c-mom{display:none!important}}
 @media (max-width:1599px){.layout{grid-template-columns:64px minmax(0,1fr) var(--detail)}.sidebar{padding:10px 6px}.sidebar button span,.sidebar .cnt,.sidefoot{display:none}.sidebar button{justify-content:center;padding:10px 0}}
-@media (max-width:1280px){:root{--detail:360px}.mhead,.mrow{grid-template-columns:28px minmax(100px,1.5fr) 92px 54px 54px 68px 90px 46px 46px 96px 28px}.c-vol{display:none!important}}
+@media (max-width:1280px){:root{--detail:360px}.mhead,.mrow{grid-template-columns:28px minmax(100px,1.5fr) 92px 74px 54px 54px 68px 90px 46px 46px 96px 28px}.c-vol{display:none!important}}
 @media (max-width:1100px){
   .layout{grid-template-columns:64px minmax(0,1fr)}
   .sidebar{padding:10px 6px}.sidebar button span,.sidebar .cnt,.sidefoot{display:none}.sidebar button{justify-content:center;padding:10px 0}
@@ -582,6 +592,21 @@ function fmtUsd(n, d = 2) {
   if (a >= 1e4) return s + '$' + (a / 1e3).toFixed(1) + 'K';
   return s + '$' + a.toFixed(d);
 }
+/* Market Cap immer mit „MC“ gekennzeichnet (38k MC, 1.2M MC, 5B MC) – nie mit dem Coin-Preis verwechselbar. */
+function fmtMc(n) {
+  if (!isNum(n) || n <= 0) return '—';
+  const U = [[1, ''], [1e3, 'k'], [1e6, 'M'], [1e9, 'B'], [1e12, 'T']];
+  let i = U.length - 1; while (i > 0 && n < U[i][0]) i--;
+  const fmt = v => (v < 10 && i > 0 ? String(Math.round(v * 10) / 10) : String(Math.round(v)));
+  let s = fmt(n / U[i][0]);
+  if (+s >= 1000 && i < U.length - 1) { i++; s = fmt(n / U[i][0]); }
+  return s + U[i][1] + ' MC';
+}
+/* Text-Ausgabe (Logs, Alarme): „Coin-Preis $0.0₄123 · 38k MC“ – MC über das aktuelle MC/Preis-Verhältnis. */
+function pxMcTxt(A, price) {
+  const r = A && isNum(A.core.mc) && isNum(A.core.price) && A.core.price > 0 ? A.core.mc / A.core.price : null;
+  return 'Coin-Preis ' + fmtPrice(price) + (r != null && isNum(price) && price > 0 ? ' · ' + fmtMc(price * r) : '');
+}
 const fmtSigned = (n, f = fmtUsd) => (!isNum(n) ? '—' : (n > 0 ? '+' : '') + f(n));
 function fmtPct(v, d = 1) { return isNum(v) ? (v > 0 ? '+' : '') + v.toFixed(d) + '%' : '—'; }
 function fmtNum(v, d = 0) { return isNum(v) ? v.toLocaleString('de-DE', { maximumFractionDigits: d, minimumFractionDigits: d }) : '—'; }
@@ -709,8 +734,8 @@ const SETTINGS_SCHEMA = [
   // Filter
   { k: 'minLiq', s: 'Filter', l: 'Min. Liquidität', t: 'num', def: 10000, min: 0, max: 1e9, u: '$' },
   { k: 'minVol1h', s: 'Filter', l: 'Min. Volumen 1h', t: 'num', def: 20000, min: 0, max: 1e10, u: '$' },
-  { k: 'minMcap', s: 'Filter', l: 'Min. Market Cap', t: 'num', def: 50000, min: 0, max: 1e11, u: '$' },
-  { k: 'maxMcap', s: 'Filter', l: 'Max. Market Cap', t: 'num', def: 5000000, min: 1000, max: 1e12, u: '$' },
+  { k: 'minMcap', s: 'Filter', l: 'Min. MC (Market Cap)', t: 'num', def: 50000, min: 0, max: 1e11, u: '$' },
+  { k: 'maxMcap', s: 'Filter', l: 'Max. MC (Market Cap)', t: 'num', def: 5000000, min: 1000, max: 1e12, u: '$' },
   { k: 'minBuyRatio', s: 'Filter', l: 'Min. Käuferanteil 1h (0–1)', t: 'num', def: 0.55, min: 0, max: 1, step: 0.01 },
   { k: 'minScore', s: 'Filter', l: 'Min. Final Score', t: 'int', def: 65, min: 40, max: 100 },
   { k: 'minPairAgeMin', s: 'Filter', l: 'Min. Pair-Alter für Auto-Buys', t: 'int', def: 10, min: 0, max: 10080, u: 'min' },
@@ -819,7 +844,7 @@ function validateSettings(input, base) {
     }
   }
   const revert = (keys, msg) => { keys.forEach(k => { out[k] = (base || defaultSettings())[k]; }); errors.push({ key: keys[0], msg }); };
-  if (out.minMcap > out.maxMcap) revert(['minMcap', 'maxMcap'], 'Min. Market Cap muss ≤ Max. Market Cap sein');
+  if (out.minMcap > out.maxMcap) revert(['minMcap', 'maxMcap'], 'Min. MC (Market Cap) muss ≤ Max. MC (Market Cap) sein');
   if (!(out.tp1Pct < out.tp2Pct && out.tp2Pct < out.tp3Pct)) revert(['tp1Pct', 'tp2Pct', 'tp3Pct'], 'Take Profits müssen aufsteigend sein (TP1 < TP2 < TP3)');
   if (out.tp1Frac + out.tp2Frac > 1) revert(['tp1Frac', 'tp2Frac'], 'TP1- + TP2-Anteil darf 100 % nicht überschreiten');
   if (out.maxPositionPct > out.maxExposurePct) revert(['maxPositionPct'], 'Max. Positionsgröße darf Max. Exposure nicht überschreiten');
@@ -1299,7 +1324,7 @@ const BLOCKER_DEFS = {
   RISK_TOO_HIGH: [3, 'SECURITY', 'Risiko zu hoch'],
   PUMP_DETECTED: [3, 'SECURITY', 'Pump/Manipulation erkannt'],
   LOW_LIQUIDITY: [3, 'SECURITY', 'Liquidität zu niedrig'],
-  THIN_LIQUIDITY: [3, 'SECURITY', 'Liquidität im Verhältnis zur MCap zu dünn'],
+  THIN_LIQUIDITY: [3, 'SECURITY', 'Liquidität im Verhältnis zur MC zu dünn'],
   LIQUIDITY_SHOCK: [3, 'SECURITY', 'Liquiditätsabfluss'],
   DAILY_LOSS_LIMIT: [4, 'PORTFOLIO', 'Tagesverlust-Limit erreicht'],
   EXPOSURE_LIMIT: [4, 'PORTFOLIO', 'Max. Exposure erreicht'],
@@ -1318,7 +1343,7 @@ const BLOCKER_DEFS = {
   SLIPPAGE_TOO_HIGH: [7, 'EXECUTION', 'Slippage/Price Impact zu hoch'],
   SIZE_ZERO: [7, 'EXECUTION', 'Positionsgröße 0'],
   INSUFFICIENT_CASH: [7, 'EXECUTION', 'Nicht genug (virtuelles) Kapital'],
-  MCAP_RANGE: [8, 'STRATEGY', 'Market Cap außerhalb Bereich'],
+  MCAP_RANGE: [8, 'STRATEGY', 'MC (Market Cap) außerhalb Bereich'],
   LOW_VOLUME: [8, 'STRATEGY', 'Volumen zu niedrig'],
   BUYER_RATIO: [8, 'STRATEGY', 'Käuferanteil zu niedrig'],
   PAIR_TOO_NEW: [8, 'STRATEGY', 'Pair zu neu / Alter unbekannt'],
@@ -1634,16 +1659,16 @@ function decideToken(tok, A, ctx) {
   const basicOk = stageRun('BASIC_FILTER', add => {
     if (!isNum(A.core.price)) add('PRICE_MISSING', 'Kein gültiger Preis vorhanden');
     if (A.stale) add('DATA_STALE', `Marktdaten veraltet (${A.dataAge == null ? 'keine' : fmtAge(A.dataAge)})`);
-    if (!isNum(A.core.mc)) add('MCAP_RANGE', 'Market Cap unbekannt');
-    else if (A.core.mc < S.minMcap || A.core.mc > S.maxMcap) add('MCAP_RANGE', `MCap ${fmtUsd(A.core.mc)} außerhalb ${fmtUsd(S.minMcap)}–${fmtUsd(S.maxMcap)}`);
+    if (!isNum(A.core.mc)) add('MCAP_RANGE', 'MC (Market Cap) unbekannt');
+    else if (A.core.mc < S.minMcap || A.core.mc > S.maxMcap) add('MCAP_RANGE', `${fmtMc(A.core.mc)} außerhalb ${fmtMc(S.minMcap)} bis ${fmtMc(S.maxMcap)}`);
     if (!isNum(A.vol.h1) || A.vol.h1 < S.minVol1h) add('LOW_VOLUME', `Vol 1h ${fmtUsd(A.vol.h1)} < ${fmtUsd(S.minVol1h)}`);
     if (A.tx.ratio1 == null || A.tx.ratio1 < S.minBuyRatio) add('BUYER_RATIO', `Käufer 1h ${A.tx.ratio1 == null ? '—' : (A.tx.ratio1 * 100).toFixed(0) + ' %'} < ${(S.minBuyRatio * 100).toFixed(0)} %`);
     if (S.minPairAgeMin > 0 && (A.core.pairAge == null || A.core.pairAge < S.minPairAgeMin * MIN)) add('PAIR_TOO_NEW', A.core.pairAge == null ? 'Pair-Alter unbekannt' : `Pair erst ${fmtAge(A.core.pairAge)} alt (< ${S.minPairAgeMin} min)`);
-    return 'Preis, Frische, MCap, Volumen, Käuferanteil ok';
+    return 'Coin-Preis, Frische, MC, Volumen, Käuferanteil ok';
   });
   const liqOk = stageRun('LIQUIDITY_FILTER', add => {
     if (!isNum(A.liq.usd) || A.liq.usd < S.minLiq) add('LOW_LIQUIDITY', `Liquidität ${fmtUsd(A.liq.usd)} < ${fmtUsd(S.minLiq)}`);
-    if (A.liq.ratioMc != null && A.liq.ratioMc < 0.03) add('THIN_LIQUIDITY', `Liquidität/MCap nur ${(A.liq.ratioMc * 100).toFixed(1)} %`);
+    if (A.liq.ratioMc != null && A.liq.ratioMc < 0.03) add('THIN_LIQUIDITY', `Liquidität/MC nur ${(A.liq.ratioMc * 100).toFixed(1)} %`);
     if (A.liq.shock) add('LIQUIDITY_SHOCK', `Liquidität ${fmtPct(A.liq.chg5)} in 5m`);
     return `Liquidität ${fmtUsd(A.liq.usd)}, Verhältnis ${A.liq.ratioMc == null ? '—' : (A.liq.ratioMc * 100).toFixed(1) + ' %'}`;
   });
@@ -1858,7 +1883,7 @@ function candidateChain(t) {
     const na = !!hit && hit.code === 'SECURITY_UNKNOWN' && !D.fastPass;
     return { k, ok: !hit, na, code: hit ? hit.code : null, msg: na ? 'nicht geprüft (Schnellfilter nicht bestanden)' : hit ? hit.msg : '' };
   });
-  const values = { DATA: A.label + (A.dataAge != null ? ' · ' + fmtAge(A.dataAge) : ''), SECURITY: A.sec.status, LIQUIDITY: fmtUsd(A.liq.usd), MARKET: fmtUsd(A.core.mc), VOLUME: fmtUsd(A.vol.h1), MOMENTUM: String(A.price.momentum), RISK: A.risk.total + ' ' + A.risk.level, SCORE: String(A.finalScore), CONFIDENCE: A.confidence.total + '%', CONSENSUS: String(A.strat ? A.strat.weightSum : 0) };
+  const values = { DATA: A.label + (A.dataAge != null ? ' · ' + fmtAge(A.dataAge) : ''), SECURITY: A.sec.status, LIQUIDITY: fmtUsd(A.liq.usd), MARKET: fmtMc(A.core.mc), VOLUME: fmtUsd(A.vol.h1), MOMENTUM: String(A.price.momentum), RISK: A.risk.total + ' ' + A.risk.level, SCORE: String(A.finalScore), CONFIDENCE: A.confidence.total + '%', CONSENSUS: String(A.strat ? A.strat.weightSum : 0) };
   steps.forEach(x => { x.value = values[x.k]; });
   const firstFail = steps.find(x => !x.ok && !x.na);
   const final = D.decision === 'APPROVED' ? 'BUY – freigegeben' : D.decision === 'BUY_CANDIDATE' ? 'BEREIT – Ausführung wartet: ' + (D.execBlockers[0] ? D.execBlockers[0].msg : '—') : 'NO TRADE';
@@ -2504,9 +2529,9 @@ function createCore(opts) {
       state.usedKeys.set(key, ord.id);
       state.metrics.counters.executed++; state.metrics.minute.executed++; state.metrics.perf.exec = ord.latencyMs;
       stratStat(leadId, 'executed');
-      audit(auto ? 'BOT' : 'USER', 'BUY', `${t.symbol} Buy #${buyNo}: ${fmtUsd(size)} @ ${fmtPrice(fillPrice)} (${state.mode})`, reason || D.reason);
-      log.trade(`${state.mode} BUY #${buyNo} ${t.symbol}: ${fmtUsd(size)} @ ${fmtPrice(fillPrice)} · Impact ${(impact * 100).toFixed(2)} % · Fees ${fmtUsd(fees.total, 4)}`, { order: ord.id });
-      alert('TRADE', t, `${state.mode} BUY #${buyNo}: ${fmtUsd(size)} @ ${fmtPrice(fillPrice)}`, 'SUCCESS', { cooldownMs: 0, key: ord.id });
+      audit(auto ? 'BOT' : 'USER', 'BUY', `${t.symbol} Buy #${buyNo}: ${fmtUsd(size)} @ ${pxMcTxt(t.A, fillPrice)} (${state.mode})`, reason || D.reason);
+      log.trade(`${state.mode} BUY #${buyNo} ${t.symbol}: ${fmtUsd(size)} @ ${pxMcTxt(t.A, fillPrice)} · Impact ${(impact * 100).toFixed(2)} % · Fees ${fmtUsd(fees.total, 4)}`, { order: ord.id });
+      alert('TRADE', t, `${state.mode} BUY #${buyNo}: ${fmtUsd(size)} @ ${pxMcTxt(t.A, fillPrice)}`, 'SUCCESS', { cooldownMs: 0, key: ord.id });
       persistNow(); emit('trade', { order: ord });
       return { ok: true, order: ord };
     } catch (e) {
@@ -2556,7 +2581,7 @@ function createCore(opts) {
   }
   function exitDecision(pos, t, p, pnlPct, liq, now) {
     const s = S(), A = t && t.A;
-    if (p <= pos.stop) return { code: pos.stopType === 'TRAILING' ? 'TRAILING_STOP' : pos.stopType === 'BREAK_EVEN' ? 'BREAK_EVEN' : pos.stopType === 'ATR' ? 'ATR_STOP' : 'STOP_LOSS', frac: 'ALL', detail: `Preis ${fmtPrice(p)} ≤ Stop ${fmtPrice(pos.stop)}` };
+    if (p <= pos.stop) return { code: pos.stopType === 'TRAILING' ? 'TRAILING_STOP' : pos.stopType === 'BREAK_EVEN' ? 'BREAK_EVEN' : pos.stopType === 'ATR' ? 'ATR_STOP' : 'STOP_LOSS', frac: 'ALL', detail: `${pxMcTxt(A, p)} ≤ Stop ${pxMcTxt(A, pos.stop)}` };
     if (isNum(liq) && isNum(pos.entryLiq) && pos.entryLiq > 0 && liq < pos.entryLiq * (1 - s.liqCollapsePct / 100)) return { code: 'LIQUIDITY_COLLAPSE', frac: 'ALL', detail: `Liquidität ${fmtUsd(liq)} (Entry ${fmtUsd(pos.entryLiq)})` };
     if (s.exitOnRiskCritical && A && (A.sec.status === 'CRITICAL' || (A.risk.level === 'CRITICAL' && A.confidence.total >= 50))) return { code: 'RISK_INCREASE', frac: 'ALL', detail: `Risiko ${A.risk.level} (${A.risk.total})` };
     if (pnlPct >= s.tp3Pct) return { code: 'TP3', frac: 'ALL', detail: `+${pnlPct.toFixed(1)} % ≥ TP3` };
@@ -2568,7 +2593,7 @@ function createCore(opts) {
       if (!pos.timeExitFlag) { pos.timeExitFlag = true; alert('SELL_CANDIDATE', t, `Time Exit Candidate: ${pos.symbol} nach ${fmtAge(held)} nur ${fmtPct(pnlPct)}`, 'INFO', { key: 'time' }); }
       if (s.timeExitAuto) return { code: 'TIME_EXIT', frac: 'ALL', detail: `${fmtAge(held)} ohne erwartete Bewegung (${fmtPct(pnlPct)})` };
     }
-    if (p <= pos.stop * 1.03) alert('SELL_CANDIDATE', t, `${pos.symbol} nahe am Stop (${fmtPrice(p)} / Stop ${fmtPrice(pos.stop)})`, 'WARNING', { key: 'nearstop' });
+    if (p <= pos.stop * 1.03) alert('SELL_CANDIDATE', t, `${pos.symbol} nahe am Stop (${pxMcTxt(A, p)} / Stop ${pxMcTxt(A, pos.stop)})`, 'WARNING', { key: 'nearstop' });
     return null;
   }
   async function managePositions() {
@@ -2653,7 +2678,7 @@ function createCore(opts) {
       if (reasonCode === 'TP2') pos.tpHit[1] = true;
       transition(ord, 'COMPLETED', 'Order Receipt erstellt (SIMULATED)');
       state.usedKeys.set(key, ord.id);
-      log.trade(`${pos.mode} SELL ${pos.symbol} (${reasonCode}): ${fmtUsd(net)} @ ${fmtPrice(fillPrice)} · realisiert ${fmtSigned(realized)}`, { order: ord.id });
+      log.trade(`${pos.mode} SELL ${pos.symbol} (${reasonCode}): ${fmtUsd(net)} @ ${pxMcTxt(t && t.A, fillPrice)} · realisiert ${fmtSigned(realized)}`, { order: ord.id });
       audit(auto ? 'BOT' : 'USER', 'SELL', `${pos.symbol} ${reasonCode}: ${fmtUsd(net)} (${fmtSigned(realized)})`, detail);
       if (/STOP|BREAK_EVEN/.test(reasonCode)) alert('STOP_HIT', t, `${pos.symbol}: ${reasonCode} ${detail}`, 'WARNING', { cooldownMs: 0, key: ord.id });
       else if (/^TP/.test(reasonCode)) alert('TP_HIT', t, `${pos.symbol}: ${reasonCode} ${fmtSigned(realized)}`, 'SUCCESS', { cooldownMs: 0, key: ord.id });
@@ -2796,7 +2821,7 @@ function createCore(opts) {
       if (t.isNew) { t.isNew = false; if (s.alertNewTokens && D.fastPass) alert('NEW_TOKEN', t, `Neuer Token: ${t.symbol} (${A.ageClass}, Liq ${fmtUsd(A.liq.usd)})`, 'INFO'); }
       if (D.decision === 'APPROVED' || D.decision === 'BUY_CANDIDATE') alert('BUY_CANDIDATE', t, D.reason, 'SUCCESS', { strength: A.finalScore });
       else if (A.finalScore >= s.alertScore && D.decision !== 'REJECTED') alert('SCORE', t, `Final Score ${A.finalScore} ≥ ${s.alertScore}`, 'INFO', { strength: A.finalScore });
-      if (s.alertX2) { const seen = state.seen[t.id]; if (seen && seen.mc > 0 && isNum(A.core.mc) && A.core.mc >= seen.mc * 2 && isNum(A.liq.usd) && A.liq.usd >= s.minLiq) alert('X2', t, `x${(A.core.mc / seen.mc).toFixed(1)} seit Fund (${fmtUsd(seen.mc)} → ${fmtUsd(A.core.mc)})`, 'SUCCESS', { cooldownMs: DAY }); }
+      if (s.alertX2) { const seen = state.seen[t.id]; if (seen && seen.mc > 0 && isNum(A.core.mc) && A.core.mc >= seen.mc * 2 && isNum(A.liq.usd) && A.liq.usd >= s.minLiq) alert('X2', t, `x${(A.core.mc / seen.mc).toFixed(1)} seit Fund (${fmtMc(seen.mc)} → ${fmtMc(A.core.mc)})`, 'SUCCESS', { cooldownMs: DAY }); }
       if (D.fastPass) {
         if (A.liq.spike) alert('LIQ_SPIKE', t, `Liquidität ${fmtPct(A.liq.chg5)} in 5 min`, 'INFO');
         if (A.liq.shock) alert('LIQ_COLLAPSE', t, `Liquidität ${fmtPct(A.liq.chg5)} in 5 min`, 'WARNING');
@@ -2806,8 +2831,8 @@ function createCore(opts) {
       const w = state.watchlist[t.id];
       if (w && w.alerts) {
         const p = A.core.price;
-        if (isNum(w.priceAbove) && isNum(p) && p >= w.priceAbove) alert('WATCH', t, `Preis ${fmtPrice(p)} ≥ ${fmtPrice(w.priceAbove)}`, 'INFO', { key: 'above' });
-        if (isNum(w.priceBelow) && isNum(p) && p <= w.priceBelow) alert('WATCH', t, `Preis ${fmtPrice(p)} ≤ ${fmtPrice(w.priceBelow)}`, 'WARNING', { key: 'below' });
+        if (isNum(w.priceAbove) && isNum(p) && p >= w.priceAbove) alert('WATCH', t, `${pxMcTxt(A, p)} ≥ Alarm ${pxMcTxt(A, w.priceAbove)}`, 'INFO', { key: 'above' });
+        if (isNum(w.priceBelow) && isNum(p) && p <= w.priceBelow) alert('WATCH', t, `${pxMcTxt(A, p)} ≤ Alarm ${pxMcTxt(A, w.priceBelow)}`, 'WARNING', { key: 'below' });
         if (isNum(w.scoreAbove) && A.finalScore >= w.scoreAbove) alert('WATCH', t, `Score ${A.finalScore} ≥ ${w.scoreAbove}`, 'INFO', { key: 'score' });
       }
     }
@@ -3269,7 +3294,7 @@ function createCore(opts) {
     // Markt (informativ – „kein Kandidat“ ist NIE ein globaler Block)
     const toks = [...state.markets.values()].filter(t => t.A && t.D);
     c(market, 'Tokens analysiert', 'info', `${st.tokens || 0} von ${state.markets.size}`);
-    c(market, 'Schnellfilter bestanden', 'info', `${st.fastPass || 0} (Liquidität, Volumen, MCap, Käuferanteil, Frische)`);
+    c(market, 'Schnellfilter bestanden', 'info', `${st.fastPass || 0} (Liquidität, Volumen, MC, Käuferanteil, Frische)`);
     c(market, 'Security VERIFIED/PARTIAL', 'info', `${toks.filter(t => t.D.fastPass && ['VERIFIED', 'PARTIAL'].includes(t.A.sec.status)).length} Kandidaten`);
     c(market, 'Mit Kaufsignal', 'info', `${st.withSignals || 0} Tokens`);
     c(market, 'Buy Candidates', 'info', `${st.candidates || 0} (Score ≥ ${s.minScore}, Konsens ≥ ${s.consensusMinWeight})`);
@@ -3465,6 +3490,35 @@ function createCore(opts) {
     state.portfolio = freshPortfolio(S().simCapitalUsd); state.risk.dailyStartEquity = S().simCapitalUsd; state.hist.equity = [];
     audit('USER', 'PORTFOLIO_RESET', fmtUsd(S().simCapitalUsd)); persistNow(); return { ok: true };
   }
+  /* Frischer Start: Startkapital zurück, offene Positionen und Orders verworfen, Risiko-Zähler/Cooldowns
+     frei. Journal, Statistiken, Lern-/Analysedaten, Logs, Alarme, Watchlist und Einstellungen bleiben erhalten;
+     verworfene Positionen stehen im Journal als RESET und zählen nicht in die Performance-Statistik. */
+  function freshStart() {
+    if (state.locks.size) return { ok: false, error: 'Eine Order wird gerade ausgeführt – bitte kurz warten' };
+    const now = env.now(), cap = S().simCapitalUsd;
+    let cancelled = 0;
+    for (const o of state.orders) {
+      if (TERMINAL.has(o.state)) continue;
+      const to = ['CANCELLED', 'FAILED', 'COMPLETED'].find(x => (ORDER_TRANSITIONS[o.state] || []).includes(x));
+      if (to) { transition(o, to, 'Frischer Start'); cancelled++; }
+    }
+    const dropped = state.positions.length;
+    for (const p of state.positions) {
+      const j = state.journal.find(x => x.id === p.id);
+      if (j && j.status === 'OPEN') { j.status = 'RESET'; j.closedAt = now; j.exitReason = 'FRESH_START'; j.holdMs = now - j.openedAt; }
+    }
+    state.positions = [];
+    for (const [k, v] of [...state.usedKeys.entries()]) if (v === 'pending') state.usedKeys.delete(k);
+    state.portfolio = freshPortfolio(cap);
+    Object.assign(state.risk, { buyCount: {}, coinCooldown: {}, stratCooldown: {}, lossCooldownUntil: 0, globalPauseUntil: 0, lossStreak: 0, dailyPnl: 0, dailyTrades: 0, dailyStartEquity: cap, dailyLimitHit: false, reviewRequired: false, buyTimes: [] });
+    state.reconciliation = { required: false, issues: [], at: now };
+    if (state.session) state.sessions.unshift({ ...state.session, endedAt: now, note: 'Frischer Start' });
+    state.session = null; ensureSession();
+    audit('USER', 'FRESH_START', `Startkapital ${fmtUsd(cap)} · ${dropped} Position(en) verworfen · ${cancelled} Order(s) storniert · Analysedaten behalten`);
+    log.info('SYSTEM', `Frischer Start: Portfolio ${fmtUsd(cap)}, ${dropped} Position(en) verworfen – Journal, Statistiken und Lerndaten bleiben erhalten`);
+    persistNow(); emit('trade', {}); emit('bot', {});
+    return { ok: true, dropped, cancelled };
+  }
   function newSession() {
     ensureSession(); state.sessions.unshift({ ...state.session, endedAt: env.now() });
     let reset = 0;
@@ -3490,7 +3544,7 @@ function createCore(opts) {
     start, pause, stop, emergencyStop, releaseEmergency, setMode, setAutoTrading, setSafeMode,
     executeBuy, executeSell, execCheck: (t, o) => execCheck(t, t.A, o), globalBlockers, buildCtx, estFees, estImpact, equityInfo, portfolioRisk, positionCorrelations,
     systemHealth, diagnostics, botHealth, readiness, candidateChain, liveReadiness, preLiveChecks, ackReconciliation, requestSignature, rpcEndpoints, fetchOhlcv, fetchCandlesForBacktest, walletConnect, walletDisconnect, walletBalance, walletNetwork,
-    updateSettings, updateStrategies, rollbackTo, addWatch, removeWatch, updateWatch, select, exportData, importSettings, resetSettings, resetPortfolio,
+    updateSettings, updateStrategies, rollbackTo, addWatch, removeWatch, updateWatch, select, exportData, importSettings, resetSettings, resetPortfolio, freshStart,
     newSession, factoryReset, persistNow, enqueueSecurity, clearFeed: () => { state.feed = []; persist(); },
     _t: { scanOnce, updateSolPrice, applySnapshot, applyAlt, fetchChunk, reconcile, analyzeAll, startScanner, stopScanner, timers, managePositions, closePosition, processQueue, enqueue, checkSecurity, ensureToken, maybeAutoTrade, setBotState }
   };
@@ -3627,6 +3681,25 @@ const SELF_TESTS = [
     const t8 = await prepToken(core, H, 8);
     assert(!codes(await core.executeBuy(t8.id, { sizeUsd: 20 })).includes('GLOBAL_PAUSE'), 'globale Pause blockiert trotz Wartezeit 0');
     return '3 Verluste gezählt · Loss-Cooldown/Global-Pause blockieren mit Wartezeit 0 nicht mehr';
+  }],
+  ['Trading', 'Frischer Start: Startkapital & Positionen neu, Analysedaten bleiben', async () => {
+    const H = makeTestHarness(); const core = await testCore(H);
+    const t1 = await prepToken(core, H, 1);
+    assert((await core.executeBuy(t1.id, { sizeUsd: 20 })).ok, 'Buy 1 fehlgeschlagen');
+    assert((await core.executeSell(core.state.positions[0].id, 'ALL', 'MANUAL')).ok, 'Sell fehlgeschlagen');
+    const t2 = await prepToken(core, H, 2);
+    assert((await core.executeBuy(t2.id, { sizeUsd: 20 })).ok, 'Buy 2 fehlgeschlagen');
+    const st = core.state, openId = st.positions[0].id, journalBefore = st.journal.length, closedBefore = st.journal.filter(j => j.status === 'CLOSED').length;
+    const pvBefore = st.paramVersions.length, logsBefore = core.log.entries.length, perfBefore = JSON.stringify(perfStats(st.journal));
+    const r = core.freshStart(); assert(r.ok && r.dropped === 1, 'freshStart: ' + JSON.stringify(r));
+    assert(core.state.positions.length === 0, 'Positionen nicht geleert');
+    assert(core.state.portfolio.cash === core.S().simCapitalUsd && core.state.portfolio.realized === 0, 'Portfolio nicht auf Startkapital');
+    assert(core.state.journal.length === journalBefore && core.state.journal.find(j => j.id === openId).status === 'RESET', 'Journal verändert oder Position nicht als RESET markiert');
+    assert(core.state.journal.filter(j => j.status === 'CLOSED').length === closedBefore && JSON.stringify(perfStats(core.state.journal)) === perfBefore, 'Statistik/geschlossene Trades verändert');
+    assert(core.state.paramVersions.length === pvBefore && core.log.entries.length >= logsBefore, 'Analysedaten verloren');
+    assert(!Object.keys(core.state.risk.buyCount).length && core.state.risk.lossStreak === 0 && !core.state.risk.dailyLimitHit, 'Risiko-Zähler nicht frei');
+    assert((await core.executeBuy(t2.id, { sizeUsd: 20 })).ok, 'Nach frischem Start kein Neukauf möglich');
+    return `1 Position verworfen · Cash = Startkapital · ${closedBefore} Trade(s) & Statistik behalten · Neukauf ok`;
   }],
   ['Trading', 'Duplicate Order Protection (Doppelklick, parallele Signale)', async () => {
     const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1);
@@ -3924,8 +3997,8 @@ const env = {
   walletProvider: () => (window.phantom && window.phantom.solana) || (window.solana && window.solana.isPhantom ? window.solana : null)
 };
 const core = createCore({ env, backend: createLocalBackend() });
-const UI = { alertsSeenAt: 0, view: 'scanner', sort: 'score', dir: -1, q: '', onlyRec: false, safeOnly: false, age: '', maxRisk: 100, minConf: 0, detailTab: 'overview', chartTf: 'live', logCat: 'ALL', logQ: '', logPaused: false, hq: '', hMode: '', hRes: '', rankBy: 'opportunity', kbQ: '', lastTouch: 0, tests: null, testsRunning: false, bt: null, btBusy: false };
-const UI_PERSIST = ['alertsSeenAt', 'view', 'sort', 'dir', 'onlyRec', 'safeOnly', 'age', 'maxRisk', 'minConf', 'detailTab', 'chartTf', 'logCat', 'rankBy'];
+const UI = { alertsSeenAt: 0, view: 'scanner', sort: 'score', dir: -1, q: '', onlyRec: false, safeOnly: false, age: '', maxRisk: 100, minConf: 0, detailTab: 'overview', chartTf: 'live', logCat: 'ALL', logQ: '', logPaused: false, hq: '', hMode: '', hRes: '', rankBy: 'opportunity', kbQ: '', lastTouch: 0, tests: null, testsRunning: false, bt: null, btBusy: false, pro: false };
+const UI_PERSIST = ['alertsSeenAt', 'view', 'sort', 'dir', 'onlyRec', 'safeOnly', 'age', 'maxRisk', 'minConf', 'detailTab', 'chartTf', 'logCat', 'rankBy', 'pro'];
 const $ = id => { const e = document.getElementById(id); if (!e) domMissing(id); return e; };
 const missingDom = new Set();
 function domMissing(id) { if (!missingDom.has(id)) { missingDom.add(id); core.log.warn('UI', `DOM-Element #${id} nicht gefunden`); } }
@@ -3942,7 +4015,25 @@ const lbl = l => html`<span class="lbl ${l}" title="Datenstatus">${l}</span>`;
 const DEC_LABEL = { APPROVED: 'APPROVED', BUY_CANDIDATE: 'CANDIDATE', WATCH: 'WATCH', REJECTED: 'NO TRADE' };
 const decChip = d => html`<span class="dec dec-${d}">${DEC_LABEL[d] || d}</span>`;
 const stCls = s => (s === 'ONLINE' || s === 'OK' ? 'ok' : s === 'DEGRADED' || s === 'STALE' ? 'warn' : s === 'OFFLINE' || s === 'ERROR' ? 'bad' : '');
-const kv = (k, v, l, title) => html`<div class="kv" title="${title || ''}"><small>${k}</small><b>${v}${l ? html`<em class="lbl ${l}">${l}</em>` : ''}</b></div>`;
+const kv = (k, v, l, title, c) => html`<div class="kv${c ? ' ' + c : ''}" title="${title || ''}"><small>${k}</small><b>${v}${l ? html`<em class="lbl ${l}">${l}</em>` : ''}</b></div>`;
+const kvA = (k, v, l, title) => kv(k, v, l, title, 'an');
+/* MC/Coin-Preis-Verhältnis (≈ Umlauf-Supply): bevorzugt aus dem Snapshot beim Einstieg, sonst live. */
+function snapRatio(sn) {
+  const smc = sn ? (isNum(sn.marketCap) ? sn.marketCap : sn.fdv) : null;
+  return isNum(smc) && smc > 0 && isNum(sn.priceUsd) && sn.priceUsd > 0 ? smc / sn.priceUsd : null;
+}
+function mcRatio(pos, t) {
+  const j = pos ? core.state.journal.find(x => x.id === pos.id) : null;
+  const r = snapRatio(j && j.decision && j.decision.snapshot);
+  if (r != null) return r;
+  const A = t && t.A;
+  return A && isNum(A.core.mc) && isNum(A.core.price) && A.core.price > 0 ? A.core.mc / A.core.price : null;
+}
+const orderMcRatio = o => { const r = snapRatio(o.decision && o.decision.snapshot); return r != null ? r : mcRatio(o.positionId ? { id: o.positionId } : null, tok(o.tokenId)); };
+const mcAt = (price, ratio) => (isNum(price) && price > 0 && isNum(ratio) ? fmtMc(price * ratio) : '—');
+/* Coin-Preis und zugehörige MC untereinander, beide eindeutig gekennzeichnet. */
+const pxMc = (price, ratio) => html`<span class="pxmc"><span class="px"><i class="pl">Preis</i> ${fmtPrice(price)}</span><span class="mcv">${mcAt(price, ratio)}</span></span>`;
+const tokRatio = t => mcRatio(null, t);
 const bar = (v, color) => html`<div class="bar"><i style="width:${clamp(v || 0, 0, 100)}%;background:${color || 'var(--cyan)'}"></i></div>`;
 const riskColor = v => (v >= 75 ? 'var(--red)' : v >= 55 ? 'var(--orange)' : v >= 30 ? 'var(--yellow)' : 'var(--green)');
 function saveUi() { const o = {}; for (const k of UI_PERSIST) o[k] = UI[k]; core.state.ui = o; }
@@ -3961,7 +4052,16 @@ function loadUi() {
   if (LOG_CATS.some(c => c[0] === u.logCat)) UI.logCat = u.logCat;
   if (['opportunity', 'risk', 'confidence', 'execution'].includes(u.rankBy)) UI.rankBy = u.rankBy;
   if (isNum(u.alertsSeenAt)) UI.alertsSeenAt = u.alertsSeenAt;
+  if (typeof u.pro === 'boolean') UI.pro = u.pro;
 }
+/* Einfache Ansicht blendet die Analysedaten der Kauf-/Verkaufsentscheidung aus (Elemente mit Klasse .an);
+   berechnet und genutzt werden sie weiterhin. */
+function applyPro() {
+  document.body.classList.toggle('pro', UI.pro);
+  if (!UI.pro && UI.detailTab === 'why') UI.detailTab = 'overview';
+  if (!UI.pro && AN_SORTS.has(UI.sort)) { UI.sort = 'score'; UI.dir = -1; }
+}
+const proToggle = () => html`<button class="btn sm ${UI.pro ? 'on' : ''}" data-act="pro" aria-pressed="${UI.pro}" title="Scores, Risikofaktoren, Strategie-Stimmen, Blocker und Entscheidungsketten ein-/ausblenden">🔬 Analyse-Daten: ${UI.pro ? 'AN' : 'AUS'}</button>`;
 function spark(t, w = 60, h = 20) {
   const v = t.hist.slice(-90).map(x => x.p); if (v.length < 2) return '';
   const step = Math.max(1, Math.floor(v.length / 30)); const s = v.filter((_, i) => i % step === 0 || i === v.length - 1);
@@ -4138,14 +4238,14 @@ function renderTop() {
   const pills = [
     [ms.cls + ' pm', '', ms.text, ms.why],
     ['info pm', 'Modus', st.mode.replace('_', ' '), 'Handelsmodus · LIVE separat & nur mit erfülltem Gating'],
-    [b.autoTrading ? 'ok' : '', 'Auto', b.autoTrading ? 'AN' : 'AUS', 'Auto-Trading (nur SIMULATION, nie Echtgeld)'],
-    [(w.status === 'CONNECTED' ? 'ok' : '') + ' pm', 'Wallet', w.status === 'CONNECTED' ? shortAddr(w.pubkey) : w.status === 'NO_PROVIDER' ? 'kein Provider' : w.status === 'ERROR' ? 'Fehler' : 'nicht verbunden', 'nur lesend, keine Signaturen'],
-    [stCls(rpc), 'RPC', rpc + (st.rpc.latency != null && rpc === 'ONLINE' ? ' ' + st.rpc.latency + 'ms' : ''), st.rpc.slot ? 'Slot ' + st.rpc.slot + ' · ' + (st.rpc.endpoint || '') : 'kein verifizierter Slot'],
-    [h.score >= 80 ? 'ok' : h.score >= S.minSystemHealth ? 'warn' : 'bad', 'Health', String(h.score), 'System Health 0–100 (APIs, RPC, Frische, Fehler)'],
+    [(b.autoTrading ? 'ok' : '') + ' pm', 'Auto', b.autoTrading ? 'AN' : 'AUS', 'Auto-Trading (nur SIMULATION, nie Echtgeld)'],
+    [(w.status === 'CONNECTED' ? 'ok' : '') + ' pm an', 'Wallet', w.status === 'CONNECTED' ? shortAddr(w.pubkey) : w.status === 'NO_PROVIDER' ? 'kein Provider' : w.status === 'ERROR' ? 'Fehler' : 'nicht verbunden', 'nur lesend, keine Signaturen'],
+    [stCls(rpc) + ' an', 'RPC', rpc + (st.rpc.latency != null && rpc === 'ONLINE' ? ' ' + st.rpc.latency + 'ms' : ''), st.rpc.slot ? 'Slot ' + st.rpc.slot + ' · ' + (st.rpc.endpoint || '') : 'kein verifizierter Slot'],
+    [(h.score >= 80 ? 'ok' : h.score >= S.minSystemHealth ? 'warn' : 'bad') + ' an', 'Health', String(h.score), 'System Health 0–100 (APIs, RPC, Frische, Fehler)'],
     [(pnl > 0.005 ? 'ok' : pnl < -0.005 ? 'bad' : '') + ' pm', 'PnL', fmtSigned(pnl) + (unknown ? '*' : ''), 'SIMULIERT · fee-adjusted' + (unknown ? ' · * Position ohne aktuellen Preis' : '')],
-    ['', 'Pos', `${st.positions.length}/${S.maxOpenPositions}`, 'offene Positionen'],
-    [pr.score >= 60 ? 'bad' : pr.score >= 35 ? 'warn' : 'ok', 'Risk', String(pr.score), 'Portfolio Risk'],
-    ['', '', `${fmtTime(now)} · Scan ${st.scanner.lastAt ? fmtAge(now - st.scanner.lastAt) : '—'}`, 'Uhrzeit · letzter Scan']
+    ['pm', 'Pos', `${st.positions.length}/${S.maxOpenPositions}`, 'offene Positionen'],
+    [(pr.score >= 60 ? 'bad' : pr.score >= 35 ? 'warn' : 'ok') + ' pm', 'Risk', String(pr.score), 'Portfolio Risk'],
+    ['an', '', `${fmtTime(now)} · Scan ${st.scanner.lastAt ? fmtAge(now - st.scanner.lastAt) : '—'}`, 'Uhrzeit · letzter Scan']
   ];
   patch($('tbPills'), html`${pills.map(p => html`<span class="pill ${p[0]}" title="${p[3] || ''}">${p[1] ? p[1] + ' ' : ''}<b>${p[2]}</b></span>`)}`);
   const e = $('btnEstop');
@@ -4204,14 +4304,14 @@ function renderControl() {
   const ms = masterStatus(), cs = $('cStatus');
   if (cs) { cs.className = 'mstat ' + ms.state; setText(cs, ms.text); }
   const soft = ms.rd.soft.filter(x2 => !['AUTO_TRADING_OFF', 'PAPER_MANUAL', 'BOT_NOT_RUNNING', 'RECOVERING'].includes(x2.code));
-  patch($('cWhy'), html`${ms.why}${soft.length ? html` <span class="dim">· Hinweis: ${soft.map(x2 => x2.msg).join(' · ')}</span>` : ''}`);
+  patch($('cWhy'), html`${ms.why}${soft.length ? html` <span class="dim an">· Hinweis: ${soft.map(x2 => x2.msg).join(' · ')}</span>` : ''}`);
   const eq = core.equityInfo(), w = st.wallet;
   const unreal = st.positions.reduce((a, q) => a + (isNum(q.pnlUsd) ? q.pnlUsd : 0), 0), pnl = st.portfolio.realized + unreal;
   const walletTxt = w.status === 'CONNECTED' ? shortAddr(w.pubkey) : w.status === 'NO_PROVIDER' ? 'kein Provider' : w.status === 'CONNECTING' ? 'verbinde …' : w.status === 'ERROR' ? 'Fehler' : 'nicht verbunden';
   patch($('cOverview'), html`
     <div class="kv"><small>Modus</small><b>${st.mode.replace('_', ' ')}</b></div>
     <button class="kv" data-act="auto" role="switch" aria-checked="${b.autoTrading}" title="Auto-Trading – nur SIMULATION, nie Echtgeld"><small>Auto-Trading</small><span class="switch ${b.autoTrading ? 'on' : ''}"><span class="tg"></span>${b.autoTrading ? 'AN' : 'AUS'}</span></button>
-    <button class="kv" data-act="walletModal"><small>Wallet (lesend)</small><b>${walletTxt}${w.balanceLamports != null ? ' · ' + Number(lamportsToSol(BigInt(w.balanceLamports))).toFixed(3) + ' SOL' : ''}</b></button>
+    <button class="kv an" data-act="walletModal"><small>Wallet (lesend)</small><b>${walletTxt}${w.balanceLamports != null ? ' · ' + Number(lamportsToSol(BigInt(w.balanceLamports))).toFixed(3) + ' SOL' : ''}</b></button>
     <div class="kv"><small>Portfolio</small><b>${fmtUsd(eq.equity)}<em class="lbl SIMULATED">SIM</em></b></div>
     <div class="kv"><small>PnL (fee-adj.)</small><b class="${cls(pnl)}">${fmtSigned(pnl)}</b></div>
     <button class="kv" data-act="view" data-view="positions"><small>Positionen</small><b>${st.positions.length}/${core.S().maxOpenPositions} · ${fmtUsd(eq.exposure)}</b></button>`);
@@ -4235,9 +4335,9 @@ function renderTiles() {
   for (const id of ['tb1', 'tb2', 'tb4']) setText($(id), liveLbl);
   const toks = [...st.markets.values()].filter(t => t.A);
   setText($('k1'), `${toks.length} Tokens · ${toks.filter(t => t.A.finalScore >= core.S().minScore).length} Empfehlungen`);
-  setText($('k2'), `${ss.candidates || 0} Kandidaten · ${ss.withSignals || 0} mit Signal`);
+  setText($('k2'), `${ss.candidates || 0} Kandidaten` + (UI.pro ? ` · ${ss.withSignals || 0} mit Signal` : ''));
   const top = toks.length ? Math.max(...toks.map(t => t.A.finalScore)) : 0;
-  setText($('k3'), `${Object.keys(st.watchlist).length} ★ · Top ${top}`);
+  setText($('k3'), `${Object.keys(st.watchlist).length} ★` + (UI.pro ? ` · Top ${top}` : ''));
   let tb = 0, tsl = 0; for (const t of toks) { if (isNum(t.A.tx.b1)) tb += t.A.tx.b1; if (isNum(t.A.tx.s1)) tsl += t.A.tx.s1; }
   const br = tb + tsl ? tb / (tb + tsl) * 100 : null;
   setText($('k4'), br == null ? 'Käufer — (keine Daten)' : `Käufer ${br.toFixed(0)} % (1h)`);
@@ -4247,8 +4347,9 @@ function renderTiles() {
 }
 
 /* ---------- Scanner-Ansicht (Live Market Table, keyed Rows) ---------- */
-const SORTS = [['score', 'Score', t => t.A.finalScore], ['mom', '5m 🚀', t => t.A.price.chg.m5], ['chg', '1h %', t => t.A.price.chg.h1], ['vol', 'Volumen', t => t.A.vol.h1], ['liq', 'Liquidität', t => t.A.liq.usd], ['momentum', 'Momentum', t => t.A.price.momentum], ['risk', 'Risiko', t => t.A.risk.total], ['conf', 'Confidence', t => t.A.confidence.total], ['opp', 'Opportunity', t => t.A.opportunity], ['age', 'Neu', t => t.A.core.pairAge]];
-const HEAD = [['', null], ['Token', null], ['Preis', null, 'r'], ['5m', 'mom', 'r'], ['1h', 'chg', 'r'], ['Liq', 'liq', 'r'], ['Vol 1h', 'vol', 'r c-vol'], ['K/V 1h', null, 'r c-bs'], ['Mom.', 'momentum', 'r c-mom'], ['Risk', 'risk'], ['Conf', 'conf', 'r'], ['Score', 'score'], ['Status', null], ['Trend', null, 'c-spark'], ['', null]];
+const SORTS = [['score', 'Score', t => t.A.finalScore], ['mc', 'MC', t => t.A.core.mc], ['mom', '5m 🚀', t => t.A.price.chg.m5], ['chg', '1h %', t => t.A.price.chg.h1], ['vol', 'Volumen', t => t.A.vol.h1], ['liq', 'Liquidität', t => t.A.liq.usd], ['momentum', 'Momentum', t => t.A.price.momentum], ['risk', 'Risiko', t => t.A.risk.total], ['conf', 'Confidence', t => t.A.confidence.total], ['opp', 'Opportunity', t => t.A.opportunity], ['age', 'Neu', t => t.A.core.pairAge]];
+const AN_SORTS = new Set(['vol', 'liq', 'momentum', 'conf', 'opp']);
+const HEAD = [['', null], ['Token', null], ['Coin-Preis', null, 'r'], ['MC', 'mc', 'r'], ['5m', 'mom', 'r'], ['1h', 'chg', 'r'], ['Liq', 'liq', 'r an'], ['Vol 1h', 'vol', 'r c-vol an'], ['K/V 1h', null, 'r c-bs an'], ['Mom.', 'momentum', 'r c-mom an'], ['Risk', 'risk'], ['Conf', 'conf', 'r an'], ['Score', 'score'], ['Status', null], ['Trend', null, 'c-spark an'], ['', null]];
 function passesFilter(t, q, S) {
   const A = t.A, D = t.D;
   if (q && !(t.symbol.toLowerCase().includes(q) || (t.name || '').toLowerCase().includes(q) || t.mint.toLowerCase().includes(q))) return false;
@@ -4262,29 +4363,30 @@ function passesFilter(t, q, S) {
 function rowHtml(t) {
   const A = t.A, D = t.D, c = A.price.chg, w = !!core.state.watchlist[t.id];
   return html`<button class="star ${w ? 'on' : ''}" data-act="star" data-id="${t.id}" aria-label="${w ? 'Von Watchlist entfernen' : 'Zur Watchlist hinzufügen'}">${w ? '★' : '☆'}</button>
-<div class="tok"><b>${t.symbol}</b><small>${t.name}</small><span class="flags">${A.flags.map(f => html`<span class="f ${f === 'BOOST' ? 'B' : f === 'PUMP' || f === 'DUMP' ? 'X' : ''}">${f}</span>`)}</span>${A.label !== 'LIVE' ? html` ${lbl(A.label)}` : ''}</div>
-<div class="cell num r" title="${A.core.priceRaw || ''}">${fmtPrice(A.core.price)}</div>
+<div class="tok"><b>${t.symbol}</b><small>${t.name}</small><span class="flags an">${A.flags.map(f => html`<span class="f ${f === 'BOOST' ? 'B' : f === 'PUMP' || f === 'DUMP' ? 'X' : ''}">${f}</span>`)}</span>${A.label !== 'LIVE' ? html` ${lbl(A.label)}` : ''}</div>
+<div class="cell num r" title="Coin-Preis ${A.core.priceRaw || ''}">${fmtPrice(A.core.price)}</div>
+<div class="cell num r mcv" title="Market Cap">${fmtMc(A.core.mc)}</div>
 <div class="cell num r ${cls(c.m5)}">${fmtPct(c.m5, 0)}</div>
 <div class="cell num r ${cls(c.h1)}">${fmtPct(c.h1, 0)}</div>
-<div class="cell num r">${fmtUsd(A.liq.usd)}</div>
-<div class="cell num r c-vol">${fmtUsd(A.vol.h1)}</div>
-<div class="cell num r c-bs">${A.tx.b1 != null ? A.tx.b1 : '—'}/${A.tx.s1 != null ? A.tx.s1 : '—'}</div>
-<div class="cell num r c-mom">${A.price.momentum}</div>
+<div class="cell num r an">${fmtUsd(A.liq.usd)}</div>
+<div class="cell num r c-vol an">${fmtUsd(A.vol.h1)}</div>
+<div class="cell num r c-bs an">${A.tx.b1 != null ? A.tx.b1 : '—'}/${A.tx.s1 != null ? A.tx.s1 : '—'}</div>
+<div class="cell num r c-mom an">${A.price.momentum}</div>
 <div class="cell">${lvlChip(A.risk.level, A.risk.total)}</div>
-<div class="cell num r">${A.confidence.total}%</div>
+<div class="cell num r an">${A.confidence.total}%</div>
 <div class="c-score">${scoreChip(A.finalScore)}</div>
 <div class="c-status">${decChip(D.decision)}</div>
-<div class="cell c-spark">${spark(t)}</div>
+<div class="cell c-spark an">${spark(t)}</div>
 <button class="more" data-act="ctx" data-id="${t.id}" aria-label="Aktionen für ${t.symbol}">⋯</button>
-<div class="cal"><div><small>Preis</small>${fmtPrice(A.core.price)}</div><div class="${cls(c.m5)}"><small>5m</small>${fmtPct(c.m5, 0)}</div><div class="${cls(c.h1)}"><small>1h</small>${fmtPct(c.h1, 0)}</div><div><small>Liq</small>${fmtUsd(A.liq.usd)}</div><div><small>Vol 1h</small>${fmtUsd(A.vol.h1)}</div><div><small>MCap</small>${fmtUsd(A.core.mc)}</div><div><small>Risk</small>${A.risk.level === 'UNKNOWN' ? '?' : A.risk.total}</div><div><small>Käufer</small>${A.tx.ratio1 != null ? (A.tx.ratio1 * 100).toFixed(0) + '%' : '—'}</div></div>
+<div class="cal"><div><small>Coin-Preis</small>${fmtPrice(A.core.price)}</div><div class="mcv"><small>MC</small>${fmtMc(A.core.mc)}</div><div class="${cls(c.m5)}"><small>5m</small>${fmtPct(c.m5, 0)}</div><div class="${cls(c.h1)}"><small>1h</small>${fmtPct(c.h1, 0)}</div><div><small>Risk</small>${A.risk.level === 'UNKNOWN' ? '?' : A.risk.total}</div><div class="an"><small>Liq</small>${fmtUsd(A.liq.usd)}</div><div class="an"><small>Vol 1h</small>${fmtUsd(A.vol.h1)}</div><div class="an"><small>Käufer</small>${A.tx.ratio1 != null ? (A.tx.ratio1 * 100).toFixed(0) + '%' : '—'}</div></div>
 <button class="ca" data-act="copy" data-v="${t.mint}" data-l="Mint" aria-label="Mint-Adresse kopieren"><code>${t.mint}</code><span>⧉ kopieren</span></button>`;
 }
 function hotCard(t) {
-  return html`<div class="hc" data-act="select" data-id="${t.id}" role="button" tabindex="0"><small>🔥 Top Score · ${DEC_LABEL[t.D.decision]}</small><br><b>${t.symbol}</b> ${scoreChip(t.A.finalScore)}<br><small>${fmtUsd(t.A.core.mc)} · 5m ${fmtPct(t.A.price.chg.m5, 0)} · ${t.A.risk.level}</small><br>${spark(t, 110, 22)}</div>`;
+  return html`<div class="hc" data-act="select" data-id="${t.id}" role="button" tabindex="0"><small>🔥 Top Score · ${DEC_LABEL[t.D.decision]}</small><br><b>${t.symbol}</b> ${scoreChip(t.A.finalScore)}<br><small>Coin-Preis ${fmtPrice(t.A.core.price)} · <span class="mcv">${fmtMc(t.A.core.mc)}</span></small><br><small>5m ${fmtPct(t.A.price.chg.m5, 0)} · Risiko ${t.A.risk.level}</small><span class="an"><br>${spark(t, 110, 22)}</span></div>`;
 }
 function renderScanner() {
   const st = core.state, S = core.S(), now = Date.now();
-  patch($('sortChips'), html`${SORTS.map(([k, n]) => html`<button data-act="sort" data-k="${k}" class="${k === UI.sort ? 'on' : ''}" aria-pressed="${k === UI.sort}">${n}${k === UI.sort ? (UI.dir < 0 ? ' ▼' : ' ▲') : ''}</button>`)}`);
+  patch($('sortChips'), html`${SORTS.map(([k, n]) => html`<button data-act="sort" data-k="${k}" class="${(k === UI.sort ? 'on' : '') + (AN_SORTS.has(k) ? ' an' : '')}" aria-pressed="${k === UI.sort}">${n}${k === UI.sort ? (UI.dir < 0 ? ' ▼' : ' ▲') : ''}</button>`)}`);
   patch($('mkHead'), html`${HEAD.map(([n, k, c]) => (k ? html`<button class="${(c || '') + (UI.sort === k ? ' on' : '')}" data-act="sort" data-k="${k}">${n}${UI.sort === k ? (UI.dir < 0 ? ' ▼' : ' ▲') : ''}</button>` : html`<span class="${c || ''}">${n}</span>`))}`);
   for (const [id, v] of [['swRec', UI.onlyRec], ['swSafe', UI.safeOnly]]) { const el = document.getElementById(id); if (el) { el.classList.toggle('on', v); el.setAttribute('aria-checked', String(v)); } }
   const all = [...st.markets.values()].filter(t => t.A && t.D);
@@ -4298,7 +4400,7 @@ function renderScanner() {
   const hot = all.filter(t => t.D.decision !== 'REJECTED').sort((a, b) => b.A.finalScore - a.A.finalScore).slice(0, 3);
   patch($('hot'), html`${hot.map(hotCard)}`);
   const dex = core.http.snapshot('dexPairs');
-  patch($('mkInfo'), html`${all.length} gescannt · ${list.length} angezeigt · sortiert nach ${(SORTS.find(s => s[0] === UI.sort) || SORTS[0])[1]} · DexScreener ${dex ? dex.status : '—'}${dex && dex.latency ? ' · ' + Math.round(dex.latency) + ' ms' : ''} · ${core.state.regime.tags.join(' · ')}`);
+  patch($('mkInfo'), html`${all.length} gescannt · ${list.length} angezeigt · sortiert nach ${(SORTS.find(s => s[0] === UI.sort) || SORTS[0])[1]}<span class="an"> · DexScreener ${dex ? dex.status : '—'}${dex && dex.latency ? ' · ' + Math.round(dex.latency) + ' ms' : ''} · ${core.state.regime.tags.join(' · ')}</span>`);
   const box = $('mkList'); if (!box) return;
   if (!box._rows) box._rows = new Map();
   const rows = box._rows, keep = new Set();
@@ -4322,7 +4424,7 @@ function renderScanner() {
 }
 function renderFilterForm() {
   const S = core.S();
-  const f = [['minLiq', 'Min. Liquidität $'], ['minVol1h', 'Min. Vol 1h $'], ['minMcap', 'Min. MCap $'], ['maxMcap', 'Max. MCap $'], ['minBuyRatio', 'Min. Käuferanteil (0–1)'], ['minScore', 'Min. Final Score']];
+  const f = [['minLiq', 'Min. Liquidität $'], ['minVol1h', 'Min. Vol 1h $'], ['minMcap', 'Min. MC ($)'], ['maxMcap', 'Max. MC ($)'], ['minBuyRatio', 'Min. Käuferanteil (0–1)'], ['minScore', 'Min. Final Score']];
   patch($('filterForm'), html`<div class="row" style="margin-bottom:10px"><b class="mut">Profil:</b>${Object.keys(PROFILES).map(p => html`<button class="btn sm" data-act="profile" data-p="${p}">${p}</button>`)}</div>
     <div class="form">${f.map(([k, n]) => html`<label class="fld">${n}<input type="number" step="any" data-set="${k}" value="${S[k]}"></label>`)}
     <label class="fld">Ansicht: max. Risk Score<input type="number" min="0" max="100" data-ui="maxRisk" value="${UI.maxRisk}"></label>
@@ -4340,12 +4442,13 @@ function signalCard(t) {
   const A = t.A, D = t.D;
   const votes = (A.strat ? A.strat.votes : []).filter(v => v.vote === 'BUY' || v.strength > 0);
   return html`<div class="card ${D.decision === 'APPROVED' || D.decision === 'BUY_CANDIDATE' ? 'hit' : ''}">
-    <div class="ch"><button class="star ${core.state.watchlist[t.id] ? 'on' : ''}" data-act="star" data-id="${t.id}" aria-label="Watchlist">${core.state.watchlist[t.id] ? '★' : '☆'}</button><b>${t.symbol}</b>${decChip(D.decision)}${scoreChip(A.finalScore)}<span class="ag">${fmtAge(A.core.pairAge)} · ${A.ageClass}</span></div>
-    <div class="grid4" style="margin-top:8px">${kv('Opportunity', A.opportunity)}${kv('Risk', A.risk.total + ' ' + A.risk.level)}${kv('Confidence', A.confidence.total + '%')}${kv('Execution', A.executionScore)}</div>
-    <div style="margin-top:8px">${A.signals.length ? A.signals.map(s => html`<span class="sig" title="${s.reason}">${SIGNAL_NAMES[s.type]} <i>${s.strength}</i></span>`) : html`<span class="mut">Keine Signale</span>`}</div>
-    ${votes.length ? html`<div class="note">Strategien: ${votes.map(v => html`<span class="chip ${v.vote === 'BUY' ? 'ok' : ''} ${v.shadow ? 'vio' : ''}" title="${v.reasons.join('; ')}">${v.name}${v.shadow ? ' (Shadow)' : ''}: ${v.vote === 'BUY' ? 'BUY' : '—'} ${v.strength}</span> `)} · Konsens ${A.strat.weightSum}</div>` : ''}
-    <div style="margin-top:6px">${D.blockers.slice(0, 5).map(b => html`<span class="blk p${b.prio}" title="${b.cat} · Priorität ${b.prio}">${b.code}</span>`)}</div>
-    ${chainHtml(core.candidateChain(t))}
+    <div class="ch"><button class="star ${core.state.watchlist[t.id] ? 'on' : ''}" data-act="star" data-id="${t.id}" aria-label="Watchlist">${core.state.watchlist[t.id] ? '★' : '☆'}</button><b>${t.symbol}</b>${decChip(D.decision)}${scoreChip(A.finalScore)}${lvlChip(A.risk.level, A.risk.total)}<span class="ag">${fmtAge(A.core.pairAge)} · ${A.ageClass}</span></div>
+    <div class="grid4" style="margin-top:8px">${kv('Coin-Preis', fmtPrice(A.core.price))}${kv('MC', html`<span class="mcv">${fmtMc(A.core.mc)}</span>`)}${kv('5m', html`<span class="${cls(A.price.chg.m5)}">${fmtPct(A.price.chg.m5, 0)}</span>`)}${kv('1h', html`<span class="${cls(A.price.chg.h1)}">${fmtPct(A.price.chg.h1, 0)}</span>`)}</div>
+    <div class="grid4 an" style="margin-top:8px">${kv('Opportunity', A.opportunity)}${kv('Risk', A.risk.total + ' ' + A.risk.level)}${kv('Confidence', A.confidence.total + '%')}${kv('Execution', A.executionScore)}</div>
+    <div class="an" style="margin-top:8px">${A.signals.length ? A.signals.map(s => html`<span class="sig" title="${s.reason}">${SIGNAL_NAMES[s.type]} <i>${s.strength}</i></span>`) : html`<span class="mut">Keine Signale</span>`}</div>
+    ${votes.length ? html`<div class="note an">Strategien: ${votes.map(v => html`<span class="chip ${v.vote === 'BUY' ? 'ok' : ''} ${v.shadow ? 'vio' : ''}" title="${v.reasons.join('; ')}">${v.name}${v.shadow ? ' (Shadow)' : ''}: ${v.vote === 'BUY' ? 'BUY' : '—'} ${v.strength}</span> `)} · Konsens ${A.strat.weightSum}</div>` : ''}
+    <div class="an" style="margin-top:6px">${D.blockers.slice(0, 5).map(b => html`<span class="blk p${b.prio}" title="${b.cat} · Priorität ${b.prio}">${b.code}</span>`)}</div>
+    <div class="an">${chainHtml(core.candidateChain(t))}</div>
     <div class="note">${D.reason}</div>
     <div class="row" style="margin-top:8px"><button class="btn sm" data-act="select" data-id="${t.id}">Details & Trace</button><button class="btn sm pri" data-act="buy" data-id="${t.id}">💱 Simulate Buy</button></div></div>`;
 }
@@ -4363,7 +4466,7 @@ function renderSignals(sec) {
     ${cand.length ? html`<div class="cards2">${cand.map(signalCard)}</div>` : html`<div class="empty">Keine validen Kandidaten. NO TRADE ist eine vollwertige Entscheidung.</div>`}
     <h3>Watch (${watch.length})</h3>
     ${watch.length ? html`<div class="cards2">${watch.map(signalCard)}</div>` : html`<div class="empty">Keine Tokens auf Watch-Level.</div>`}
-    <div class="grid2" style="margin-top:12px"><div class="panel"><h3 style="margin-top:0">Häufigste Ablehnungsgründe (aktueller Scan)</h3>${rr.length ? html`<table class="tbl">${rr.map(([c, n]) => html`<tr><td><span class="blk">${c}</span></td><td class="mut">${(BLOCKER_DEFS[c] || [])[2] || ''}</td><td class="r num">${n}</td></tr>`)}</table>` : html`<div class="empty">—</div>`}</div>
+    <div class="grid2 an" style="margin-top:12px"><div class="panel"><h3 style="margin-top:0">Häufigste Ablehnungsgründe (aktueller Scan)</h3>${rr.length ? html`<table class="tbl">${rr.map(([c, n]) => html`<tr><td><span class="blk">${c}</span></td><td class="mut">${(BLOCKER_DEFS[c] || [])[2] || ''}</td><td class="r num">${n}</td></tr>`)}</table>` : html`<div class="empty">—</div>`}</div>
     <div class="panel"><h3 style="margin-top:0">Pre-Trade-Ablehnungen (kumuliert)</h3>${pre.length ? html`<table class="tbl">${pre.map(([c, n]) => html`<tr><td><span class="blk">${c}</span></td><td class="r num">${n}</td></tr>`)}</table>` : html`<div class="empty">Noch keine</div>`}</div></div>`);
 }
 
@@ -4371,15 +4474,16 @@ function renderSignals(sec) {
 function renderMarkets(sec) {
   const st = core.state, rg = st.regime || { tags: [] };
   const toks = [...st.markets.values()].filter(t => t.A && t.D && t.D.decision !== 'REJECTED' || (t.A && t.A.finalScore >= 40));
-  const key = { opportunity: t => t.A.opportunity, risk: t => -t.A.risk.total, confidence: t => t.A.confidence.total, execution: t => t.A.executionScore }[UI.rankBy];
+  const key = UI.pro ? { opportunity: t => t.A.opportunity, risk: t => -t.A.risk.total, confidence: t => t.A.confidence.total, execution: t => t.A.executionScore }[UI.rankBy] : t => t.A.finalScore;
   const top = toks.filter(t => t.A).sort((a, b) => key(b) - key(a)).slice(0, 25);
   patch(sec, html`<h2>🌐 Markt</h2>
     <div class="panel"><div class="row">${rg.tags.map(x => html`<span class="chip ${x === 'RISK_ON' ? 'ok' : x === 'RISK_OFF' ? 'bad' : x === 'HIGH_VOLATILITY' ? 'warn' : 'info'}">${x}</span>`)}</div>
-      <div class="grid4" style="margin-top:10px">${kv('Breadth (1h > 0)', rg.breadth != null ? (rg.breadth * 100).toFixed(0) + '%' : '—')}${kv('Median 1h', fmtPct(rg.medH1))}${kv('Median |5m|', rg.medM5 != null ? rg.medM5.toFixed(1) + '%' : '—')}${kv('SOL', st.sol ? fmtUsd(st.sol.usd) : '—', st.sol ? (Date.now() - st.sol.at < 60000 ? 'LIVE' : 'STALE') : 'UNKNOWN')}</div>
-      <p class="note">Regime aus ${rg.n || 0} Tokens mit Daten. Bei Risk-Off erhöht sich die Vorsicht nicht automatisch aggressiver – keine Revenge-Logik.</p></div>
-    <div class="seg" role="group" aria-label="Ranking">${[['opportunity', 'Opportunity'], ['risk', 'Niedrigstes Risiko'], ['confidence', 'Data Confidence'], ['execution', 'Execution Score']].map(([k, n]) => html`<button data-act="rank" data-k="${k}" class="${UI.rankBy === k ? 'on' : ''}">${n}</button>`)}</div>
-    <div class="panel tw" style="margin-top:10px"><table class="tbl"><thead><tr><th>#</th><th>Token</th><th class="r">Opportunity</th><th class="r">Risk</th><th class="r">Confidence</th><th class="r">Execution</th><th class="r">Score</th><th>Status</th></tr></thead><tbody>
-    ${top.map((t, i) => html`<tr class="click" data-act="select" data-id="${t.id}"><td class="num">${i + 1}</td><td><b>${t.symbol}</b></td><td class="r num">${t.A.opportunity}</td><td class="r">${lvlChip(t.A.risk.level, t.A.risk.total)}</td><td class="r num">${t.A.confidence.total}%</td><td class="r num">${t.A.executionScore}</td><td class="r">${scoreChip(t.A.finalScore)}</td><td>${decChip(t.D.decision)}</td></tr>`)}
+      <div class="grid4" style="margin-top:10px">${kvA('Breadth (1h > 0)', rg.breadth != null ? (rg.breadth * 100).toFixed(0) + '%' : '—')}${kvA('Median 1h', fmtPct(rg.medH1))}${kvA('Median |5m|', rg.medM5 != null ? rg.medM5.toFixed(1) + '%' : '—')}${kv('SOL-Preis', st.sol ? fmtUsd(st.sol.usd) : '—', st.sol ? (Date.now() - st.sol.at < 60000 ? 'LIVE' : 'STALE') : 'UNKNOWN')}</div>
+      <p class="note an">Regime aus ${rg.n || 0} Tokens mit Daten. Bei Risk-Off erhöht sich die Vorsicht nicht automatisch aggressiver – keine Revenge-Logik.</p></div>
+    <h3>Top-Tokens${UI.pro ? '' : ' nach Score'}</h3>
+    <div class="seg an" role="group" aria-label="Ranking">${[['opportunity', 'Opportunity'], ['risk', 'Niedrigstes Risiko'], ['confidence', 'Data Confidence'], ['execution', 'Execution Score']].map(([k, n]) => html`<button data-act="rank" data-k="${k}" class="${UI.rankBy === k ? 'on' : ''}">${n}</button>`)}</div>
+    <div class="panel tw" style="margin-top:10px"><table class="tbl"><thead><tr><th>#</th><th>Token</th><th class="r">Coin-Preis</th><th class="r">MC</th><th class="r an">Opportunity</th><th class="r">Risk</th><th class="r an">Confidence</th><th class="r an">Execution</th><th class="r">Score</th><th>Status</th></tr></thead><tbody>
+    ${top.map((t, i) => html`<tr class="click" data-act="select" data-id="${t.id}"><td class="num">${i + 1}</td><td><b>${t.symbol}</b></td><td class="r num">${fmtPrice(t.A.core.price)}</td><td class="r num mcv">${fmtMc(t.A.core.mc)}</td><td class="r num an">${t.A.opportunity}</td><td class="r">${lvlChip(t.A.risk.level, t.A.risk.total)}</td><td class="r num an">${t.A.confidence.total}%</td><td class="r num an">${t.A.executionScore}</td><td class="r">${scoreChip(t.A.finalScore)}</td><td>${decChip(t.D.decision)}</td></tr>`)}
     </tbody></table>${top.length ? '' : html`<div class="empty">Noch keine analysierten Tokens.</div>`}</div>`);
 }
 
@@ -4391,12 +4495,12 @@ function renderWatchlist(sec) {
     ${ids.length ? html`<div class="cards2">${ids.map(id => {
       const w = st.watchlist[id], t = tok(id), A = t && t.A;
       return html`<div class="card"><div class="ch"><button class="star on" data-act="star" data-id="${id}" aria-label="Entfernen">★</button><b>${(t && t.symbol !== '?' ? t.symbol : w.symbol) || shortAddr(mintOfId(id))}</b>${A ? html`${scoreChip(A.finalScore)}${lvlChip(A.risk.level, A.risk.total)}${lbl(A.label)}` : html`<span class="lbl UNKNOWN">KEINE DATEN</span>`}<span class="ag">P${w.priority}</span></div>
-        ${A ? html`<div class="grid4" style="margin-top:8px">${kv('Preis', fmtPrice(A.core.price))}${kv('5m', fmtPct(A.price.chg.m5, 0))}${kv('Liq', fmtUsd(A.liq.usd))}${kv('MCap', fmtUsd(A.core.mc))}</div>` : html`<p class="note">Noch keine Marktdaten (Token wird priorisiert abgefragt).</p>`}
+        ${A ? html`<div class="grid4" style="margin-top:8px">${kv('Coin-Preis', fmtPrice(A.core.price))}${kv('MC', html`<span class="mcv">${fmtMc(A.core.mc)}</span>`)}${kv('5m', fmtPct(A.price.chg.m5, 0))}${kv('1h', fmtPct(A.price.chg.h1, 0))}${kvA('Liq', fmtUsd(A.liq.usd))}</div>` : html`<p class="note">Noch keine Marktdaten (Token wird priorisiert abgefragt).</p>`}
         <div class="form" style="margin-top:8px">
           <label class="fld">Notiz<input data-wl="${id}" data-f="note" value="${w.note}" maxlength="200"></label>
           <label class="fld">Priorität<select data-wl="${id}" data-f="priority">${[1, 2, 3].map(p => html`<option value="${p}" ${w.priority === p ? raw('selected') : ''}>${p === 1 ? '1 – hoch' : p === 2 ? '2 – normal' : '3 – niedrig'}</option>`)}</select></label>
-          <label class="fld">Alarm Preis ≥<input type="number" step="any" data-wl="${id}" data-f="priceAbove" value="${w.priceAbove != null ? w.priceAbove : ''}"></label>
-          <label class="fld">Alarm Preis ≤<input type="number" step="any" data-wl="${id}" data-f="priceBelow" value="${w.priceBelow != null ? w.priceBelow : ''}"></label>
+          <label class="fld">Alarm Coin-Preis ≥ ($)<input type="number" step="any" data-wl="${id}" data-f="priceAbove" value="${w.priceAbove != null ? w.priceAbove : ''}"></label>
+          <label class="fld">Alarm Coin-Preis ≤ ($)<input type="number" step="any" data-wl="${id}" data-f="priceBelow" value="${w.priceBelow != null ? w.priceBelow : ''}"></label>
           <label class="fld">Alarm Score ≥<input type="number" data-wl="${id}" data-f="scoreAbove" value="${w.scoreAbove != null ? w.scoreAbove : ''}"></label>
           <label class="fld inl">Alerts aktiv<input type="checkbox" data-wl="${id}" data-f="alerts" ${w.alerts ? raw('checked') : ''}></label>
         </div>
@@ -4409,16 +4513,16 @@ function renderWatchlist(sec) {
 function positionCard(p) {
   const S = core.S(), t = tok(p.tokenId), now = Date.now();
   const pnlOk = isNum(p.pnlUsd);
-  const eq = core.equityInfo();
-  const tpTxt = (i) => html`${fmtPrice(p.tps[i])} ${p.tpHit[i] ? '✓' : ''}`;
+  const eq = core.equityInfo(), r = mcRatio(p, t);
+  const tpTxt = (i) => html`${pxMc(p.tps[i], r)}${p.tpHit[i] ? ' ✓' : ''}`;
   return html`<div class="card"><div class="ch"><b>${p.symbol}</b><span class="chip vio">${p.mode}</span><span class="chip">${p.strategy || 'manuell'}</span>${lbl(p.priceLabel || 'UNKNOWN')}<span class="ag">Haltedauer ${fmtAge(now - p.openedAt)}</span></div>
     <div class="grid4" style="margin-top:8px">
-      ${kv('Entry (Ø Fill)', fmtPrice(p.entryPrice))}${kv('Aktuell', fmtPrice(p.lastPrice), p.priceLabel)}
+      ${kv('Einstieg', pxMc(p.entryPrice, r), null, 'Ø Füll-Coin-Preis und die daraus abgeleitete MC')}${kv('Aktuell', pxMc(p.lastPrice, r), p.priceLabel)}
       ${kv('PnL (fee-adj.)', pnlOk ? fmtSigned(p.pnlUsd) : 'nicht verfügbar', pnlOk ? 'SIMULATED' : 'UNKNOWN')}${kv('PnL %', pnlOk ? fmtPct(p.pnlPct) : '—')}
-      ${kv('Größe (Kosten)', fmtUsd(p.costUsd))}${kv('Exposure', eq.equity > 0 ? (p.costUsd / eq.equity * 100).toFixed(1) + '%' : '—')}
-      ${kv('Stop (' + p.stopType + ')', fmtPrice(p.stop))}${kv('Trailing', p.trailing ? 'aktiv' : 'ab +' + S.trailActivatePct + '%')}
-      ${kv('TP1', tpTxt(0))}${kv('TP2', tpTxt(1))}${kv('TP3', fmtPrice(p.tps[2]))}${kv('Risk', t && t.A ? t.A.risk.level + ' ' + t.A.risk.total : '—')}
-      ${kv('Realisiert', fmtSigned(p.realizedUsd), 'SIMULATED')}${kv('Fees', fmtUsd(p.feesUsd, 4))}${kv('Exit-Impact (voll)', isNum(p.exitImpactPct) ? p.exitImpactPct.toFixed(2) + '%' : '—', 'ESTIMATED')}${kv('Buys', p.entries.length + '/' + Math.min(S.maxBuysPerCoin, 2))}
+      ${kv('Größe (Kosten)', fmtUsd(p.costUsd))}${kv('Anteil', eq.equity > 0 ? (p.costUsd / eq.equity * 100).toFixed(1) + '%' : '—')}
+      ${kv('Stop (' + p.stopType + ')', pxMc(p.stop, r))}${kv('Trailing', p.trailing ? 'aktiv' : 'ab +' + S.trailActivatePct + '%')}
+      ${kv('TP1', tpTxt(0))}${kv('TP2', tpTxt(1))}${kv('TP3', pxMc(p.tps[2], r))}${kvA('Risk', t && t.A ? t.A.risk.level + ' ' + t.A.risk.total : '—')}
+      ${kv('Realisiert', fmtSigned(p.realizedUsd), 'SIMULATED')}${kv('Fees', fmtUsd(p.feesUsd, 4))}${kvA('Exit-Impact (voll)', isNum(p.exitImpactPct) ? p.exitImpactPct.toFixed(2) + '%' : '—', 'ESTIMATED')}${kv('Buys', p.entries.length + '/' + Math.min(S.maxBuysPerCoin, 2))}
     </div>
     ${p.timeExitFlag ? html`<p class="note warn">⏱ Time Exit Candidate – erwartete Bewegung blieb aus.</p>` : ''}
     ${p.exitPending ? html`<p class="note bad">Exit ausgesetzt (${p.exitPending.code}): ${p.exitPending.blocker}</p>` : ''}
@@ -4428,6 +4532,7 @@ function renderPositions(sec) {
   const st = core.state, eq = core.equityInfo(), pf = st.portfolio;
   const unreal = st.positions.reduce((a, p) => a + (isNum(p.pnlUsd) ? p.pnlUsd : 0), 0);
   patch(sec, html`<h2>💼 Positionen <span class="lbl SIMULATED">SIMULATED</span></h2>
+    <div class="row" style="margin:0 0 10px"><button class="btn sm warn" data-act="freshStart" title="Startkapital wiederherstellen und Positionen verwerfen – gesammelte Analysedaten bleiben erhalten">↺ Frischer Start (Startkapital ${fmtUsd(core.S().simCapitalUsd)})</button></div>
     <div class="grid4">${kv('Equity', fmtUsd(eq.equity), eq.estimated ? 'ESTIMATED' : 'SIMULATED')}${kv('Cash', fmtUsd(pf.cash))}${kv('Exposure', fmtUsd(eq.exposure) + ' · ' + eq.exposurePct.toFixed(1) + '%')}${kv('Unrealisiert', fmtSigned(unreal))}${kv('Realisiert', fmtSigned(pf.realized))}${kv('Fees gesamt', fmtUsd(pf.fees, 2))}${kv('Startkapital', fmtUsd(pf.startCapital))}${kv('Max Drawdown', (pf.maxDD || 0).toFixed(2) + '%')}</div>
     <p class="note">Alle Positionen sind virtuell (SIMULATION/PAPER) mit echten Marktdaten, geschätzter Slippage und Gebühren. Es gibt keine echten Orders.</p>
     ${st.positions.length ? html`<div class="cards2">${st.positions.map(positionCard)}</div>` : html`<div class="empty">Keine offenen Positionen.</div>`}`);
@@ -4437,43 +4542,45 @@ function renderPositions(sec) {
 function renderOrders(sec) {
   const os = core.state.orders.slice(0, 120);
   patch(sec, html`<h2>🧾 Orders</h2><p class="note">Jede Order hat eine eindeutige ID und Idempotency-Key. Tx: nur echte Signaturen würden verlinkt – im Simulationsmodus existiert keine Transaktion.</p>
-    <div class="panel tw">${os.length ? html`<table class="tbl"><thead><tr><th>Zeit</th><th>Token</th><th>Typ</th><th class="r">Größe</th><th class="r">Preis</th><th>Status</th><th>Tx</th><th>Grund</th></tr></thead><tbody>
-    ${os.map(o => html`<tr class="click" data-act="order" data-id="${o.id}"><td class="num">${fmtTime(o.createdAt)}</td><td><b>${o.symbol}</b></td><td>${o.side} <small class="mut">${o.auto ? 'Bot' : 'manuell'} · ${o.mode}</small></td><td class="r num">${o.sizeUsd != null ? fmtUsd(o.sizeUsd) : '—'}</td><td class="r num">${o.fillPrice != null ? fmtPrice(o.fillPrice) : '—'}</td><td><span class="chip ${o.state === 'COMPLETED' ? 'ok' : o.state === 'REJECTED' || o.state === 'FAILED' ? 'bad' : o.state === 'CANCELLED' ? '' : 'info'}">${o.state}</span></td><td class="mut">${o.txSig ? 'Tx' : 'SIMULIERT'}</td><td class="mut">${(o.blockers && o.blockers[0] ? o.blockers[0].code + ': ' : '') + (o.reason || '').slice(0, 80)}</td></tr>`)}
+    <div class="panel tw">${os.length ? html`<table class="tbl"><thead><tr><th>Zeit</th><th>Token</th><th>Typ</th><th class="r">Größe</th><th class="r">Coin-Preis</th><th class="r">MC</th><th>Status</th><th class="an">Tx</th><th>Grund</th></tr></thead><tbody>
+    ${os.map(o => { const r = orderMcRatio(o); return html`<tr class="click" data-act="order" data-id="${o.id}"><td class="num">${fmtTime(o.createdAt)}</td><td><b>${o.symbol}</b></td><td>${o.side} <small class="mut">${o.auto ? 'Bot' : 'manuell'} · ${o.mode}</small></td><td class="r num">${o.sizeUsd != null ? fmtUsd(o.sizeUsd) : '—'}</td><td class="r num">${o.fillPrice != null ? fmtPrice(o.fillPrice) : '—'}</td><td class="r num mcv">${o.fillPrice != null ? mcAt(o.fillPrice, r) : '—'}</td><td><span class="chip ${o.state === 'COMPLETED' ? 'ok' : o.state === 'REJECTED' || o.state === 'FAILED' ? 'bad' : o.state === 'CANCELLED' ? '' : 'info'}">${o.state}</span></td><td class="mut an">${o.txSig ? 'Tx' : 'SIMULIERT'}</td><td class="mut"><span class="an">${o.blockers && o.blockers[0] ? o.blockers[0].code + ': ' : ''}</span>${(o.reason || '').slice(0, 80)}</td></tr>`; })}
     </tbody></table>` : html`<div class="empty">Noch keine Orders.</div>`}</div>`);
 }
 function orderModal(id) {
   const o = core.state.orders.find(x => x.id === id); if (!o) return;
+  const r = orderMcRatio(o);
   openModal({ title: 'Order Receipt · ' + o.id, body: html`
-    <div class="grid2">${kv('Token', o.symbol)}${kv('Seite', o.side + (o.buyNo ? ' #' + o.buyNo : ''))}${kv('Status', o.state)}${kv('Modus', o.mode)}${kv('Größe', o.sizeUsd != null ? fmtUsd(o.sizeUsd) : '—')}${kv('Menge', o.qty != null ? fmtNum(o.qty, 2) : '—')}${kv('Referenzpreis', fmtPrice(o.estPrice))}${kv('Füllpreis', fmtPrice(o.fillPrice), o.fillPrice ? 'SIMULATED' : null)}${kv('Price Impact', isNum(o.expSlipPct) ? o.expSlipPct.toFixed(3) + '%' : '—', 'ESTIMATED')}${kv('Fees', o.fees ? fmtUsd(o.fees.total, 4) : '—', 'ESTIMATED')}${kv('Latenz', o.latencyMs != null ? o.latencyMs + ' ms' : '—')}${kv('Transaktion', 'keine (Simulation)')}</div>
-    <p class="note mono">Mint: ${o.mint} · Key: ${o.key || '—'}</p>
-    ${o.blockers ? html`<h3>Blocker</h3>${o.blockers.map(b => html`<div class="check"><span class="ic fail">P${b.prio}</span><div><b>${b.code}</b><small>${b.msg}</small></div></div>`)}` : ''}
-    <h3>State Machine</h3><ul class="trace">${o.history.map(h => html`<li><b>${fmtTime(h.ts)}</b><span>${h.s}${h.note ? ' – ' + h.note : ''}</span></li>`)}</ul>
-    <div class="row" style="margin-top:8px"><button class="btn sm" data-act="copy" data-v="${o.mint}" data-l="Mint">⧉ Copy Mint</button>${o.fillPrice ? html`<button class="btn sm" data-act="copy" data-v="${String(o.fillPrice)}" data-l="Preis">⧉ Copy Price</button>` : ''}</div>` });
+    <div class="grid2">${kv('Token', o.symbol)}${kv('Seite', o.side + (o.buyNo ? ' #' + o.buyNo : ''))}${kv('Status', o.state)}${kv('Modus', o.mode)}${kv('Größe', o.sizeUsd != null ? fmtUsd(o.sizeUsd) : '—')}${kv('Menge', o.qty != null ? fmtNum(o.qty, 2) : '—')}${kv('Referenz', pxMc(o.estPrice, r))}${kv('Füllung', pxMc(o.fillPrice, r), o.fillPrice ? 'SIMULATED' : null)}${kvA('Price Impact', isNum(o.expSlipPct) ? o.expSlipPct.toFixed(3) + '%' : '—', 'ESTIMATED')}${kv('Fees', o.fees ? fmtUsd(o.fees.total, 4) : '—', 'ESTIMATED')}${kvA('Latenz', o.latencyMs != null ? o.latencyMs + ' ms' : '—')}${kv('Transaktion', 'keine (Simulation)')}</div>
+    ${o.reason ? html`<p class="note">${o.reason}</p>` : ''}
+    <p class="note mono">Mint: ${o.mint}<span class="an"> · Key: ${o.key || '—'}</span></p>
+    ${o.blockers ? html`<div class="an"><h3>Blocker</h3>${o.blockers.map(b => html`<div class="check"><span class="ic fail">P${b.prio}</span><div><b>${b.code}</b><small>${b.msg}</small></div></div>`)}</div>` : ''}
+    <div class="an"><h3>State Machine</h3><ul class="trace">${o.history.map(h => html`<li><b>${fmtTime(h.ts)}</b><span>${h.s}${h.note ? ' – ' + h.note : ''}</span></li>`)}</ul></div>
+    <div class="row" style="margin-top:8px"><button class="btn sm" data-act="copy" data-v="${o.mint}" data-l="Mint">⧉ Copy Mint</button>${o.fillPrice ? html`<button class="btn sm" data-act="copy" data-v="${String(o.fillPrice)}" data-l="Coin-Preis">⧉ Coin-Preis kopieren</button>` : ''}</div>` });
 }
 
 /* ---------- History & Trade Replay ---------- */
 function renderHistory() {
   const q = UI.hq.trim().toLowerCase();
-  const list = core.state.journal.filter(j => (!UI.hMode || j.mode === UI.hMode) && (!UI.hRes || (UI.hRes === 'open' ? j.status !== 'CLOSED' : j.result && (UI.hRes === 'win' ? j.result.win : !j.result.win))) && (!q || (j.symbol + ' ' + j.mint + ' ' + (j.reason || '') + ' ' + (j.exitReason || '') + ' ' + (j.strategy || '')).toLowerCase().includes(q))).slice(0, 200);
-  patch($('hList'), list.length ? html`<div class="panel tw"><table class="tbl"><thead><tr><th>Eröffnet</th><th>Token</th><th>Modus</th><th>Strategie</th><th class="r">Größe</th><th class="r">PnL</th><th>Exit</th><th class="r">Halten</th><th class="r">Score</th></tr></thead><tbody>
-    ${list.map(j => html`<tr class="click" data-act="trade" data-id="${j.id}"><td class="num">${fmtDateTime(j.openedAt)}</td><td><b>${j.symbol}</b></td><td>${j.mode}</td><td>${j.strategy || 'manuell'}</td><td class="r num">${fmtUsd(j.sizeUsd)}</td><td class="r num ${j.result ? cls(j.result.pnlUsd) : ''}">${j.result ? fmtSigned(j.result.pnlUsd) + ' (' + fmtPct(j.result.pnlPct) + ')' : j.status}</td><td>${j.exitReason || '—'}</td><td class="r num">${j.holdMs ? fmtAge(j.holdMs) : '—'}</td><td class="r">${scoreChip(j.score)}</td></tr>`)}
+  const list = core.state.journal.filter(j => (!UI.hMode || j.mode === UI.hMode) && (!UI.hRes || (UI.hRes === 'open' ? !['CLOSED', 'RESET'].includes(j.status) : j.result && (UI.hRes === 'win' ? j.result.win : !j.result.win))) && (!q || (j.symbol + ' ' + j.mint + ' ' + (j.reason || '') + ' ' + (j.exitReason || '') + ' ' + (j.strategy || '')).toLowerCase().includes(q))).slice(0, 200);
+  patch($('hList'), list.length ? html`<div class="panel tw"><table class="tbl"><thead><tr><th>Eröffnet</th><th>Token</th><th>Modus</th><th class="an">Strategie</th><th class="r">Größe</th><th class="r">PnL</th><th>Exit</th><th class="r">Halten</th><th class="r an">Score</th></tr></thead><tbody>
+    ${list.map(j => html`<tr class="click" data-act="trade" data-id="${j.id}"><td class="num">${fmtDateTime(j.openedAt)}</td><td><b>${j.symbol}</b></td><td>${j.mode}</td><td class="an">${j.strategy || 'manuell'}</td><td class="r num">${fmtUsd(j.sizeUsd)}</td><td class="r num ${j.result ? cls(j.result.pnlUsd) : ''}">${j.result ? fmtSigned(j.result.pnlUsd) + ' (' + fmtPct(j.result.pnlPct) + ')' : j.status === 'RESET' ? 'Frischer Start' : j.status}</td><td>${j.exitReason || '—'}</td><td class="r num">${j.holdMs ? fmtAge(j.holdMs) : '—'}</td><td class="r an">${scoreChip(j.score)}</td></tr>`)}
     </tbody></table></div>` : html`<div class="empty">Keine Trades${q || UI.hMode || UI.hRes ? ' für diesen Filter' : ''}. Alle Trades sind simuliert und klar gekennzeichnet.</div>`);
 }
 function tradeModal(id) {
   const j = core.state.journal.find(x => x.id === id); if (!j) return;
-  const d = j.decision || {}, sn = d.snapshot || {};
+  const d = j.decision || {}, sn = d.snapshot || {}, r = mcRatio({ id: j.id }, tok(j.tokenId));
   openModal({ title: `Trade Replay · ${j.symbol} (${j.mode})`, body: html`
-    <div class="grid2">${kv('Trade ID', j.id)}${kv('Status', j.status)}${kv('Eröffnet', fmtDateTime(j.openedAt))}${kv('Geschlossen', fmtDateTime(j.closedAt))}${kv('Investiert', fmtUsd(j.sizeUsd))}${kv('Ergebnis', j.result ? fmtSigned(j.result.pnlUsd) : '—', 'SIMULATED')}${kv('Fees', fmtUsd(j.feesUsd, 4))}${kv('Slippage', fmtUsd(j.slippageUsd, 4), 'ESTIMATED')}${kv('Exit-Grund', j.exitReason || '—')}${kv('MAE 2 min', isNum(j.mae2m) ? fmtPct(j.mae2m) : '—')}${kv('Ø Exec-Latenz', j.execLatencyMs != null ? Math.round(j.execLatencyMs) + ' ms' : '—')}${kv('Param-Version', 'v' + j.paramVersion)}</div>
-    <h3>Market Snapshot bei Entscheidung (unveränderlich)</h3>
-    <div class="grid2">${kv('Preis', fmtPrice(sn.priceUsd))}${kv('Liquidität', fmtUsd(sn.liquidityUsd))}${kv('MCap', fmtUsd(sn.marketCap))}${kv('Vol 1h', fmtUsd(sn.vol && sn.vol.h1))}${kv('Quelle', sn.source || '—')}${kv('Zeit', fmtTime(sn.fetchedAt))}${kv('Security', d.security ? d.security.status : '—')}${kv('SOL', d.sol ? fmtUsd(d.sol) : '—')}</div>
-    <h3>Entscheidung</h3><p>Score <b>${j.score}</b> · Confidence <b>${j.confidence}</b> · Risk <b>${j.risk ? j.risk.total + ' ' + j.risk.level : '—'}</b> · Strategie <b>${j.strategy || 'manuell'}</b> · Regime ${(j.regime || []).join(', ')}</p>
+    <div class="grid2">${kvA('Trade ID', j.id)}${kv('Status', j.status === 'RESET' ? 'Frischer Start (nicht gewertet)' : j.status)}${kv('Eröffnet', fmtDateTime(j.openedAt))}${kv('Geschlossen', fmtDateTime(j.closedAt))}${kv('Investiert', fmtUsd(j.sizeUsd))}${kv('Ergebnis', j.result ? fmtSigned(j.result.pnlUsd) : '—', 'SIMULATED')}${kv('Fees', fmtUsd(j.feesUsd, 4))}${kvA('Slippage', fmtUsd(j.slippageUsd, 4), 'ESTIMATED')}${kv('Exit-Grund', j.exitReason || '—')}${kvA('MAE 2 min', isNum(j.mae2m) ? fmtPct(j.mae2m) : '—')}${kvA('Ø Exec-Latenz', j.execLatencyMs != null ? Math.round(j.execLatencyMs) + ' ms' : '—')}${kvA('Param-Version', 'v' + j.paramVersion)}</div>
+    <h3>Markt beim Einstieg</h3>
+    <div class="grid2">${kv('Coin-Preis', fmtPrice(sn.priceUsd))}${kv('MC', html`<span class="mcv">${fmtMc(isNum(sn.marketCap) ? sn.marketCap : sn.fdv)}</span>`)}${kvA('Liquidität', fmtUsd(sn.liquidityUsd))}${kvA('Vol 1h', fmtUsd(sn.vol && sn.vol.h1))}${kvA('Quelle', sn.source || '—')}${kvA('Zeit', fmtTime(sn.fetchedAt))}${kvA('Security', d.security ? d.security.status : '—')}${kvA('SOL-Preis', d.sol ? fmtUsd(d.sol) : '—')}</div>
+    <div class="an"><h3>Entscheidung</h3><p>Score <b>${j.score}</b> · Confidence <b>${j.confidence}</b> · Risk <b>${j.risk ? j.risk.total + ' ' + j.risk.level : '—'}</b> · Strategie <b>${j.strategy || 'manuell'}</b> · Regime ${(j.regime || []).join(', ')}</p></div>
     <p class="note">${j.reason}</p>
-    <div>${j.signals.map(s => html`<span class="sig" title="${s.reason}">${SIGNAL_NAMES[s.type] || s.type} <i>${s.strength}</i></span>`)}</div>
-    <div>${(j.tags || []).map(x => html`<span class="chip info">${x}</span> `)}</div>
-    ${d.trace ? html`<h3>Decision Trace</h3><ul class="trace">${d.trace.map(x => html`<li><span class="ic">${x.ok === true ? '✅' : x.ok === false ? '❌' : '·'}</span><b>${x.stage}</b><span>${x.detail}</span></li>`)}</ul>` : ''}
-    <h3>Ausführungen</h3><table class="tbl"><tr><th>Zeit</th><th>Typ</th><th class="r">Preis</th><th class="r">USD</th><th class="r">Fees</th><th>Grund</th></tr>
-    ${j.entries.map(e => html`<tr><td class="num">${fmtTime(e.ts)}</td><td>BUY</td><td class="r num">${fmtPrice(e.price)}</td><td class="r num">${fmtUsd(e.usd)}</td><td class="r num">${fmtUsd(e.fees, 4)}</td><td>—</td></tr>`)}
-    ${j.exits.map(e => html`<tr><td class="num">${fmtTime(e.ts)}</td><td>SELL</td><td class="r num">${fmtPrice(e.price)}</td><td class="r num">${fmtUsd(e.usd)}</td><td class="r num">${fmtUsd(e.fees, 4)}</td><td>${e.reason} (${fmtSigned(e.realized)})</td></tr>`)}</table>` });
+    <div class="an">${j.signals.map(s => html`<span class="sig" title="${s.reason}">${SIGNAL_NAMES[s.type] || s.type} <i>${s.strength}</i></span>`)}</div>
+    <div class="an">${(j.tags || []).map(x => html`<span class="chip info">${x}</span> `)}</div>
+    ${d.trace ? html`<div class="an"><h3>Decision Trace</h3><ul class="trace">${d.trace.map(x => html`<li><span class="ic">${x.ok === true ? '✅' : x.ok === false ? '❌' : '·'}</span><b>${x.stage}</b><span>${x.detail}</span></li>`)}</ul></div>` : ''}
+    <h3>Ausführungen</h3><div class="tw"><table class="tbl"><tr><th>Zeit</th><th>Typ</th><th class="r">Coin-Preis</th><th class="r">MC</th><th class="r">USD</th><th class="r">Fees</th><th>Grund</th></tr>
+    ${j.entries.map(e => html`<tr><td class="num">${fmtTime(e.ts)}</td><td>BUY</td><td class="r num">${fmtPrice(e.price)}</td><td class="r num mcv">${mcAt(e.price, r)}</td><td class="r num">${fmtUsd(e.usd)}</td><td class="r num">${fmtUsd(e.fees, 4)}</td><td>—</td></tr>`)}
+    ${j.exits.map(e => html`<tr><td class="num">${fmtTime(e.ts)}</td><td>SELL</td><td class="r num">${fmtPrice(e.price)}</td><td class="r num mcv">${mcAt(e.price, r)}</td><td class="r num">${fmtUsd(e.usd)}</td><td class="r num">${fmtUsd(e.fees, 4)}</td><td>${e.reason} (${fmtSigned(e.realized)})</td></tr>`)}</table></div>` });
 }
 
 /* ---------- Backtest Lab ---------- */
@@ -4513,7 +4620,7 @@ function renderBtResult() {
       <table class="tbl"><tr><th>${BT_STRATEGIES[r.cfg.strategy].param}</th><th class="r">Train Trades</th><th class="r">Train Expectancy</th><th class="r">Train Win Rate</th></tr>${r.wf.grid.map(g => html`<tr><td>${g.param}${g.param === r.wf.chosen ? ' ✓' : ''}</td><td class="r num">${g.train.trades}</td><td class="r num">${fmtUsd(g.train.expectancy)}</td><td class="r num">${g.train.winRate != null ? (g.train.winRate * 100).toFixed(0) + '%' : '—'}</td></tr>`)}</table>
       <h3>Validation (25 %)</h3>${metricGrid(r.wf.validation)}<h3>Test (25 %, out-of-sample)</h3>${metricGrid(r.wf.test)}` : html`${metricGrid(r.res.metrics)}`}
     <h3>Equity-Kurve ${r.wf ? '(Test)' : ''}</h3><div class="chartbox small"><canvas data-chart="bt" aria-label="Backtest Equity"></canvas></div>
-    <h3>Trades</h3><div class="tw"><table class="tbl"><tr><th>Einstieg</th><th>Ausstieg</th><th class="r">Entry</th><th class="r">Exit</th><th class="r">PnL</th><th>Grund</th></tr>${(r.wf ? r.wf.testTrades : r.res.trades).slice(-60).map(t => html`<tr><td class="num">${fmtDateTime(t.entryT)}</td><td class="num">${fmtDateTime(t.exitT)}</td><td class="r num">${fmtPrice(t.entry)}</td><td class="r num">${fmtPrice(t.exit)}</td><td class="r num ${cls(t.pnl)}">${fmtSigned(t.pnl)}</td><td>${t.reason}</td></tr>`)}</table></div>
+    <h3>Trades</h3><div class="tw"><table class="tbl"><tr><th>Einstieg</th><th>Ausstieg</th><th class="r">Einstieg Coin-Preis</th><th class="r">Ausstieg Coin-Preis</th><th class="r">PnL</th><th>Grund</th></tr>${(r.wf ? r.wf.testTrades : r.res.trades).slice(-60).map(t => html`<tr><td class="num">${fmtDateTime(t.entryT)}</td><td class="num">${fmtDateTime(t.exitT)}</td><td class="r num">${fmtPrice(t.entry)}</td><td class="r num">${fmtPrice(t.exit)}</td><td class="r num ${cls(t.pnl)}">${fmtSigned(t.pnl)}</td><td>${t.reason}</td></tr>`)}</table></div>
     <p class="note">Keine Aussage über zukünftige Ergebnisse. Keine Optimierung auf die gesamte Historie.</p></div>`);
   drawCharts(el);
 }
@@ -4599,8 +4706,8 @@ function walletPanel() {
 function renderAlerts(sec) {
   const f = core.state.feed;
   patch(sec, html`<h2>💬 Alarm-Chat</h2><div class="toolbar"><button class="btn" data-act="notify">🔔 Browser-Benachrichtigungen</button><button class="btn sm" data-act="clearFeed">Verlauf leeren</button></div>
-    ${f.length ? f.slice(0, 80).map(e => html`<div class="bub ${e.level}"><small>${fmtTime(e.ts)} · ${e.tag}${e.label ? ' · Daten ' + e.label : ''}${isNum(e.dataAge) ? ' (' + fmtAge(e.dataAge) + ' alt)' : ''}</small>${e.sym ? html`<b>${e.sym}</b> · ` : ''}${e.detail}
-      ${e.mint ? html`<div class="note">${isNum(e.mc) ? 'MC ' + fmtUsd(e.mc) + ' · ' : ''}${isNum(e.score) ? 'Score ' + e.score + ' · ' : ''}${e.risk ? 'Risk ' + e.risk + (isNum(e.riskScore) ? ' ' + e.riskScore : '') + ' · ' : ''}${isNum(e.conf) ? 'Confidence ' + e.conf + '%' : ''}${isNum(e.strength) ? ' · Stärke ' + e.strength : ''}</div>
+    ${f.length ? f.slice(0, 80).map(e => html`<div class="bub ${e.level}"><small>${fmtTime(e.ts)} · ${e.tag}<span class="an">${e.label ? ' · Daten ' + e.label : ''}${isNum(e.dataAge) ? ' (' + fmtAge(e.dataAge) + ' alt)' : ''}</span></small>${e.sym ? html`<b>${e.sym}</b> · ` : ''}${e.detail}
+      ${e.mint ? html`<div class="note">${isNum(e.price) ? 'Coin-Preis ' + fmtPrice(e.price) + ' · ' : ''}${isNum(e.mc) ? html`<span class="mcv">${fmtMc(e.mc)}</span>` : ''}${e.risk ? ' · Risiko ' + e.risk : ''}<span class="an">${isNum(e.score) ? ' · Score ' + e.score : ''}${isNum(e.riskScore) ? ' · Risk ' + e.riskScore : ''}${isNum(e.conf) ? ' · Confidence ' + e.conf + '%' : ''}${isNum(e.strength) ? ' · Stärke ' + e.strength : ''}</span></div>
       <button class="ca" data-act="copy" data-v="${e.mint}" data-l="Mint"><code>${e.mint}</code><span>⧉ kopieren</span></button>
       <div class="lk"><a href="#" data-act="select" data-id="${e.tokenId}">🔍 Details</a>${linkHtml([['DexScreener', LINKS.dexscreener(null, e.mint)], ['RugCheck', LINKS.rugcheck(e.mint)], ['Solscan', LINKS.solscanToken(e.mint)]])}</div>` : ''}</div>`) : html`<div class="empty">Noch keine Alarme. Sie erscheinen hier wie in einem Chat.</div>`}`);
 }
@@ -4619,7 +4726,7 @@ function renderDiagnostics(sec) {
     <div class="grid2"><div class="panel"><h3 style="margin-top:0">System & Sicherheit (global)</h3>${checkRows(d.system)}</div>
       <div><div class="panel"><h3 style="margin-top:0">Trading-Einstellungen</h3>${checkRows(d.trading)}</div><div class="panel"><h3 style="margin-top:0">Markt (informativ)</h3>${checkRows(d.market)}</div></div></div>
     <div class="panel"><h3 style="margin-top:0">Kandidaten im Detail (je Token, kein globaler Block)</h3>
-      <p class="note">Je Stufe: PASS · Ablehnungsgrund · „—“ = nicht erreicht. Werte stehen klein daneben (Security, Liquidität, MCap, Volumen, Momentum, Risk, Score, Confidence, Konsens).</p>
+      <p class="note">Je Stufe: PASS · Ablehnungsgrund · „—“ = nicht erreicht. Werte stehen klein daneben (Security, Liquidität, MC, Volumen, Momentum, Risk, Score, Confidence, Konsens).</p>
       ${d.chains.length ? d.chains.map(c => html`<div class="card" style="margin-bottom:8px;padding:10px"><div class="ch"><a href="#" data-act="select" data-id="${c.id}"><b>${c.symbol}</b></a>${decChip(c.chain.decision)}${scoreChip(c.score)}${c.chain.reason ? html`<span class="ag">${c.chain.reason}</span>` : ''}</div>
         ${chainHtml(c.chain)}</div>`) : html`<div class="empty">Noch keine analysierten Kandidaten.</div>`}</div>
     <div class="grid2"><div class="panel"><h3 style="margin-top:0">Candidate Pipeline (aktueller Scan)</h3>${PIPELINE.map((p, i) => { const n = d.funnel[p] || 0, first = d.funnel.DISCOVERY || 1; return html`<div class="meter"><span>${i + 1}. ${p.replace('_', ' ')}</span>${bar(n / first * 100, 'var(--pink)')}<span class="num r">${n}</span></div>`; })}</div>
@@ -4682,6 +4789,8 @@ function renderSettings(sec) {
   const S = core.S(), st = core.state;
   const sections = [...new Set(SETTINGS_SCHEMA.map(d => d.s))];
   setHTML(sec, html`<h2>⚙ Einstellungen</h2>
+    <div class="panel"><h3 style="margin-top:0">Ansicht</h3><div class="row">${proToggle()}</div>
+      <p class="note">AUS (Standard): nur die für dich relevanten Werte. AN: zusätzlich alle Analysedaten, mit denen der Bot seine Kauf-/Verkaufsentscheidungen trifft (Scores, Risikofaktoren, Confidence, Strategie-Stimmen, Blocker, Entscheidungsketten, Indikatoren). Der Bot rechnet immer mit allen Daten.</p></div>
     <p class="note">Alle Werte werden validiert (endliche Zahlen, Min/Max, Prozente, keine negativen Kapitalwerte). Sichere Defaults: SIMULATION, Auto-Trading AUS. Änderungen werden versioniert protokolliert.</p>
     <div class="row" style="margin-bottom:10px"><b class="mut">Profil:</b>${Object.keys(PROFILES).map(p => html`<button class="btn sm" data-act="profile" data-p="${p}">${p}</button>`)}</div>
     ${sections.map(s => html`<details class="panel" ${s === 'Filter' || s === 'Risiko' ? raw('open') : ''}><summary><b>${s}</b></summary><div class="form" style="margin-top:10px">${SETTINGS_SCHEMA.filter(d => d.s === s).map(d => settingField(d, S))}</div></details>`)}
@@ -4691,7 +4800,7 @@ function renderSettings(sec) {
     <details class="panel"><summary><b>Export / Import / Reset</b></summary><div class="row" style="margin-top:10px">
       <button class="btn sm" data-act="export" data-kind="settings-json">⬇ Settings JSON</button><button class="btn sm" data-act="export" data-kind="journal-json">⬇ Journal JSON</button><button class="btn sm" data-act="export" data-kind="journal-csv">⬇ Journal CSV</button><button class="btn sm" data-act="export" data-kind="analytics-json">⬇ Analytics JSON</button><button class="btn sm" data-act="export" data-kind="logs-json">⬇ Logs JSON</button>
       <button class="btn sm" data-act="importSettings">⬆ Settings/Watchlist importieren</button></div>
-      <div class="row" style="margin-top:10px"><button class="btn sm warn" data-act="resetSettings">Einstellungen zurücksetzen</button><button class="btn sm warn" data-act="resetPortfolio">Sim-Portfolio zurücksetzen</button><button class="btn sm bad" data-act="factoryReset">Factory Reset</button></div></details>
+      <div class="row" style="margin-top:10px"><button class="btn sm warn" data-act="freshStart">↺ Frischer Start (Startkapital, Positionen leeren, Analysedaten behalten)</button><button class="btn sm warn" data-act="resetSettings">Einstellungen zurücksetzen</button><button class="btn sm warn an" data-act="resetPortfolio">Sim-Portfolio zurücksetzen</button><button class="btn sm bad" data-act="factoryReset">Factory Reset</button></div></details>
     <details class="panel"><summary><b>Config Change Log & Audit Trail</b></summary>
       <h3>Konfigurationsänderungen</h3>${st.configLog.length ? html`<div class="tw"><table class="tbl">${st.configLog.slice(0, 40).map(c => html`<tr><td class="num">${fmtDateTime(c.ts)}</td><td>${c.who}</td><td>${c.kind}</td><td class="mut">${c.changes.map(x => x.key + ': ' + x.from + ' → ' + x.to).join(' · ')}</td></tr>`)}</table></div>` : html`<p class="mut">Keine Änderungen.</p>`}
       <h3>Audit Trail (wer/was/wann/warum)</h3>${st.auditLog.length ? html`<div class="tw"><table class="tbl">${st.auditLog.slice(0, 60).map(a => html`<tr><td class="num">${fmtDateTime(a.ts)}</td><td>${a.who}</td><td>${a.what}</td><td class="mut">${a.detail}${a.why ? ' · ' + a.why : ''}</td></tr>`)}</table></div>` : html`<p class="mut">Noch keine Einträge.</p>`}</details>
@@ -4710,7 +4819,7 @@ const KB = [
   ['Solana', 'Freeze Authority', 'Eine aktive Freeze Authority kann Token-Konten einfrieren – Verkauf wäre dann unmöglich. Status CRITICAL, Käufe blockiert.'],
   ['Solana', 'Token-2022-Extensions', 'Permanent Delegate, Transfer Hook, Transfer Fee oder Non-Transferable können Verkäufe verhindern oder verteuern. Sie werden aus den Mint-Daten erkannt und als Risiko markiert.'],
   ['Solana', 'Lamports & Gebühren', '1 SOL = 1.000.000.000 Lamports. Gebühren = Basisgebühr (5000 Lamports) + Priority Fee + DEX-Gebühr. Umrechnung erfolgt exakt über BigInt; ohne aktuellen SOL-Preis wird nicht gehandelt.'],
-  ['Liquidity', 'Liquidität / Market Cap', 'Ein niedriges Verhältnis (< 3 %) bedeutet dünne Exit-Liquidität: Schon kleine Verkäufe bewegen den Preis stark.'],
+  ['Liquidity', 'Liquidität / MC (Market Cap)', 'Ein niedriges Verhältnis (< 3 %) bedeutet dünne Exit-Liquidität: Schon kleine Verkäufe bewegen den Preis stark.'],
   ['Slippage', 'Price Impact (AMM)', 'Geschätzt über die Konstantprodukt-Formel: Impact ≈ Größe / (Liquidität/2 + Größe). Das ist eine Schätzung (ESTIMATED); echte Pools, Gebührenstufen und MEV können abweichen.'],
   ['Memecoin Risks', 'Rug Pull & Holder-Konzentration', 'Hohe Konzentration bei wenigen Wallets, ungesperrte LP und aktive Authorities sind typische Rug-Risiken. Holder-Daten via RPC enthalten Pool-/LP-Konten und sind daher Beobachtungen mit begrenzter Confidence – keine Insider-Behauptungen.'],
   ['Memecoin Risks', 'Boosts sind Werbung', 'DexScreener-Boosts sind bezahlte Promotion. Sie werden als Flag angezeigt, erhöhen aber nicht den Score.'],
@@ -4738,9 +4847,10 @@ function detailHead(t) {
   if (!A) return html`<div class="dhead"><h2>${t.symbol}</h2><button class="dclose" data-act="closeDetail" aria-label="Details schließen">✕</button></div><p class="mut">Warte auf Marktdaten … (keine Platzhalterwerte)</p>`;
   const c = A.price.chg;
   return html`<div class="dhead"><div style="min-width:0"><h2>${t.symbol} <small class="mut">${t.name}</small></h2>
-    <div class="row" style="margin-top:4px">${decChip(D.decision)}${scoreChip(A.finalScore)}${lvlChip(A.risk.level, A.risk.total)}<span class="chip info" title="Data Confidence">Conf ${A.confidence.total}%</span><span class="chip">${A.ageClass}</span>${lbl(A.label)}</div></div>
+    <div class="row" style="margin-top:4px">${decChip(D.decision)}${scoreChip(A.finalScore)}${lvlChip(A.risk.level, A.risk.total)}<span class="chip info an" title="Data Confidence">Conf ${A.confidence.total}%</span><span class="chip">${A.ageClass}</span>${lbl(A.label)}</div></div>
     <button class="dclose" data-act="closeDetail" aria-label="Details schließen">✕</button></div>
-    <div class="row" style="margin-top:8px"><b class="num" style="font-size:21px" title="${A.core.priceRaw || ''}">${fmtPrice(A.core.price)}</b><span class="num ${cls(c.m5)}">5m ${fmtPct(c.m5)}</span><span class="num ${cls(c.h1)}">1h ${fmtPct(c.h1)}</span><span class="num ${cls(c.h24)}">24h ${fmtPct(c.h24)}</span><span class="mut">· ${A.dataAge != null ? fmtAge(A.dataAge) + ' alt' : ''} · ${A.core.source || '—'}</span></div>
+    <div class="row" style="margin-top:8px"><span><small class="mut">Coin-Preis </small><b class="num" style="font-size:21px" title="${A.core.priceRaw || ''}">${fmtPrice(A.core.price)}</b></span><b class="num mcv" style="font-size:17px">${fmtMc(A.core.mc)}</b></div>
+    <div class="row" style="margin-top:4px"><span class="num ${cls(c.m5)}">5m ${fmtPct(c.m5)}</span><span class="num ${cls(c.h1)}">1h ${fmtPct(c.h1)}</span><span class="num ${cls(c.h24)}">24h ${fmtPct(c.h24)}</span><span class="mut an">· ${A.dataAge != null ? fmtAge(A.dataAge) + ' alt' : ''} · ${A.core.source || '—'}</span></div>
     <button class="ca" data-act="copy" data-v="${t.mint}" data-l="Mint"><code>${t.mint}</code><span>⧉ Mint</span></button>
     <div class="row" style="margin-top:8px"><button class="btn sm ${w ? 'on' : ''}" data-act="star" data-id="${t.id}">${w ? '★ Watchlist' : '☆ Watchlist'}</button><button class="btn sm pri" data-act="buy" data-id="${t.id}">💱 Simulate Buy</button><button class="btn sm" data-act="analyze" data-id="${t.id}">🔍 Neu analysieren</button><button class="btn sm" data-act="ctx" data-id="${t.id}" aria-label="Weitere Aktionen">⋯</button></div>`;
 }
@@ -4748,35 +4858,37 @@ function meterRow(name, v, color, label) { return html`<div class="meter"><span>
 function tabOverview(t) {
   const A = t.A; if (!A) return '';
   const tx = A.tx, v = A.vol;
-  return html`<div class="grid3">${kv('Market Cap', fmtUsd(A.core.mc), A.labels.price)}${kv('FDV', fmtUsd(A.core.fdv))}${kv('Liquidität', fmtUsd(A.liq.usd), A.labels.liquidity)}
-    ${kv('Liq/MCap', A.liq.ratioMc != null ? (A.liq.ratioMc * 100).toFixed(1) + '%' : '—')}${kv('Vol 5m', fmtUsd(v.m5))}${kv('Vol 1h', fmtUsd(v.h1), A.labels.volume)}
-    ${kv('Vol 24h', fmtUsd(v.h24))}${kv('Txns 5m K/V', (tx.b5 != null ? tx.b5 : '—') + '/' + (tx.s5 != null ? tx.s5 : '—'))}${kv('Txns 1h K/V', (tx.b1 != null ? tx.b1 : '—') + '/' + (tx.s1 != null ? tx.s1 : '—'))}
-    ${kv('Käufer 5m', tx.ratio5 != null ? (tx.ratio5 * 100).toFixed(0) + '%' : '—')}${kv('Käufer 1h', tx.ratio1 != null ? (tx.ratio1 * 100).toFixed(0) + '%' : '—')}${kv('Ø Trade 5m', fmtUsd(tx.avgTrade5))}
-    ${kv('Run-Rate 5m', v.runRate5 != null ? v.runRate5.toFixed(2) + '×' : '—')}${kv('Volatilität/min', A.price.volPct != null ? A.price.volPct.toFixed(2) + '%' : '—', A.price.volLabel)}${kv('Drawdown 30m', fmtPct(A.price.drawdown))}
-    ${kv('Pair-Alter', fmtAge(A.core.pairAge))}${kv('DEX', A.core.dexId || '—')}${kv('Top-10 Holder', A.sec.top10Pct != null ? A.sec.top10Pct.toFixed(1) + '%' : '—', A.labels.holders)}</div>
-    <h3>Opportunity vs. Risk vs. Confidence</h3>
+  const seen = core.state.seen[t.id];
+  return html`<div class="grid3">${kv('Coin-Preis', fmtPrice(A.core.price), A.labels.price)}${kv('MC', html`<span class="mcv">${fmtMc(A.core.mc)}</span>`, A.labels.price)}${kvA('FDV', fmtMc(A.core.fdv).replace(' MC', ' FDV'))}${kv('Liquidität', fmtUsd(A.liq.usd), A.labels.liquidity)}
+    ${kvA('Liq/MC', A.liq.ratioMc != null ? (A.liq.ratioMc * 100).toFixed(1) + '%' : '—')}${kvA('Vol 5m', fmtUsd(v.m5))}${kv('Vol 1h', fmtUsd(v.h1), A.labels.volume)}
+    ${kv('Vol 24h', fmtUsd(v.h24))}${kvA('Txns 5m K/V', (tx.b5 != null ? tx.b5 : '—') + '/' + (tx.s5 != null ? tx.s5 : '—'))}${kvA('Txns 1h K/V', (tx.b1 != null ? tx.b1 : '—') + '/' + (tx.s1 != null ? tx.s1 : '—'))}
+    ${kvA('Käufer 5m', tx.ratio5 != null ? (tx.ratio5 * 100).toFixed(0) + '%' : '—')}${kvA('Käufer 1h', tx.ratio1 != null ? (tx.ratio1 * 100).toFixed(0) + '%' : '—')}${kvA('Ø Trade 5m', fmtUsd(tx.avgTrade5))}
+    ${kvA('Run-Rate 5m', v.runRate5 != null ? v.runRate5.toFixed(2) + '×' : '—')}${kvA('Volatilität/min', A.price.volPct != null ? A.price.volPct.toFixed(2) + '%' : '—', A.price.volLabel)}${kvA('Drawdown 30m', fmtPct(A.price.drawdown))}
+    ${kv('Pair-Alter', fmtAge(A.core.pairAge))}${kv('DEX', A.core.dexId || '—')}${kvA('Top-10 Holder', A.sec.top10Pct != null ? A.sec.top10Pct.toFixed(1) + '%' : '—', A.labels.holders)}</div>
+    <div class="an"><h3>Opportunity vs. Risk vs. Confidence</h3>
     ${meterRow('Opportunity', A.opportunity, 'var(--green)')}${meterRow('Risk', A.risk.total, riskColor(A.risk.total))}${meterRow('Confidence', A.confidence.total, 'var(--cyan)')}${meterRow('Execution', A.executionScore, 'var(--violet)')}
-    <h3>Technische Analyse ${A.ta ? lbl(A.ta.label) : ''}</h3>${A.ta ? html`<div class="grid3">${kv('EMA 9', fmtPrice(A.ta.ema9))}${kv('EMA 21', fmtPrice(A.ta.ema21))}${kv('SMA 20', fmtPrice(A.ta.sma20))}${kv('RSI 14', A.ta.rsi != null ? A.ta.rsi.toFixed(0) : '—')}${kv('ATR %', A.ta.atrPct != null ? A.ta.atrPct.toFixed(2) + '%' : '—')}${kv('ROC 10', fmtPct(A.ta.roc))}${kv('VWAP', fmtPrice(A.ta.vwap))}${kv('Momentum', A.price.momentum)}${kv('Trend', A.price.trend)}</div><p class="note">Quelle: ${A.ta.source}. Indikatoren unterstützen Entscheidungen, ersetzen aber keine Risikoanalyse.</p>` : html`<p class="mut">Nicht genug Datenpunkte (mind. 15 Live-Samples oder frische 1m-OHLCV via Chart-Tab).</p>`}
+    <h3>Technische Analyse ${A.ta ? lbl(A.ta.label) : ''}</h3>${A.ta ? html`<div class="grid3">${kv('EMA 9 (Preis)', fmtPrice(A.ta.ema9))}${kv('EMA 21 (Preis)', fmtPrice(A.ta.ema21))}${kv('SMA 20 (Preis)', fmtPrice(A.ta.sma20))}${kv('RSI 14', A.ta.rsi != null ? A.ta.rsi.toFixed(0) : '—')}${kv('ATR %', A.ta.atrPct != null ? A.ta.atrPct.toFixed(2) + '%' : '—')}${kv('ROC 10', fmtPct(A.ta.roc))}${kv('VWAP (Preis)', fmtPrice(A.ta.vwap))}${kv('Momentum', A.price.momentum)}${kv('Trend', A.price.trend)}</div><p class="note">Quelle: ${A.ta.source}. Indikatoren unterstützen Entscheidungen, ersetzen aber keine Risikoanalyse.</p>` : html`<p class="mut">Nicht genug Datenpunkte (mind. 15 Live-Samples oder frische 1m-OHLCV via Chart-Tab).</p>`}
     <h3>Signale</h3>${A.signals.length ? A.signals.map(s => html`<div class="check"><span class="ic ${CONTEXT_SIGNALS.has(s.type) ? 'na' : 'pass'}">${s.strength}</span><div><b>${SIGNAL_NAMES[s.type]}</b><small>${s.reason} · Confidence ${s.confidence}</small></div></div>`) : html`<p class="mut">Keine Signale aktiv.</p>`}
-    ${A.flags.length ? html`<h3>Flags</h3><div class="row">${A.flags.map(f => html`<span class="f ${f === 'BOOST' ? 'B' : f === 'PUMP' || f === 'DUMP' ? 'X' : ''}">${f}</span>`)}</div>` : ''}
+    ${A.flags.length ? html`<h3>Flags</h3><div class="row">${A.flags.map(f => html`<span class="f ${f === 'BOOST' ? 'B' : f === 'PUMP' || f === 'DUMP' ? 'X' : ''}">${f}</span>`)}</div>` : ''}</div>
     <h3>Links</h3><div class="lk">${linkHtml(tokenLinks(t))}</div>
-    <p class="note">Entdeckt ${fmtAge(Date.now() - t.meta.discoveredAt)} her via ${t.meta.via.join(', ')}${core.state.seen[t.id] ? ` · seit Fund ${fmtPct((A.core.mc / core.state.seen[t.id].mc - 1) * 100)}` : ''}</p>`;
+    <p class="note">Entdeckt ${fmtAge(Date.now() - t.meta.discoveredAt)} her<span class="an"> via ${t.meta.via.join(', ')}</span>${seen ? ` · MC beim Fund ${fmtMc(seen.mc)} → jetzt ${fmtMc(A.core.mc)} (${fmtPct((A.core.mc / seen.mc - 1) * 100)})` : ''}</p>`;
 }
 function tabRisk(t) {
   const A = t.A; if (!A) return '';
   const sec = t.sec, now = Date.now();
-  const q = [['Preis', A.labels.price, A.dataAge, A.core.source], ['Liquidität', A.labels.liquidity, A.dataAge, A.core.source], ['Volumen', A.labels.volume, A.dataAge, A.core.source], ['Security', A.labels.security, sec ? now - sec.checkedAt : null, sec ? Object.entries(sec.sources).filter(x => x[1]).map(x => x[0]).join('+') || 'keine' : '—'], ['Holders', A.labels.holders, sec ? now - sec.checkedAt : null, sec ? sec.holderSrc || '—' : '—'], ['Social', 'UNKNOWN', null, 'keine Datenquelle']];
-  return html`<h3 style="margin-top:0">Scorecard</h3>${Object.entries(A.components).map(([k, v]) => meterRow(COMP_NAMES[k], v, v >= 65 ? 'var(--green)' : v >= 40 ? 'var(--yellow)' : 'var(--red)'))}${meterRow('RISK (gesamt)', A.risk.total, riskColor(A.risk.total))}
+  const q = [['Coin-Preis', A.labels.price, A.dataAge, A.core.source], ['Liquidität', A.labels.liquidity, A.dataAge, A.core.source], ['Volumen', A.labels.volume, A.dataAge, A.core.source], ['Security', A.labels.security, sec ? now - sec.checkedAt : null, sec ? Object.entries(sec.sources).filter(x => x[1]).map(x => x[0]).join('+') || 'keine' : '—'], ['Holders', A.labels.holders, sec ? now - sec.checkedAt : null, sec ? sec.holderSrc || '—' : '—'], ['Social', 'UNKNOWN', null, 'keine Datenquelle']];
+  return html`<div class="kv" style="margin-bottom:8px"><small>Risiko gesamt</small><b>${lvlChip(A.risk.level, A.risk.total)}</b></div>
+    <div class="an"><h3 style="margin-top:0">Scorecard</h3>${Object.entries(A.components).map(([k, v]) => meterRow(COMP_NAMES[k], v, v >= 65 ? 'var(--green)' : v >= 40 ? 'var(--yellow)' : 'var(--red)'))}${meterRow('RISK (gesamt)', A.risk.total, riskColor(A.risk.total))}
     <h3>Risk Factors</h3>${Object.entries(A.risk.factors).map(([k, v]) => html`<div class="meter"><span>${RISK_NAMES[k].replace(' Risk', '')}</span>${bar(v, riskColor(v || 0))}<span class="num r">${v == null ? '?' : v}</span></div>`)}
-    <p class="note">Gesamt ${A.risk.total} → ${A.risk.level}. „?“ = keine Daten (fließt neutral ein, keine Annahme).</p>
+    <p class="note">Gesamt ${A.risk.total} → ${A.risk.level}. „?“ = keine Daten (fließt neutral ein, keine Annahme).</p></div>
     <h3>Token Security ${sec ? html`<span class="lvl lvl-${sec.status === 'VERIFIED' ? 'LOW' : sec.status === 'PARTIAL' ? 'MODERATE' : sec.status === 'CRITICAL' ? 'CRITICAL' : 'UNKNOWN'}">${sec.status}</span>` : html`<span class="lvl lvl-UNKNOWN">${t.secPending ? 'PRÜFUNG LÄUFT' : 'UNKNOWN'}</span>`}</h3>
-    ${sec ? html`<div class="grid2">${kv('Mint Authority', sec.mintAuthority)}${kv('Freeze Authority', sec.freezeAuthority)}${kv('Programm', sec.program || '—')}${kv('Decimals', sec.decimals != null ? sec.decimals : '—')}${kv('Top-10', sec.top10Pct != null ? sec.top10Pct.toFixed(1) + '%' : '—')}${kv('RugCheck (norm.)', sec.rugScoreNorm != null ? sec.rugScoreNorm : '—')}${kv('LP gesperrt', sec.lpLockedPct != null ? sec.lpLockedPct.toFixed(0) + '%' : '—')}${kv('Geprüft', fmtAge(now - sec.checkedAt) + ' her')}</div>
+    ${sec ? html`<div class="grid2">${kv('Mint Authority', sec.mintAuthority)}${kv('Freeze Authority', sec.freezeAuthority)}${kvA('Programm', sec.program || '—')}${kvA('Decimals', sec.decimals != null ? sec.decimals : '—')}${kvA('Top-10', sec.top10Pct != null ? sec.top10Pct.toFixed(1) + '%' : '—')}${kvA('RugCheck (norm.)', sec.rugScoreNorm != null ? sec.rugScoreNorm : '—')}${kv('LP gesperrt', sec.lpLockedPct != null ? sec.lpLockedPct.toFixed(0) + '%' : '—')}${kv('Geprüft', fmtAge(now - sec.checkedAt) + ' her')}</div>
       ${sec.flags.length ? sec.flags.map(f => html`<div class="check"><span class="ic ${f.level === 'CRITICAL' ? 'fail' : 'warn'}">${f.level}</span><div><b>${f.code}</b><small>${f.msg}</small></div></div>`) : html`<p class="ok">Keine Risk Flags gefunden.</p>`}` : html`<p class="mut">Noch nicht geprüft. Käufe bleiben blockiert (Security Unknown = No Buy).</p>`}
     <p class="note">Beobachtungen, keine Sicherheitsgarantie. Holder-Daten via RPC enthalten Pool-Konten.</p><button class="btn sm" data-act="secRecheck" data-id="${t.id}">🛡 Security neu prüfen</button>
-    ${A.pump.flags.length ? html`<h3>Pump / Manipulation</h3>${A.pump.flags.map(f => html`<div class="check"><span class="ic warn">!</span><div>${f}</div></div>`)}` : ''}
+    <div class="an">${A.pump.flags.length ? html`<h3>Pump / Manipulation</h3>${A.pump.flags.map(f => html`<div class="check"><span class="ic warn">!</span><div>${f}</div></div>`)}` : ''}
     ${A.vol.anomalies.length ? html`<h3>Volumen-Anomalien</h3>${A.vol.anomalies.map(f => html`<div class="check"><span class="ic warn">!</span><div>${f}</div></div>`)}` : ''}
     <h3>Datenkonflikte</h3>${A.conflicts.length ? A.conflicts.map(c => html`<div class="check"><span class="ic fail">KONFLIKT</span><div><b>${c.field}</b><small>DexScreener ${c.field === 'Preis' ? fmtPrice(c.a) : fmtUsd(c.a)} vs. GeckoTerminal ${c.field === 'Preis' ? fmtPrice(c.b) : fmtUsd(c.b)} (${c.diffPct.toFixed(1)} %)</small></div></div>`) : html`<p class="mut">${A.crossChecked ? 'Cross-Check mit GeckoTerminal: keine Konflikte' + (A.crossPriceDiff != null ? ` (Δ Preis ${A.crossPriceDiff.toFixed(2)} %)` : '') : 'Kein Cross-Check verfügbar (Zweitquelle fehlt/nicht zeitgleich).'}</p>`}
-    <h3>Data Quality</h3><table class="tbl">${q.map(r => html`<tr><td>${r[0]}</td><td>${lbl(r[1])}</td><td class="num">${r[2] != null ? fmtAge(r[2]) : '—'}</td><td class="mut">${r[3]}</td></tr>`)}</table>`;
+    <h3>Data Quality</h3><table class="tbl">${q.map(r => html`<tr><td>${r[0]}</td><td>${lbl(r[1])}</td><td class="num">${r[2] != null ? fmtAge(r[2]) : '—'}</td><td class="mut">${r[3]}</td></tr>`)}</table></div>`;
 }
 function tabPlan(t) {
   const A = t.A, S = core.S(); if (!A) return '';
@@ -4786,22 +4898,23 @@ function tabPlan(t) {
   const pos = core.state.positions.find(x => x.tokenId === t.id);
   const exitImp = sz && sz.size > 0 ? core.estImpact(sz.size, A.liq.usd) : null;
   const autoB = t.D.blockers;
+  const r = tokRatio(t), at = f => (p ? pxMc(p * f, r) : '—');
   return html`<h3 style="margin-top:0">Execution Preview <span class="lbl SIMULATED">${core.state.mode}</span></h3>
-    <div class="grid2">${kv('Token', t.symbol)}${kv('Seite', 'BUY')}${kv('Vorgeschlagene Größe', sz && sz.size > 0 ? fmtUsd(sz.size) : '0', 'ESTIMATED')}${kv('begrenzt durch', (sz && sz.capBy) || '—')}${kv('Geschätzter Preis', fmtPrice(p), A.label)}${kv('Erw. Price Impact', sz && isNum(sz.impactPct) ? sz.impactPct.toFixed(3) + '%' : '—', 'ESTIMATED')}${kv('Gebühren gesamt', sz && sz.fees ? fmtUsd(sz.fees.total, 4) : '—', 'ESTIMATED')}${kv('Max. Price Impact', S.maxSlippagePct + '%')}</div>
-    ${sz && sz.fees ? html`<p class="note">Fees: Netzwerk ${fmtUsd(sz.fees.network, 5)} + Priority ${fmtUsd(sz.fees.priority, 5)} (${sz.fees.lamports} Lamports @ SOL ${fmtUsd(sz.fees.solUsd)}) + DEX ${fmtUsd(sz.fees.dex, 4)}</p>` : ''}
-    ${sz && sz.factors && sz.factors.caps ? html`<p class="note">Sizing: Basis ${sz.factors.basePct}% · Risk-Faktor ${sz.factors.fRisk} · Confidence-Faktor ${sz.factors.fConf} · Volatilitäts-Faktor ${sz.factors.fVol} · Limits: ${Object.entries(sz.factors.caps).map(([k, v]) => k + ' ' + fmtUsd(v)).join(', ')}</p>` : sz && sz.reason ? html`<p class="note warn">${sz.reason}</p>` : ''}
-    <h3>Trade Plan</h3><div class="grid2">${kv('Stop Loss (' + S.stopLossPct + '%)', fmtPrice(p ? p * (1 - S.stopLossPct / 100) : null))}${kv('ATR-Stop (' + S.atrMult + '× ATR)', a14 && p ? fmtPrice(p - S.atrMult * a14) : 'ATR n/v', a14 ? 'LIVE' : 'UNKNOWN')}${kv('TP1 +' + S.tp1Pct + '% (' + Math.round(S.tp1Frac * 100) + '%)', fmtPrice(p ? p * (1 + S.tp1Pct / 100) : null))}${kv('TP2 +' + S.tp2Pct + '% (' + Math.round(S.tp2Frac * 100) + '%)', fmtPrice(p ? p * (1 + S.tp2Pct / 100) : null))}${kv('TP3 +' + S.tp3Pct + '% (Rest)', fmtPrice(p ? p * (1 + S.tp3Pct / 100) : null))}${kv('Trailing', 'ab +' + S.trailActivatePct + '%, Abstand ' + S.trailPct + '%')}${kv('Time Exit', S.timeExitMin + ' min < ' + S.timeExitMinPnlPct + '%')}${kv('Break-even nach TP1', S.breakEvenAfterTp1 ? 'ja' : 'nein')}</div>
-    <h3>Liquidity Exit Test</h3><div class="grid2">${kv('Verfügbare Liquidität', fmtUsd(A.liq.usd))}${kv('Exit-Liquidität (Quote-Seite)', fmtUsd(A.liq.exitLiqUsd), 'ESTIMATED')}${kv('Erw. Exit-Slippage', exitImp != null ? (exitImp * 100).toFixed(3) + '%' : '—', 'ESTIMATED')}${kv('Exit Risk', A.liq.slipRisk)}</div>
-    ${pos ? html`<p class="note info">Offene Position: ${fmtUsd(pos.costUsd)} · Entry ${fmtPrice(pos.entryPrice)} · PnL ${isNum(pos.pnlUsd) ? fmtSigned(pos.pnlUsd) : 'n/v'}</p>` : ''}
-    <h3>Blocker (manuell)</h3>${ex.blockers.length ? ex.blockers.map(b => html`<div class="check"><span class="ic fail">P${b.prio}</span><div><b>${b.code}</b><small>${b.msg}</small></div></div>`) : html`<p class="ok">Keine Ausführungs-Blocker für einen manuellen Sim-Kauf (harte Regeln werden beim Kauf erneut geprüft).</p>`}
-    <h3>Blocker (Auto-Bot)</h3>${autoB.length ? autoB.slice(0, 8).map(b => html`<span class="blk p${b.prio}" title="${b.msg}">${b.code}</span>`) : html`<p class="ok">Keine – Token wäre für den Bot freigegeben.</p>`}
+    <div class="grid2">${kv('Token', t.symbol)}${kvA('Seite', 'BUY')}${kv('Vorgeschlagene Größe', sz && sz.size > 0 ? fmtUsd(sz.size) : '0', 'ESTIMATED')}${kvA('begrenzt durch', (sz && sz.capBy) || '—')}${kv('Geschätzt', pxMc(p, r), A.label)}${kvA('Erw. Price Impact', sz && isNum(sz.impactPct) ? sz.impactPct.toFixed(3) + '%' : '—', 'ESTIMATED')}${kv('Gebühren gesamt', sz && sz.fees ? fmtUsd(sz.fees.total, 4) : '—', 'ESTIMATED')}${kvA('Max. Price Impact', S.maxSlippagePct + '%')}</div>
+    ${sz && sz.fees ? html`<p class="note an">Fees: Netzwerk ${fmtUsd(sz.fees.network, 5)} + Priority ${fmtUsd(sz.fees.priority, 5)} (${sz.fees.lamports} Lamports @ SOL-Preis ${fmtUsd(sz.fees.solUsd)}) + DEX ${fmtUsd(sz.fees.dex, 4)}</p>` : ''}
+    ${sz && sz.factors && sz.factors.caps ? html`<p class="note an">Sizing: Basis ${sz.factors.basePct}% · Risk-Faktor ${sz.factors.fRisk} · Confidence-Faktor ${sz.factors.fConf} · Volatilitäts-Faktor ${sz.factors.fVol} · Limits: ${Object.entries(sz.factors.caps).map(([k, v]) => k + ' ' + fmtUsd(v)).join(', ')}</p>` : sz && sz.reason ? html`<p class="note warn">${sz.reason}</p>` : ''}
+    <h3>Trade Plan</h3><div class="grid2">${kv('Stop Loss (−' + S.stopLossPct + '%)', at(1 - S.stopLossPct / 100))}${kvA('ATR-Stop (' + S.atrMult + '× ATR)', a14 && p ? pxMc(p - S.atrMult * a14, r) : 'ATR n/v', a14 ? 'LIVE' : 'UNKNOWN')}${kv('TP1 +' + S.tp1Pct + '% (' + Math.round(S.tp1Frac * 100) + '%)', at(1 + S.tp1Pct / 100))}${kv('TP2 +' + S.tp2Pct + '% (' + Math.round(S.tp2Frac * 100) + '%)', at(1 + S.tp2Pct / 100))}${kv('TP3 +' + S.tp3Pct + '% (Rest)', at(1 + S.tp3Pct / 100))}${kv('Trailing', 'ab +' + S.trailActivatePct + '%, Abstand ' + S.trailPct + '%')}${kv('Time Exit', S.timeExitMin + ' min < ' + S.timeExitMinPnlPct + '%')}${kv('Break-even nach TP1', S.breakEvenAfterTp1 ? 'ja' : 'nein')}</div>
+    <div class="an"><h3>Liquidity Exit Test</h3><div class="grid2">${kv('Verfügbare Liquidität', fmtUsd(A.liq.usd))}${kv('Exit-Liquidität (Quote-Seite)', fmtUsd(A.liq.exitLiqUsd), 'ESTIMATED')}${kv('Erw. Exit-Slippage', exitImp != null ? (exitImp * 100).toFixed(3) + '%' : '—', 'ESTIMATED')}${kv('Exit Risk', A.liq.slipRisk)}</div></div>
+    ${pos ? html`<p class="note info">Offene Position: ${fmtUsd(pos.costUsd)} · Einstieg Coin-Preis ${fmtPrice(pos.entryPrice)} (${mcAt(pos.entryPrice, mcRatio(pos, t))}) · PnL ${isNum(pos.pnlUsd) ? fmtSigned(pos.pnlUsd) : 'n/v'}</p>` : ''}
+    <h3>Was einen manuellen Kauf gerade verhindert</h3>${ex.blockers.length ? ex.blockers.map(b => html`<div class="check"><span class="ic fail">P${b.prio}</span><div><b class="an">${b.code}</b><small>${b.msg}</small></div></div>`) : html`<p class="ok">Nichts – ein manueller Sim-Kauf ist möglich (harte Regeln werden beim Kauf erneut geprüft).</p>`}
+    <div class="an"><h3>Blocker (Auto-Bot)</h3>${autoB.length ? autoB.slice(0, 8).map(b => html`<span class="blk p${b.prio}" title="${b.msg}">${b.code}</span>`) : html`<p class="ok">Keine – Token wäre für den Bot freigegeben.</p>`}</div>
     <div class="row" style="margin-top:10px"><button class="btn pri" data-act="buy" data-id="${t.id}">💱 Sim-Kauf vorbereiten</button></div>
-    <h3>Live-Order-Precheck (Vorbereitung, derzeit nicht ausführbar)</h3>${core.preLiveChecks(t, sz && sz.size > 0 ? sz.size : 20).map(c => html`<div class="check"><span class="ic ${c.ok ? 'pass' : 'fail'}">${c.ok ? 'OK' : 'NEIN'}</span><div><b>${c.name}</b><small>${c.detail}</small></div></div>`)}
-    <p class="note">Vor einer echten Order müssten alle Punkte bestehen. Route/Provider fehlt → NO TRADE im Live-Modus. Simulation bleibt davon unberührt.</p>`;
+    <div class="an"><h3>Live-Order-Precheck (Vorbereitung, derzeit nicht ausführbar)</h3>${core.preLiveChecks(t, sz && sz.size > 0 ? sz.size : 20).map(c => html`<div class="check"><span class="ic ${c.ok ? 'pass' : 'fail'}">${c.ok ? 'OK' : 'NEIN'}</span><div><b>${c.name}</b><small>${c.detail}</small></div></div>`)}
+    <p class="note">Vor einer echten Order müssten alle Punkte bestehen. Route/Provider fehlt → NO TRADE im Live-Modus. Simulation bleibt davon unberührt.</p></div>`;
 }
 function tabWhy(t) {
   const A = t.A, D = t.D; if (!A) return '';
-  const facts = [['Preis', fmtPrice(A.core.price), A.labels.price], ['Market Cap', fmtUsd(A.core.mc), A.labels.price], ['Liquidität', fmtUsd(A.liq.usd), A.labels.liquidity], ['Volumen 1h', fmtUsd(A.vol.h1), A.labels.volume], ['Käufer 1h', A.tx.ratio1 != null ? (A.tx.ratio1 * 100).toFixed(0) + '%' : '—', A.labels.volume], ['Security', A.sec.status, A.labels.security], ['Pair-Alter', fmtAge(A.core.pairAge), A.core.pairAge != null ? 'LIVE' : 'UNKNOWN']];
+  const facts = [['Coin-Preis', fmtPrice(A.core.price), A.labels.price], ['MC', fmtMc(A.core.mc), A.labels.price], ['Liquidität', fmtUsd(A.liq.usd), A.labels.liquidity], ['Volumen 1h', fmtUsd(A.vol.h1), A.labels.volume], ['Käufer 1h', A.tx.ratio1 != null ? (A.tx.ratio1 * 100).toFixed(0) + '%' : '—', A.labels.volume], ['Security', A.sec.status, A.labels.security], ['Pair-Alter', fmtAge(A.core.pairAge), A.core.pairAge != null ? 'LIVE' : 'UNKNOWN']];
   const risks = [...(t.sec ? t.sec.flags.map(f => f.msg) : []), ...A.pump.flags, ...A.vol.anomalies, ...A.conflicts.map(c => `Datenkonflikt ${c.field} (${c.diffPct.toFixed(1)} %)`), ...Object.entries(A.risk.factors).filter(([, v]) => v != null && v >= 60).map(([k, v]) => `${RISK_NAMES[k]} ${v}`)];
   const sentence = D.decision === 'APPROVED' ? `Der Bot würde ${t.symbol} kaufen: ${D.reason}.` : D.decision === 'BUY_CANDIDATE' ? `Die Analyse für ${t.symbol} ist positiv, aber die Ausführung ist blockiert: ${D.execBlockers.slice(0, 2).map(b => b.msg).join('; ')}.` : `Der Bot handelt ${t.symbol} nicht. Wichtigste Gründe: ${D.blockers.slice(0, 3).map(b => b.msg).join('; ')}.`;
   return html`<div class="panel tight"><b>${sentence}</b>${chainHtml(core.candidateChain(t))}<p class="note">Regelbasierte Erklärung aus gemessenen Daten – keine externe KI, keine erfundenen Werte. Dies ist eine Entscheidung für diesen Token, kein globaler Bot-Block.</p></div>
@@ -4816,8 +4929,8 @@ function tabWhy(t) {
 const TAB_RENDER = { overview: tabOverview, risk: tabRisk, plan: tabPlan, why: tabWhy };
 function emptyDetail() {
   const st = core.state, pos = st.positions;
-  return html`<h2>Token-Details</h2><p class="mut">Wähle einen Token im Scanner, um Chart, Scorecard, Security, Trade Plan und Decision Trace zu sehen.</p>
-    <div class="grid2" style="margin-top:12px">${kv('Tokens', st.markets.size)}${kv('Kandidaten', (st.metrics.scanStats || {}).candidates || 0)}${kv('Positionen', pos.length)}${kv('Health', core.systemHealth().score)}</div>
+  return html`<h2>Token-Details</h2><p class="mut">Wähle einen Token im Scanner, um Coin-Preis, MC, Chart, Security und Trade Plan zu sehen.</p>
+    <div class="grid2" style="margin-top:12px">${kv('Tokens', st.markets.size)}${kv('Kandidaten', (st.metrics.scanStats || {}).candidates || 0)}${kv('Positionen', pos.length)}${kvA('Health', core.systemHealth().score)}</div>
     <h3>Letzte Alarme</h3>${st.feed.slice(0, 5).map(e => html`<div class="check"><span class="ic ${e.level === 'CRITICAL' || e.level === 'ERROR' ? 'fail' : e.level === 'WARNING' ? 'warn' : 'pass'}">${fmtTime(e.ts).slice(0, 5)}</span><div><b>${e.tag}${e.sym ? ' · ' + e.sym : ''}</b><small>${e.detail}</small></div></div>`)}${st.feed.length ? '' : html`<p class="mut">Noch keine.</p>`}`;
 }
 function renderDetail() {
@@ -4831,7 +4944,7 @@ function renderDetail() {
   }
   if (box._tokenId !== t.id || box._tab !== UI.detailTab) {
     box._tokenId = t.id; box._tab = UI.detailTab;
-    setHTML(box, html`<div id="dHead"></div><div class="tabs" role="tablist">${DETAIL_TABS.map(([k, n]) => html`<button role="tab" data-act="dtab" data-k="${k}" class="${UI.detailTab === k ? 'on' : ''}" aria-selected="${UI.detailTab === k}">${n}</button>`)}</div><div id="dBody"></div>`);
+    setHTML(box, html`<div id="dHead"></div><div class="tabs" role="tablist">${DETAIL_TABS.map(([k, n]) => html`<button role="tab" data-act="dtab" data-k="${k}" class="${(UI.detailTab === k ? 'on' : '') + (k === 'why' ? ' an' : '')}" aria-selected="${UI.detailTab === k}">${n}</button>`)}</div><div id="dBody"></div>`);
     if (UI.detailTab === 'chart') buildChartTab(t);
   }
   patch(document.getElementById('dHead'), detailHead(t));
@@ -5026,7 +5139,7 @@ function openCtx(id, anchor) {
     <button role="menuitem" data-act="buy" data-id="${id}">💱 Simulate Buy</button><hr>
     <button role="menuitem" data-act="copy" data-v="${t.mint}" data-l="Mint">⧉ Copy Mint</button>
     ${pair ? html`<button role="menuitem" data-act="copy" data-v="${pair}" data-l="Pair">⧉ Copy Pair</button>` : ''}
-    ${pr ? html`<button role="menuitem" data-act="copy" data-v="${pr}" data-l="Preis">⧉ Copy Price</button>` : ''}<hr>
+    ${pr ? html`<button role="menuitem" data-act="copy" data-v="${pr}" data-l="Coin-Preis">⧉ Coin-Preis kopieren</button>` : ''}<hr>
     ${tokenLinks(t).slice(0, 9).map(([n, u]) => html`<a role="menuitem" href="${u}" target="_blank" rel="noopener noreferrer">↗ ${n}</a>`)}`);
   m.hidden = false;
   const r = anchor.getBoundingClientRect(), mw = m.offsetWidth, mh = m.offsetHeight;
@@ -5041,8 +5154,8 @@ function buyPreviewHtml(t, size) {
   const S = core.S();
   const ex = core.execCheck(t, { auto: false, preTrade: false, sizeUsd: size });
   const sz = ex.sizing || {}, A = t.A;
-  return html`<div class="grid2">${kv('Token', t.symbol)}${kv('Seite', 'BUY #' + ((core.state.risk.buyCount[t.id] || 0) + 1) + ' / ' + Math.min(S.maxBuysPerCoin, 2))}${kv('Modus', core.state.mode, 'SIMULATED')}${kv('Geschätzter Preis', fmtPrice(A.core.price), A.label)}${kv('Erw. Price Impact', isNum(sz.impactPct) ? sz.impactPct.toFixed(3) + '%' : '—', 'ESTIMATED')}${kv('Max. Price Impact', S.maxSlippagePct + '%')}${kv('Gebühren', sz.fees ? fmtUsd(sz.fees.total, 4) : '—', 'ESTIMATED')}${kv('Risk / Confidence', A.risk.level + ' ' + A.risk.total + ' / ' + A.confidence.total + '%')}</div>
-    ${ex.blockers.length ? html`<h3>Blocker</h3>${ex.blockers.map(b => html`<div class="check"><span class="ic fail">P${b.prio}</span><div><b>${b.code}</b><small>${b.msg}</small></div></div>`)}` : html`<p class="ok">Vorabprüfung ok. Beim Bestätigen werden Daten frisch geladen und alle harten Regeln erneut geprüft (Pre-Trade-Check).</p>`}
+  return html`<div class="grid2">${kv('Token', t.symbol)}${kv('Kauf', '#' + ((core.state.risk.buyCount[t.id] || 0) + 1) + ' von ' + Math.min(S.maxBuysPerCoin, 2))}${kv('Modus', core.state.mode, 'SIMULATED')}${kv('Geschätzt', pxMc(A.core.price, tokRatio(t)), A.label)}${kvA('Erw. Price Impact', isNum(sz.impactPct) ? sz.impactPct.toFixed(3) + '%' : '—', 'ESTIMATED')}${kvA('Max. Price Impact', S.maxSlippagePct + '%')}${kv('Gebühren', sz.fees ? fmtUsd(sz.fees.total, 4) : '—', 'ESTIMATED')}${kv('Risiko', lvlChip(A.risk.level, A.risk.total))}${kvA('Confidence', A.confidence.total + '%')}</div>
+    ${ex.blockers.length ? html`<h3>Das verhindert den Kauf</h3>${ex.blockers.map(b => html`<div class="check"><span class="ic fail">P${b.prio}</span><div><b class="an">${b.code}</b><small>${b.msg}</small></div></div>`)}` : html`<p class="ok">Vorabprüfung ok. Beim Bestätigen werden Daten frisch geladen und alle harten Regeln erneut geprüft (Pre-Trade-Check).</p>`}
     <p class="note">Simulation: keine echte Order, keine Transaktion. Füllung zum Live-Preis + geschätztem Impact, Gebühren geschätzt.</p>`;
 }
 let buyModalToken = null;
@@ -5072,7 +5185,7 @@ async function openBuyInner(id) {
   scheduleRender(true);
 }
 function receiptModal(o) {
-  openModal({ title: 'Order Receipt (SIMULATED)', body: html`<div class="grid2">${kv('Order ID', o.id)}${kv('Status', o.state)}${kv('Token', o.symbol)}${kv('Seite', o.side)}${kv('Füllpreis', fmtPrice(o.fillPrice), 'SIMULATED')}${kv('Größe', fmtUsd(o.sizeUsd))}${kv('Menge', fmtNum(o.qty, 2))}${kv('Fees', o.fees ? fmtUsd(o.fees.total, 4) : '—', 'ESTIMATED')}${kv('Zeit', fmtDateTime(o.history[o.history.length - 1].ts))}${kv('Transaktion', 'keine – Simulation')}</div><p class="note">Kein Explorer-Link: es existiert keine echte Transaktions-Signatur.</p>` });
+  openModal({ title: 'Order Receipt (SIMULATED)', body: html`<div class="grid2">${kvA('Order ID', o.id)}${kv('Status', o.state)}${kv('Token', o.symbol)}${kv('Seite', o.side)}${kv('Füllung', pxMc(o.fillPrice, orderMcRatio(o)), 'SIMULATED')}${kv('Größe', fmtUsd(o.sizeUsd))}${kv('Menge', fmtNum(o.qty, 2))}${kv('Fees', o.fees ? fmtUsd(o.fees.total, 4) : '—', 'ESTIMATED')}${kv('Zeit', fmtDateTime(o.history[o.history.length - 1].ts))}${kv('Transaktion', 'keine – Simulation')}</div><p class="note">Kein Explorer-Link: es existiert keine echte Transaktions-Signatur.</p>` });
 }
 async function openSell(posId, frac) {
   const p = core.state.positions.find(x => x.id === posId); if (!p) return;
@@ -5082,7 +5195,7 @@ async function openSell(posId, frac) {
   const net = gross != null && imp != null && fees ? gross * (1 - imp) - fees.total : null;
   const ok = await confirmDialog(`Verkaufen · ${p.symbol} (${frac === 'ALL' ? '100' : Math.round(frac * 100)} %)`, 'Simulierter Verkauf mit frischem Preis (Pre-Exit-Check).', {
     confirmLabel: 'Verkaufen', danger: true,
-    extra: html`<div class="grid2">${kv('Menge', fmtNum(qty, 2))}${kv('Preis', fmtPrice(p.lastPrice), p.priceLabel)}${kv('Erw. Erlös netto', net != null ? fmtUsd(net) : 'n/v', 'ESTIMATED')}${kv('Price Impact', imp != null ? (imp * 100).toFixed(3) + '%' : 'n/v', 'ESTIMATED')}</div>`
+    extra: html`<div class="grid2">${kv('Menge', fmtNum(qty, 2))}${kv('Aktuell', pxMc(p.lastPrice, mcRatio(p, t)), p.priceLabel)}${kv('Erw. Erlös netto', net != null ? fmtUsd(net) : 'n/v', 'ESTIMATED')}${kvA('Price Impact', imp != null ? (imp * 100).toFixed(3) + '%' : 'n/v', 'ESTIMATED')}</div>`
   });
   if (!ok) return;
   const r = await core.executeSell(posId, frac, 'MANUAL', { detail: 'Manueller Verkauf' });
@@ -5096,10 +5209,18 @@ const ACTIONS = {
   more: () => {
     const ms = masterStatus(), h = core.systemHealth(), dex = core.http.status('dexPairs');
     return openModal({ title: 'Mehr', body: html`<div class="ctl-top"><span class="mstat ${ms.state}">${ms.text}</span><div class="ctl-why">${ms.why}</div></div>
-      <p class="note">Health ${h.score} · DexScreener ${dex} · RPC ${bestRpcStatus()} · RugCheck ${core.http.status('rugcheck')}</p>
+      <p class="note an">Health ${h.score} · DexScreener ${dex} · RPC ${bestRpcStatus()} · RugCheck ${core.http.status('rugcheck')}</p>
+      <div class="row" style="margin:8px 0">${proToggle()}</div>
       ${NAV_GROUPS.map(([g, ids]) => html`<div class="navgrp"><h3>${g}</h3><div class="grid2">${ids.map(id => { const v = VIEWS.find(x => x[0] === id); return html`<button class="btn" data-act="navgo" data-view="${id}">${v[1]} ${v[2]}</button>`; })}</div></div>`)}` });
   },
   navgo: el => { closeModal(null); showView(el.dataset.view, true); },
+  pro: () => {
+    UI.pro = !UI.pro; saveUi(); applyPro(); core.persistNow();
+    document.querySelectorAll('[data-act="pro"]').forEach(b => { b.classList.toggle('on', UI.pro); b.setAttribute('aria-pressed', String(UI.pro)); b.textContent = '🔬 Analyse-Daten: ' + (UI.pro ? 'AN' : 'AUS'); });
+    const box = $('detail'); if (box) box._tokenId = null;
+    renderView(true); renderAll(true);
+    toast('INFO', 'Analyse-Daten ' + (UI.pro ? 'eingeblendet' : 'ausgeblendet'), UI.pro ? 'Alle Messwerte der Kauf-/Verkaufsanalyse sichtbar' : 'Nur die für dich relevanten Werte – der Bot rechnet weiter mit allen Daten');
+  },
   select: el => { closeCtx(); if (el.dataset.id) selectToken(el.dataset.id); },
   star: el => { const id = el.dataset.id; closeCtx(); if (core.state.watchlist[id]) { core.removeWatch(id); toast('INFO', 'Von Watchlist entfernt'); } else { const r = core.addWatch(id); toast(r.ok ? 'SUCCESS' : 'ERROR', r.ok ? 'Zur Watchlist hinzugefügt ★' : r.error); } scheduleRender(true); },
   ctx: el => { const m = document.getElementById('ctx'); if (!m.hidden && m._for === el) { closeCtx(); return; } m._for = el; openCtx(el.dataset.id, el); },
@@ -5127,6 +5248,13 @@ const ACTIONS = {
     if (r.id === 'go') { if ((r.data || '').trim() !== 'LIVE') { toast('WARNING', 'Nicht bestätigt'); return; } const res = core.setMode('LIVE'); toast(res.ok ? 'CRITICAL' : 'ERROR', res.ok ? 'LIVE aktiv' : res.error); }
   },
   walletModal: () => openModal({ title: 'Wallet', body: walletPanel() }),
+  freshStart: async () => {
+    const st = core.state, S = core.S();
+    if (!(await confirmDialog('Frischer Start?', `Das Sim-Portfolio startet neu mit ${fmtUsd(S.simCapitalUsd)} Startkapital. ${st.positions.length} offene Position(en) werden verworfen (nicht verkauft, nicht gewertet). Buy-Zähler, Cooldowns und Tageslimit werden zurückgesetzt, damit der Bot neu anfangen kann.`, { confirmLabel: '↺ Frisch starten', danger: true, extra: html`<p class="note ok">Behalten wird alles Gesammelte: Trade-Journal & History, Statistiken, Lern- und Analysedaten, Parameter-Versionen, Logs, Alarme, Watchlist und Einstellungen.</p>` }))) return;
+    const r = core.freshStart();
+    toast(r.ok ? 'SUCCESS' : 'ERROR', r.ok ? 'Frischer Start' : r.error, r.ok ? `Startkapital ${fmtUsd(S.simCapitalUsd)} · ${r.dropped} Position(en) verworfen · Analysedaten behalten` : '');
+    renderView(true); scheduleRender(true);
+  },
   reconcile: async () => {
     const rc = core.state.reconciliation;
     const r = await openModal({ title: 'Abgleich (Reconciliation)', body: html`<p>Nach dem Neustart wurden Punkte gefunden, die nicht eindeutig waren. Sie wurden konservativ aufgelöst (keine Füllung ohne Nachweis, Buy-Zähler nie gesenkt). Bitte prüfen und bestätigen – bis dahin sind neue Käufe blockiert, Exits laufen weiter.</p><ul class="list-plain">${rc.issues.map(x => html`<li>${x}</li>`)}</ul>`, actions: [{ id: 'close', label: 'Später' }, { id: 'ack', label: 'Geprüft – bestätigen', cls: 'pri' }] });
@@ -5266,7 +5394,7 @@ function startApp() {
   if (appStarted) return;
   appStarted = true;
   core.init({ autoStart: true });
-  loadUi();
+  loadUi(); applyPro();
   buildNav(); buildControl(); buildTiles();
   const q = document.getElementById('q'); if (q) q.value = UI.q;
   const fr = document.getElementById('fRec'); if (fr) fr.checked = UI.onlyRec;
