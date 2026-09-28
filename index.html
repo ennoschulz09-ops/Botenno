@@ -452,7 +452,7 @@ pre.raw{white-space:pre-wrap;word-break:break-all;font:11px/1.4 var(--mono);back
    ===================================================================== */
 
 /* ============================== KONSTANTEN ============================== */
-const APP_VERSION = '2.1.0';
+const APP_VERSION = '2.1.1';
 const STRATEGY_VERSION = '1.0.0';
 const DATA_ENGINE_VERSION = '1.0.0';
 const STORAGE_KEY_V2 = 'smartlab.v2';
@@ -3325,6 +3325,14 @@ function createCore(opts) {
   function hydrate(d) {
     if (!d) return;
     state.settings = validateSettings(d.settings || d.settingsIn || {}, defaultSettings()).settings;
+    /* Einmalige Migration (< v2.1.1): Loss-Cooldown/Globale Pause standen zuvor hart auf
+       10/5 min. Nur die noch unveränderten alten Default-Werte werden auf 0 korrigiert –
+       ein bewusst höher gesetzter eigener Wert bleibt unangetastet. Nach dem nächsten
+       Speichern (app === APP_VERSION) greift das nicht mehr erneut. */
+    if (d.app !== APP_VERSION) {
+      if (state.settings.lossCooldownMin === 10) state.settings.lossCooldownMin = 0;
+      if (state.settings.globalPauseMin === 5) state.settings.globalPauseMin = 0;
+    }
     state.strategies = validateStrategies(d.strategies, defaultStrategies()).strategies;
     if (['SIMULATION', 'PAPER', 'READ_ONLY'].includes(d.mode)) state.mode = d.mode;
     if (d.bot && typeof d.bot === 'object') {
