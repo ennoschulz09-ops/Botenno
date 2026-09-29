@@ -1,6 +1,6 @@
 # Smart Lab – Architektur & technischer Audit
 
-Stand: Phase 1 des Master-Prompts „Ganzheitliche Optimierung“ (App-Version 2.3.0).
+Stand: Phase 2 des Master-Prompts „Ganzheitliche Optimierung“ (App-Version 2.3.0).
 Dieses Dokument wird in jeder Phase fortgeschrieben (siehe „Änderungsprotokoll“ am Ende).
 
 ## 1. Überblick
@@ -95,8 +95,8 @@ UI-Schicht (DOM): Views, Detail-Panel, Modals, Charts (Canvas), Toasts, Alarm-Fe
 | Bereich | Vorhanden | Lücken (Phase) |
 |---|---|---|
 | Datenebene | Rate-Limit, Backoff, Timeout, Dedupe, Cache mit TTL, Health je Quelle, Schema-Validierung, Stale-Erkennung, NaN/Infinity/negativ/unplausibel → null, Zählung ungültiger Felder & verworfener Datensätze je Quelle (System-Ansicht) | – |
-| Scanner | Schnellfilter, Security-Queue, Priorisierung, Entscheidungskette je Token | keine getrennten Stufen-Scores Discovery/Quality/Security/Market/Readiness (2) |
-| Security | eigene Engine, CRITICAL blockiert immer (auch manuell), Stale-Security blockiert | kein strukturierter Prüfbericht je Check; „keine Daten“ und „kein Risiko“ nicht überall getrennt sichtbar (2) |
+| Scanner | Schnellfilter, Security-Queue, Priorisierung, Entscheidungskette je Token, Stufen-Scores Discovery → Datenqualität → Security → Markt → Handelsbereitschaft mit Teilbegründungen (`stageScores`) | – |
+| Security | eigene Engine, CRITICAL blockiert immer (auch manuell), Stale-Security blockiert, Prüfbericht mit 14 Checks (Ergebnis, Schweregrad, Quelle, Zeitpunkt, Aktion aus den echten Blockern, `securityReport`), NO_DATA getrennt von PASS | Creator-/Wallet-Historie ohne Datenquelle (bleibt NO_DATA) |
 | Signale | 12 Signaltypen, 7 Strategien, Konsens, Confidence getrennt vom Score | keine Attribution pro/contra, kein Signal-Konflikt-Detektor, kein Multi-Timeframe-Abgleich, kein Signal-Alter (3) |
 | Risk | harte Limits, Cooldowns, Exposure, Korrelation, Tageslimit, Overtrading, Impact-Grenze | kein Drawdown-Modus, keine Staleness-/Execution-Penalty mit Reason Codes (3) |
 | Portfolio | Journal, realisiert/unrealisiert, Fees/Slippage, Reconciliation nach Neustart | Positionen nur OPEN/CLOSED statt Lebenszyklus (4) |
@@ -135,7 +135,7 @@ Kein Hotspot gefunden, der eine Optimierung rechtfertigt. Render ist bereits ged
 
 ## 9. Tests (Ist)
 
-- **50 Selbsttests** in der App (System → Selbsttest): Grundlagen, Trading-Limits, Daten/Stale, Security, Chaos (API-/RPC-Ausfall, 429, falsches JSON, Scanner-Lock, verspätete Antworten, Reload-Recovery), Status-Logik, LIVE-Gating, Storage, Backtest-Look-Ahead, 11 Lern-KI-Tests.
+- **53 Selbsttests** in der App (System → Selbsttest): Grundlagen, Trading-Limits, Daten/Stale, Security, Chaos (API-/RPC-Ausfall, 429, falsches JSON, Scanner-Lock, verspätete Antworten, Reload-Recovery), Status-Logik, LIVE-Gating, Storage, Backtest-Look-Ahead, 11 Lern-KI-Tests.
 - **Browser-E2E** (Playwright, außerhalb des Repos): Login, Cooldown-Migration, UI einfach/Analyse inkl. Mobil, Lern-KI.
 - **Lücken:** Property-/Grenzwert-Tests für harte Limits und Positionsgröße, Positions-Lebenszyklus, Execution-Provider, Monitoring-Aktionen, Backtest-Reproduzierbarkeit, UI-Smoke für LIVE-Gate/Wallet/Diagnose.
 
@@ -153,4 +153,5 @@ Kein Hotspot gefunden, der eine Optimierung rechtfertigt. Render ist bereits ged
 ## Änderungsprotokoll
 
 - Phase 0: Audit erstellt.
+- Phase 2: Stufen-Scores und Security-Prüfbericht (Detail → Übersicht im Analyse-Modus bzw. Risiko & Security in beiden Modi); 3 Security-Selbsttests (Gate nicht kompensierbar, NO_DATA ≠ PASS, Stufen konsistent zur Entscheidung).
 - Phase 1 (2.3.0): harte Untergrenzen Loss-Cooldown 10 min / globale Pause 5 min wiederhergestellt; `app.js` entfernt; Datenvalidierung mit Zählung je Quelle; Voll-Backup & geprüftes Wiederherstellen; Login mit PBKDF2, Fehlversuch-Sperre und gesperrten App-Aktionen; Randfall „Positionsgröße > Exposure“ behoben (durch Fuzz-Test gefunden); 3 neue Selbsttests, neue E2E-Tests für Backup und Login-Sperre.
