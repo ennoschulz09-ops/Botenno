@@ -1,6 +1,6 @@
 # Smart Lab – Architektur & technischer Audit
 
-Stand: Phase 0 des Master-Prompts „Ganzheitliche Optimierung“ (App-Version 2.2.0).
+Stand: Phase 1 des Master-Prompts „Ganzheitliche Optimierung“ (App-Version 2.3.0).
 Dieses Dokument wird in jeder Phase fortgeschrieben (siehe „Änderungsprotokoll“ am Ende).
 
 ## 1. Überblick
@@ -8,13 +8,12 @@ Dieses Dokument wird in jeder Phase fortgeschrieben (siehe „Änderungsprotokol
 - **Auslieferung:** eine einzige statische Datei `index.html` (HTML + CSS + JavaScript in einer IIFE), veröffentlicht über GitHub Pages aus `main`. Keine Build-Pipeline, kein Server, keine Abhängigkeiten von Drittbibliotheken.
 - **Laufzeit:** komplett im Browser. Alle Daten (Einstellungen, Positionen, Journal, Lerndaten) liegen im `localStorage` des jeweiligen Geräts.
 - **Handel:** ausschließlich simuliert (SIMULATION / PAPER). LIVE ist bewusst nicht verfügbar (kein Swap-/Routing-Provider, Signieren deaktiviert).
-- `app.js` im Repository ist eine alte, **nicht eingebundene** Kopie (enthält das abgelehnte „Always-Trade“). Wird in Phase 1 entfernt.
 - `IMG_8763.png` ist ein Bild ohne Verwendung im Code.
 
 ## 2. Architektur (Textdiagramm)
 
 ```
-Login-Gate (SHA-256-Hash-Vergleich, nichts gespeichert)
+Login-Gate (PBKDF2-SHA256, 600.000 Iterationen, Sperre nach 5 Fehlversuchen)
    │  erst nach Erfolg: startApp()
    ▼
 createCore(env)  ── DOM-frei, alle Seiteneffekte über env (Uhr, fetch, Timer, Storage) → testbar
@@ -81,7 +80,8 @@ UI-Schicht (DOM): Views, Detail-Panel, Modals, Charts (Canvas), Toasts, Alarm-Fe
 
 - Jeder Schlüssel trägt `v: 3`; beschädigte Kernbereiche → RECONCILIATION REQUIRED (keine Käufe bis Bestätigung); beschädigte Lernbereiche → leere Defaults.
 - Geschrieben wird nur, was sich geändert hat; bei vollem Speicher werden Logs/Stats/Journal/Lerndaten rotiert.
-- Laufzeit-Migrationen: v1 → v2 → v3, Cooldown-Migration (2.1.1), Journal → Learning Records (2.2.0).
+- Laufzeit-Migrationen: v1 → v2 → v3, Journal → Learning Records (2.2.0), Cooldowns unter 10/5 min → auf harte Untergrenze angehoben und im Config-Log vermerkt (2.3.0).
+- Voll-Backup: Export aller Bereiche; Wiederherstellen erst nach Prüfung (Kennung, Version, jeder Bereich) und Probe-Laden in einer isolierten Instanz, vorher automatische Sicherung des aktuellen Stands, danach Neustart mit Login.
 
 ## 5. Startfluss
 
@@ -94,7 +94,7 @@ UI-Schicht (DOM): Views, Detail-Panel, Modals, Charts (Canvas), Toasts, Alarm-Fe
 
 | Bereich | Vorhanden | Lücken (Phase) |
 |---|---|---|
-| Datenebene | Rate-Limit, Backoff, Timeout, Dedupe, Cache mit TTL, Health je Quelle, Schema-Validierung, Stale-Erkennung, NaN/negativ → null | keine Zählung verworfener Felder je Quelle (1) |
+| Datenebene | Rate-Limit, Backoff, Timeout, Dedupe, Cache mit TTL, Health je Quelle, Schema-Validierung, Stale-Erkennung, NaN/Infinity/negativ/unplausibel → null, Zählung ungültiger Felder & verworfener Datensätze je Quelle (System-Ansicht) | – |
 | Scanner | Schnellfilter, Security-Queue, Priorisierung, Entscheidungskette je Token | keine getrennten Stufen-Scores Discovery/Quality/Security/Market/Readiness (2) |
 | Security | eigene Engine, CRITICAL blockiert immer (auch manuell), Stale-Security blockiert | kein strukturierter Prüfbericht je Check; „keine Daten“ und „kein Risiko“ nicht überall getrennt sichtbar (2) |
 | Signale | 12 Signaltypen, 7 Strategien, Konsens, Confidence getrennt vom Score | keine Attribution pro/contra, kein Signal-Konflikt-Detektor, kein Multi-Timeframe-Abgleich, kein Signal-Alter (3) |
@@ -106,7 +106,7 @@ UI-Schicht (DOM): Views, Detail-Panel, Modals, Charts (Canvas), Toasts, Alarm-Fe
 | Lernen | vollständig seit 2.2.0 | Near-Misses/Opportunity Cost, Fehlerklassen nach PDF, Herkunft aktiver Parameter; altes naives Auto-Tuning ohne OOS-Nachweis (6) |
 | Monitoring | System/Bot Health, API Health Center, Metriken, Diagnose | keine Anomalie-Erkennung mit Aktionen (warn/degrade/pause/stop), keine Block-/Erfolgsraten (7) |
 | UI | einfache/Analyse-Ansicht, „Warum?“-Tab, Entscheidungsketten | Status-Leiste System/Data/Wallet/Risk/Live-Gate nur teilweise (7) |
-| Login | Hash-Vergleich, kein Klartext, kein Persistieren, Reload → neu anmelden | schneller SHA-256 (offline leicht zu raten), kein Lockout (1) |
+| Login | PBKDF2 (600k), kein Klartext, kein Persistieren, Reload → neu anmelden, Sperre 30 s → 15 min nach je 5 Fehlversuchen, gesperrt keine App-Aktionen | bleibt clientseitig (kein Server) |
 
 ## 7. Sicherheitskritische Stellen
 
@@ -115,7 +115,7 @@ UI-Schicht (DOM): Views, Detail-Panel, Modals, Charts (Canvas), Toasts, Alarm-Fe
 - `setMode('LIVE')` / `liveReadiness`: LIVE nie aktivierbar ohne Provider.
 - `requestSignature`: deaktiviert.
 - Lern-KI: `mergeParams` (nur verschärfend), `sanitizeRules`, Übernahme nur SIMULATION.
-- Login: Hash im Quelltext öffentlich sichtbar (GitHub Pages) → clientseitige Sperre, **kein** Server-Schutz.
+- Login: Hash im Quelltext öffentlich sichtbar (GitHub Pages) → clientseitige Sperre, **kein** Server-Schutz. PBKDF2 macht Offline-Raten teuer, verhindert es aber nicht bei schwachen Passwörtern.
 - CSP: `script-src 'unsafe-inline'` (nötig bei Einzeldatei), `connect-src https:`, keine externen Skripte.
 - Alle dynamischen Texte laufen durch den `html`-Template-Escaper; Links nur über `safeUrl` (kein `javascript:`).
 
@@ -135,16 +135,14 @@ Kein Hotspot gefunden, der eine Optimierung rechtfertigt. Render ist bereits ged
 
 ## 9. Tests (Ist)
 
-- **47 Selbsttests** in der App (System → Selbsttest): Grundlagen, Trading-Limits, Daten/Stale, Security, Chaos (API-/RPC-Ausfall, 429, falsches JSON, Scanner-Lock, verspätete Antworten, Reload-Recovery), Status-Logik, LIVE-Gating, Storage, Backtest-Look-Ahead, 11 Lern-KI-Tests.
+- **50 Selbsttests** in der App (System → Selbsttest): Grundlagen, Trading-Limits, Daten/Stale, Security, Chaos (API-/RPC-Ausfall, 429, falsches JSON, Scanner-Lock, verspätete Antworten, Reload-Recovery), Status-Logik, LIVE-Gating, Storage, Backtest-Look-Ahead, 11 Lern-KI-Tests.
 - **Browser-E2E** (Playwright, außerhalb des Repos): Login, Cooldown-Migration, UI einfach/Analyse inkl. Mobil, Lern-KI.
 - **Lücken:** Property-/Grenzwert-Tests für harte Limits und Positionsgröße, Positions-Lebenszyklus, Execution-Provider, Monitoring-Aktionen, Backtest-Reproduzierbarkeit, UI-Smoke für LIVE-Gate/Wallet/Diagnose.
 
 ## 10. Technische Schulden
 
 - Eine sehr große Datei (bewusst beibehalten: einfache Auslieferung, geringes Risiko).
-- Tote Datei `app.js`.
 - Altes Auto-Tuning (`maybeTune`) wählt Parameter ohne Out-of-Sample-Nachweis, wenn die Lern-KI aus ist.
-- Wissensbasis-Texte teils veraltet (z. B. Cooldown-Angaben).
 
 ## 11. Bewusste Abweichungen / Entscheidungen
 
@@ -155,3 +153,4 @@ Kein Hotspot gefunden, der eine Optimierung rechtfertigt. Render ist bereits ged
 ## Änderungsprotokoll
 
 - Phase 0: Audit erstellt.
+- Phase 1 (2.3.0): harte Untergrenzen Loss-Cooldown 10 min / globale Pause 5 min wiederhergestellt; `app.js` entfernt; Datenvalidierung mit Zählung je Quelle; Voll-Backup & geprüftes Wiederherstellen; Login mit PBKDF2, Fehlversuch-Sperre und gesperrten App-Aktionen; Randfall „Positionsgröße > Exposure“ behoben (durch Fuzz-Test gefunden); 3 neue Selbsttests, neue E2E-Tests für Backup und Login-Sperre.
