@@ -467,7 +467,7 @@ pre.raw{white-space:pre-wrap;word-break:break-all;font:11px/1.4 var(--mono);back
    ===================================================================== */
 
 /* ============================== KONSTANTEN ============================== */
-const APP_VERSION = '2.7.0';
+const APP_VERSION = '2.8.0';
 /* true, wenn Version a älter als b ist (fehlende Version = sehr alt). */
 const verLt = (a, b) => { if (typeof a !== 'string') return true; const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const STRATEGY_VERSION = '1.0.0';
@@ -497,9 +497,9 @@ const MIN_ORDER_USD = 5;
 const HARD_LIMITS = Object.freeze({
   MAX_BUYS_PER_COIN: 2,
   MIN_SELL_COOLDOWN_MIN: 15,
-  MIN_LOSS_COOLDOWN_MIN: 10,
+  MIN_LOSS_COOLDOWN_MIN: 0, // Entscheidung Nutzer (2026-09-29, ab 2.8.0): Loss-Cooldown und globale Pause dürfen 0 sein
   MAX_LOSS_STREAK_LIMIT: 3,
-  MIN_GLOBAL_PAUSE_MIN: 5,
+  MIN_GLOBAL_PAUSE_MIN: 0,
   MIN_TRADES_FOR_TUNING: 20,
   MAX_EXPOSURE_PCT: 50,
   MAX_POSITION_PCT: 20
@@ -759,9 +759,9 @@ const SETTINGS_SCHEMA = [
   { k: 'requireVerifiedSecurity', s: 'Risiko', l: 'Nur VERIFIED Security (RPC + RugCheck)', t: 'bool', def: false },
   { k: 'maxBuysPerCoin', s: 'Risiko', l: 'Max. Käufe pro Coin', t: 'int', def: 2, min: 1, max: HARD_LIMITS.MAX_BUYS_PER_COIN, hard: true },
   { k: 'sellCooldownMin', s: 'Risiko', l: 'Coin-Cooldown nach Verkauf', t: 'int', def: 15, min: HARD_LIMITS.MIN_SELL_COOLDOWN_MIN, max: 1440, u: 'min', hard: true },
-  { k: 'lossCooldownMin', s: 'Risiko', l: 'Loss-Cooldown (global) nach Verlust', t: 'int', def: 10, min: HARD_LIMITS.MIN_LOSS_COOLDOWN_MIN, max: 1440, u: 'min', hard: true },
+  { k: 'lossCooldownMin', s: 'Risiko', l: 'Loss-Cooldown (global) nach Verlust', t: 'int', def: 0, min: HARD_LIMITS.MIN_LOSS_COOLDOWN_MIN, max: 1440, u: 'min', hard: true },
   { k: 'lossStreakLimit', s: 'Risiko', l: 'Verlustserie bis globale Pause', t: 'int', def: 3, min: 1, max: HARD_LIMITS.MAX_LOSS_STREAK_LIMIT, hard: true },
-  { k: 'globalPauseMin', s: 'Risiko', l: 'Globale Pause nach Verlustserie', t: 'int', def: 5, min: HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN, max: 1440, u: 'min', hard: true },
+  { k: 'globalPauseMin', s: 'Risiko', l: 'Globale Pause nach Verlustserie', t: 'int', def: 0, min: HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN, max: 1440, u: 'min', hard: true },
   { k: 'maxTradesPerHour', s: 'Risiko', l: 'Overtrading-Limit (Käufe/Stunde)', t: 'int', def: 6, min: 1, max: 30 },
   { k: 'correlationLimit', s: 'Risiko', l: 'Korrelations-Grenze (Konzentration)', t: 'num', def: 0.85, min: 0.5, max: 1, step: 0.01 },
   { k: 'ddReducePct', s: 'Risiko', l: 'Drawdown-Modus: Positionsgröße halbieren ab', t: 'num', def: 10, min: 2, max: 50, u: '%' },
@@ -3828,11 +3828,12 @@ function createCore(opts) {
     const pnl = pos.realizedUsd, win = pnl > 0;
     if (!win) {
       r.lossStreak++; r.lossCooldownUntil = now + s.lossCooldownMin * MIN;
-      log.risk(`Verlust ${pos.symbol} ${fmtSigned(pnl)} → Loss-Cooldown ${s.lossCooldownMin} min (Serie ${r.lossStreak})`);
+      log.risk(`Verlust ${pos.symbol} ${fmtSigned(pnl)} → ${s.lossCooldownMin > 0 ? `Loss-Cooldown ${s.lossCooldownMin} min` : 'kein Loss-Cooldown (0 min)'} (Serie ${r.lossStreak})`);
       if (r.lossStreak >= s.lossStreakLimit) {
         r.globalPauseUntil = now + s.globalPauseMin * MIN; r.reviewRequired = true;
-        log.risk(`${r.lossStreak} Verluste in Folge → globale Pause ${s.globalPauseMin} min`);
-        alert('RISK', null, `${r.lossStreak} Verluste in Folge → globale Pause ${s.globalPauseMin} min. Kontrollierter Review empfohlen.`, 'CRITICAL', { key: 'streak', cooldownMs: 0 });
+        const pauseTxt = s.globalPauseMin > 0 ? `globale Pause ${s.globalPauseMin} min` : 'keine globale Pause (0 min)';
+        log.risk(`${r.lossStreak} Verluste in Folge → ${pauseTxt}`);
+        alert('RISK', null, `${r.lossStreak} Verluste in Folge → ${pauseTxt}. Kontrollierter Review empfohlen.`, s.globalPauseMin > 0 ? 'CRITICAL' : 'WARNING', { key: 'streak', cooldownMs: 0 });
       }
     } else r.lossStreak = 0;
     ensureSession();
@@ -4935,11 +4936,11 @@ function createCore(opts) {
   function hydrate(d) {
     if (!d) return;
     state.settings = validateSettings(d.settings || d.settingsIn || {}, defaultSettings()).settings;
-    /* Seit 2.3.0 gelten wieder harte Untergrenzen (Loss-Cooldown 10 min, globale Pause 5 min).
-       Niedrigere gespeicherte Werte (z. B. 0 aus 2.1.1–2.2.x) hebt validateSettings an – sichtbar protokolliert. */
-    const rawS = (d.settings && typeof d.settings === 'object') ? d.settings : {}, raised = [];
-    for (const [k, lim, name] of [['lossCooldownMin', HARD_LIMITS.MIN_LOSS_COOLDOWN_MIN, 'Loss-Cooldown'], ['globalPauseMin', HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN, 'Globale Pause']])
-      if (isNum(rawS[k]) && rawS[k] < lim) { log.warn('RISK', `${name}: gespeicherter Wert ${rawS[k]} min auf harte Untergrenze ${lim} min angehoben`); raised.push({ key: k, from: rawS[k], to: state.settings[k] }); }
+    /* Ab 2.8.0 (Entscheidung Nutzer): Loss-Cooldown und globale Pause wieder 0. Gespeicherte Werte aus älteren Versionen
+       (2.3.0–2.7.x erzwangen 10 / 5 min) werden einmalig auf 0 gesetzt – sichtbar protokolliert. Danach frei einstellbar. */
+    const zeroed = [], oldVer = !d.app || verLt(String(d.app), '2.8.0');
+    if (oldVer) for (const [k, name] of [['lossCooldownMin', 'Loss-Cooldown'], ['globalPauseMin', 'Globale Pause']])
+      if (state.settings[k] !== 0) { zeroed.push({ key: k, from: state.settings[k], to: 0 }); log.info('RISK', `${name}: ${state.settings[k]} min → 0 min (Umstellung 2.8.0)`); state.settings = { ...state.settings, [k]: 0 }; }
     state.strategies = validateStrategies(d.strategies, defaultStrategies()).strategies;
     if (['SIMULATION', 'PAPER', 'READ_ONLY'].includes(d.mode)) state.mode = d.mode;
     if (d.bot && typeof d.bot === 'object') {
@@ -4952,6 +4953,7 @@ function createCore(opts) {
       const r = d.risk, R = state.risk;
       R.buyCount = numMap(r.buyCount, HARD_LIMITS.MAX_BUYS_PER_COIN); R.coinCooldown = numMap(r.coinCooldown); R.stratCooldown = numMap(r.stratCooldown);
       for (const k of ['lossCooldownUntil', 'globalPauseUntil', 'lossStreak', 'dailyPnl', 'dailyTrades']) if (isNum(r[k])) R[k] = r[k];
+      if (oldVer) { R.lossCooldownUntil = 0; R.globalPauseUntil = 0; } // laufende Pause/Cooldown aus der alten 10/5-Regel beenden
       if (isNum(r.dailyStartEquity)) R.dailyStartEquity = r.dailyStartEquity;
       R.dayKey = typeof r.dayKey === 'string' ? r.dayKey : ''; R.dailyLimitHit = r.dailyLimitHit === true; R.reviewRequired = r.reviewRequired === true;
       R.buyTimes = arr(r.buyTimes).filter(isNum);
@@ -4981,7 +4983,7 @@ function createCore(opts) {
     if (d.ui && typeof d.ui === 'object') state.ui = d.ui;
     if (isNum(d.tradeSeq)) state.tradeSeq = d.tradeSeq;
     if (d.reconciliation && d.reconciliation.required === true) state.reconciliation = { required: true, issues: arr(d.reconciliation.issues).map(x => str(String(x), 200)), at: isNum(d.reconciliation.at) ? d.reconciliation.at : env.now() };
-    if (raised.length) state.configLog.unshift({ ts: env.now(), who: 'MIGRATION', kind: 'settings', changes: raised });
+    if (zeroed.length) state.configLog.unshift({ ts: env.now(), who: 'MIGRATION', kind: 'settings', changes: zeroed });
     const lp = loadLearnParts(d);
     state.learn = lp.learn; state.research = lp.research; state.patterns = lp.patterns;
     if (lp.models) state.models = lp.models;
@@ -5401,12 +5403,22 @@ const SELF_TESTS = [
     const r2 = await core.executeBuy(t.id, { sizeUsd: 20 }); assert(!codes(r2).includes('COOLDOWN_ACTIVE'), 'Cooldown nach 15 min noch aktiv');
     return 'Cooldown aktiv direkt nach Verkauf, frei nach 15 min';
   }],
-  ['Trading', 'Loss-Cooldown 10 min & globale Pause 5 min (hart, nicht unterschreitbar)', async () => {
-    assert(HARD_LIMITS.MIN_LOSS_COOLDOWN_MIN === 10 && HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN === 5, 'harte Cooldown-Grenzen nicht 10/5');
-    const v = validateSettings({ lossCooldownMin: 0, globalPauseMin: -3 }).settings;
-    assert(v.lossCooldownMin === 10 && v.globalPauseMin === 5, 'Cooldowns unter die harte Grenze gesetzt: ' + v.lossCooldownMin + '/' + v.globalPauseMin);
-    const H = makeTestHarness(); const core = await testCore(H, { lossCooldownMin: 0, globalPauseMin: 0 });
-    assert(core.S().lossCooldownMin === 10 && core.S().globalPauseMin === 5, 'updateSettings unterschreitet harte Grenze');
+  ['Trading', 'Loss-Cooldown & globale Pause: Standard 0 (aus), einstellbar, nie negativ', async () => {
+    assert(HARD_LIMITS.MIN_LOSS_COOLDOWN_MIN === 0 && HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN === 0 && defaultSettings().lossCooldownMin === 0 && defaultSettings().globalPauseMin === 0, 'Standard/Untergrenze nicht 0');
+    const v = validateSettings({ lossCooldownMin: -5, globalPauseMin: -3 }).settings;
+    assert(v.lossCooldownMin === 0 && v.globalPauseMin === 0, 'negative Werte nicht auf 0 begrenzt: ' + v.lossCooldownMin + '/' + v.globalPauseMin);
+    // Standard 0/0: drei Verluste in Folge → weder Cooldown noch Pause, aber Review-Hinweis
+    const H0 = makeTestHarness(); const c0 = await testCore(H0);
+    for (let i = 1; i <= 3; i++) {
+      const t = await prepToken(c0, H0, i);
+      assert((await c0.executeBuy(t.id, { sizeUsd: 20 })).ok, `Buy ${i} fehlgeschlagen`);
+      assert((await c0.executeSell(c0.state.positions[0].id, 'ALL', 'MANUAL')).ok, 'Sell fehlgeschlagen');
+    }
+    const p0 = await c0.executeBuy((await prepToken(c0, H0, 7)).id, { sizeUsd: 20 });
+    assert(c0.state.risk.lossStreak === 3 && c0.state.risk.reviewRequired && !codes(p0).includes('LOSS_COOLDOWN') && !codes(p0).includes('GLOBAL_PAUSE') && p0.ok, 'Cooldown/Pause trotz 0 aktiv: ' + codes(p0).join(','));
+    // Einstellbar: mit 10 / 5 min greifen beide und laufen ab
+    const H = makeTestHarness(); const core = await testCore(H, { lossCooldownMin: 10, globalPauseMin: 5 });
+    assert(core.S().lossCooldownMin === 10 && core.S().globalPauseMin === 5, 'Einstellung 10/5 nicht übernommen');
     const refresh = async () => { await core._t.updateSolPrice(true); };
     for (let i = 1; i <= 3; i++) {
       const t = await prepToken(core, H, i);
@@ -5425,7 +5437,14 @@ const SELF_TESTS = [
     H.env.advance(10 * MIN + SEC); await refresh();
     const p9 = await core.executeBuy((await prepToken(core, H, 9)).id, { sizeUsd: 20 });
     assert(!codes(p9).includes('GLOBAL_PAUSE') && !codes(p9).includes('LOSS_COOLDOWN'), 'Pause/Cooldown laufen nicht ab: ' + codes(p9).join(','));
-    return 'Grenzen 10/5 min nicht unterschreitbar · Cooldown nach jedem Verlust · Pause nach 3 Verlusten · beide laufen ab';
+    // Umstellung 2.8.0: gespeicherte 10/5 aus 2.7.0 → 0/0, laufende Pause/Cooldown beendet, protokolliert
+    const Hm = makeTestHarness(); Hm.backend = createMemoryBackend(); const nm = Hm.env.now();
+    Hm.backend.set(STORAGE_KEYS.settings, JSON.stringify({ v: STORAGE_VERSION, settings: { lossCooldownMin: 10, globalPauseMin: 5 }, strategies: {}, watchlist: {}, ui: {} }));
+    Hm.backend.set(STORAGE_KEYS.runtime, JSON.stringify({ v: STORAGE_VERSION, tradeSeq: 0, savedAt: nm, app: '2.7.0', mode: 'SIMULATION', risk: { lossCooldownUntil: nm + 10 * MIN, globalPauseUntil: nm + 5 * MIN, lossStreak: 3 } }));
+    const cm = createCore({ env: Hm.env, backend: Hm.backend }); cm.init({ autoStart: false });
+    assert(cm.S().lossCooldownMin === 0 && cm.S().globalPauseMin === 0 && cm.state.risk.lossCooldownUntil === 0 && cm.state.risk.globalPauseUntil === 0, 'Umstellung 2.8.0: Werte/laufende Pause nicht zurückgesetzt');
+    assert(cm.state.configLog.some(c => c.who === 'MIGRATION' && c.changes.some(x => x.key === 'lossCooldownMin' && x.from === 10 && x.to === 0)), 'Umstellung 2.8.0 nicht protokolliert');
+    return 'Standard 0/0: kein Cooldown, keine Pause, Review-Hinweis · eingestellt 10/5: Cooldown nach jedem Verlust, Pause nach 3 Verlusten, beide laufen ab · Umstellung aus 2.7.0 protokolliert';
   }],
   ['Trading', 'Frischer Start: Startkapital & Positionen neu, Analysedaten bleiben', async () => {
     const H = makeTestHarness(); const core = await testCore(H);
@@ -7105,7 +7124,7 @@ const KB = [
   ['Trading', 'NO TRADE ist eine valide Entscheidung', 'Ein entdeckter Token ist kein Kaufgrund. Der Bot handelt nur, wenn Datenqualität, Sicherheit, Risiko, Portfolio-Limits, Cooldowns und Strategie-Konsens gleichzeitig passen.'],
   ['Risk Management', 'Positionsgröße', 'Größe = Kapital × Strategie-% × Risiko-, Confidence- und Volatilitätsfaktor, begrenzt durch Liquidität (Impact ≤ halbe max. Slippage), freie Exposure, max. Positionsgröße und Cash. Bei zu geringer Datenqualität ist die Größe 0.'],
   ['Risk Management', 'Stops & Take Profits', 'Prozent-Stop, optional ATR-Stop (aus 1m-OHLCV), Trailing ab definiertem Gewinn, Break-even nach TP1, TP1–TP3 als Teilverkäufe, Time Exit, Liquiditätsabfluss- und Risiko-Exit.'],
-  ['Risk Management', 'Buy-Limit & Cooldowns', 'Pro Mint maximal 2 Käufe. Nachkauf nur im Gewinn (≥ +10 %), nie im Verlust (kein Martingale/Blind DCA). Nach jedem Verkauf 15 min Coin-Cooldown, nach Verlust 10 min globaler Loss-Cooldown, nach 3 Verlusten in Folge globale Pause.'],
+  ['Risk Management', 'Buy-Limit & Cooldowns', 'Pro Mint maximal 2 Käufe. Nachkauf nur im Gewinn (≥ +10 %), nie im Verlust (kein Martingale/Blind DCA). Nach jedem Verkauf 15 min Coin-Cooldown. Globaler Loss-Cooldown nach Verlust und globale Pause nach 3 Verlusten in Folge sind einstellbar (Standard 0 min = aus).'],
   ['Market Structure', 'Käufer/Verkäufer-Verhältnis', 'DexScreener liefert Transaktionszahlen (nicht Buy-/Sell-Volumen). Das Verhältnis zeigt Druck, sagt aber nichts über Trade-Größen – deshalb wird zusätzlich die Ø-Trade-Größe relativ zur Liquidität betrachtet.'],
   ['Market Structure', 'Pump- & Manipulationsmuster', 'Vertikaler Anstieg, extreme Kaufquote, Volumen- oder Liquiditäts-Spikes und Whale-dominierte Bewegungen erhöhen das Risiko. Ein Pump wird nie automatisch als Kaufsignal gewertet.'],
   ['Solana', 'Mint Authority', 'Ist die Mint Authority aktiv, kann jederzeit neue Supply erzeugt werden. Der Bot prüft das per Solana RPC (getAccountInfo, jsonParsed) und blockiert aktive Mint Authorities.'],
