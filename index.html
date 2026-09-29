@@ -377,6 +377,7 @@ pre.raw{white-space:pre-wrap;word-break:break-all;font:11px/1.4 var(--mono);back
     <input type="password" id="loginPass" name="password" autocomplete="current-password" required aria-required="true">
     <p class="login-err" id="loginErr" role="alert" aria-live="assertive" hidden></p>
     <button type="submit" class="btn pri login-submit">Anmelden</button>
+    <p class="note login-note">Lokale Zugangssperre in diesem Browser – kein Server-Login. Sie schützt die Oberfläche auf diesem Gerät, nicht den öffentlichen Quelltext.</p>
   </form>
 </div>
 <a class="skip" href="#center">Zum Inhalt springen</a>
@@ -464,7 +465,7 @@ pre.raw{white-space:pre-wrap;word-break:break-all;font:11px/1.4 var(--mono);back
    ===================================================================== */
 
 /* ============================== KONSTANTEN ============================== */
-const APP_VERSION = '2.2.0';
+const APP_VERSION = '2.3.0';
 /* true, wenn Version a älter als b ist (fehlende Version = sehr alt). */
 const verLt = (a, b) => { if (typeof a !== 'string') return true; const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const STRATEGY_VERSION = '1.0.0';
@@ -472,6 +473,7 @@ const DATA_ENGINE_VERSION = '1.0.0';
 const STORAGE_KEY_V2 = 'smartlab.v2';
 const STORAGE_VERSION = 3;
 /* Storage logisch getrennt: Settings · Runtime · Positionen/Orders · Trades · Logs · Statistiken */
+const RESTORE_NOTE_KEY = 'smartlab.restore.note';
 const STORAGE_KEYS = Object.freeze({ settings: 'smartlab.v3.settings', runtime: 'smartlab.v3.runtime', positions: 'smartlab.v3.positions', trades: 'smartlab.v3.trades', logs: 'smartlab.v3.logs', stats: 'smartlab.v3.stats', learning: 'smartlab.v3.learning', experiments: 'smartlab.v3.experiments', models: 'smartlab.v3.models', patterns: 'smartlab.v3.patterns' });
 const SEC = 1000, MIN = 60 * SEC, HOUR = 60 * MIN, DAY = 24 * HOUR;
 const LAMPORTS_PER_SOL = 1000000000n;
@@ -493,9 +495,9 @@ const MIN_ORDER_USD = 5;
 const HARD_LIMITS = Object.freeze({
   MAX_BUYS_PER_COIN: 2,
   MIN_SELL_COOLDOWN_MIN: 15,
-  MIN_LOSS_COOLDOWN_MIN: 0,
+  MIN_LOSS_COOLDOWN_MIN: 10,
   MAX_LOSS_STREAK_LIMIT: 3,
-  MIN_GLOBAL_PAUSE_MIN: 0,
+  MIN_GLOBAL_PAUSE_MIN: 5,
   MIN_TRADES_FOR_TUNING: 20,
   MAX_EXPOSURE_PCT: 50,
   MAX_POSITION_PCT: 20
@@ -755,9 +757,9 @@ const SETTINGS_SCHEMA = [
   { k: 'requireVerifiedSecurity', s: 'Risiko', l: 'Nur VERIFIED Security (RPC + RugCheck)', t: 'bool', def: false },
   { k: 'maxBuysPerCoin', s: 'Risiko', l: 'Max. Käufe pro Coin', t: 'int', def: 2, min: 1, max: HARD_LIMITS.MAX_BUYS_PER_COIN, hard: true },
   { k: 'sellCooldownMin', s: 'Risiko', l: 'Coin-Cooldown nach Verkauf', t: 'int', def: 15, min: HARD_LIMITS.MIN_SELL_COOLDOWN_MIN, max: 1440, u: 'min', hard: true },
-  { k: 'lossCooldownMin', s: 'Risiko', l: 'Loss-Cooldown (global) nach Verlust', t: 'int', def: 0, min: HARD_LIMITS.MIN_LOSS_COOLDOWN_MIN, max: 1440, u: 'min', hard: true },
+  { k: 'lossCooldownMin', s: 'Risiko', l: 'Loss-Cooldown (global) nach Verlust', t: 'int', def: 10, min: HARD_LIMITS.MIN_LOSS_COOLDOWN_MIN, max: 1440, u: 'min', hard: true },
   { k: 'lossStreakLimit', s: 'Risiko', l: 'Verlustserie bis globale Pause', t: 'int', def: 3, min: 1, max: HARD_LIMITS.MAX_LOSS_STREAK_LIMIT, hard: true },
-  { k: 'globalPauseMin', s: 'Risiko', l: 'Globale Pause nach Verlustserie', t: 'int', def: 0, min: HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN, max: 1440, u: 'min', hard: true },
+  { k: 'globalPauseMin', s: 'Risiko', l: 'Globale Pause nach Verlustserie', t: 'int', def: 5, min: HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN, max: 1440, u: 'min', hard: true },
   { k: 'maxTradesPerHour', s: 'Risiko', l: 'Overtrading-Limit (Käufe/Stunde)', t: 'int', def: 6, min: 1, max: 30 },
   { k: 'correlationLimit', s: 'Risiko', l: 'Korrelations-Grenze (Konzentration)', t: 'num', def: 0.85, min: 0.5, max: 1, step: 0.01 },
   { k: 'consensusMinWeight', s: 'Risiko', l: 'Min. Strategie-Konsens (Summe Gewichte)', t: 'num', def: 1.5, min: 0.5, max: 5, step: 0.1 },
@@ -858,6 +860,7 @@ function validateSettings(input, base) {
   if (!(out.tp1Pct < out.tp2Pct && out.tp2Pct < out.tp3Pct)) revert(['tp1Pct', 'tp2Pct', 'tp3Pct'], 'Take Profits müssen aufsteigend sein (TP1 < TP2 < TP3)');
   if (out.tp1Frac + out.tp2Frac > 1) revert(['tp1Frac', 'tp2Frac'], 'TP1- + TP2-Anteil darf 100 % nicht überschreiten');
   if (out.maxPositionPct > out.maxExposurePct) revert(['maxPositionPct'], 'Max. Positionsgröße darf Max. Exposure nicht überschreiten');
+  if (out.maxPositionPct > out.maxExposurePct) out.maxPositionPct = out.maxExposurePct; // auch der Rückfallwert darf die Exposure nicht überschreiten
   // harte Grenzen (redundant zur Schema-Grenze, bewusst doppelt abgesichert)
   out.maxBuysPerCoin = Math.min(out.maxBuysPerCoin, HARD_LIMITS.MAX_BUYS_PER_COIN);
   out.sellCooldownMin = Math.max(out.sellCooldownMin, HARD_LIMITS.MIN_SELL_COOLDOWN_MIN);
@@ -1155,6 +1158,17 @@ function createHttp(env, log) {
 
 /* ============================== NORMALIZATION LAYER ==============================
    Alle Quellen -> einheitlicher MarketSnapshot. Fehlende Werte = null (nie erfunden). */
+/* Datenvalidierung je Quelle: gelieferte, aber ungültige Felder (NaN, Infinity, negativ, 0-Preis, unplausibel groß)
+   werden zu null – nie zu 0 – und gezählt. Ganze Datensätze ohne gültige Identität werden verworfen und gezählt. */
+const PLAUS_MAX = Object.freeze({ price: 1e7, usd: 1e13, pct: 1e6 });
+const newDq = () => ({ records: 0, accepted: 0, rejected: 0, invalidFields: 0, byField: {}, lastIssue: '', lastIssueAt: 0 });
+function dqField(dq, name, raw, v, max, at) {
+  let out = v;
+  if (out != null && isNum(max) && Math.abs(out) > max) out = null;
+  if (dq && out == null && raw != null && raw !== '') { dq.invalidFields++; dq.byField[name] = (dq.byField[name] || 0) + 1; dq.lastIssue = `${name} = ${String(raw).slice(0, 24)}`; dq.lastIssueAt = at || 0; }
+  return out;
+}
+const dqReject = (dq, why, at) => { if (dq) { dq.rejected++; dq.lastIssue = why; dq.lastIssueAt = at || 0; } return null; };
 function normTxn(t) { return t && typeof t === 'object' ? { b: int(t.buys), s: int(t.sells) } : null; }
 function normLinks(list, typeKey) {
   const out = [];
@@ -1166,57 +1180,67 @@ function normLinks(list, typeKey) {
   }
   return out;
 }
-function normDexPair(p, fetchedAt) {
-  if (!p || typeof p !== 'object' || p.chainId !== 'solana') return null;
+function normDexPair(p, fetchedAt, dq) {
+  if (dq) dq.records++;
+  if (!p || typeof p !== 'object') return dqReject(dq, 'Datensatz kein Objekt', fetchedAt);
+  if (p.chainId !== 'solana') return dqReject(dq, 'falsche Chain: ' + str(String(p.chainId), 16), fetchedAt);
   const bt = p.baseToken && typeof p.baseToken === 'object' ? p.baseToken : {};
   const mint = bt.address;
-  if (!isMint(mint)) return null;
+  if (!isMint(mint)) return dqReject(dq, 'ungültige Mint-Adresse', fetchedAt);
   const vol = p.volume || {}, ch = p.priceChange || {}, lq = p.liquidity || {}, tx = p.txns || {}, info = p.info || {};
-  const price = nonNeg(p.priceUsd);
+  const F = (name, raw, parse, max) => dqField(dq, name, raw, parse(raw), max, fetchedAt);
+  const price = F('priceUsd', p.priceUsd, v => { const n = nonNeg(v); return n && n > 0 ? n : null; }, PLAUS_MAX.price);
+  if (dq) dq.accepted++;
   const priceRaw = typeof p.priceUsd === 'string' && /^\d+(\.\d+)?([eE]-?\d+)?$/.test(p.priceUsd) ? p.priceUsd : null;
   return {
     source: 'dexscreener', id: tokenIdOf(mint), mint,
     symbol: str(bt.symbol, 24) || '?', name: str(bt.name, 64),
     pairAddress: isMint(p.pairAddress) ? p.pairAddress : null, dexId: str(p.dexId, 24) || null, url: safeUrl(p.url),
     quoteSymbol: str((p.quoteToken || {}).symbol, 12) || null,
-    priceUsd: price && price > 0 ? price : null, priceRaw: price && price > 0 ? priceRaw : null, priceNative: nonNeg(p.priceNative),
-    marketCap: nonNeg(p.marketCap), fdv: nonNeg(p.fdv), liquidityUsd: nonNeg(lq.usd),
-    vol: { m5: nonNeg(vol.m5), h1: nonNeg(vol.h1), h6: nonNeg(vol.h6), h24: nonNeg(vol.h24) },
-    chg: { m5: num(ch.m5), h1: num(ch.h1), h6: num(ch.h6), h24: num(ch.h24) },
+    priceUsd: price && price > 0 ? price : null, priceRaw: price && price > 0 ? priceRaw : null, priceNative: F('priceNative', p.priceNative, nonNeg),
+    marketCap: F('marketCap', p.marketCap, nonNeg, PLAUS_MAX.usd), fdv: F('fdv', p.fdv, nonNeg, PLAUS_MAX.usd), liquidityUsd: F('liquidityUsd', lq.usd, nonNeg, PLAUS_MAX.usd),
+    vol: { m5: F('vol.m5', vol.m5, nonNeg, PLAUS_MAX.usd), h1: F('vol.h1', vol.h1, nonNeg, PLAUS_MAX.usd), h6: F('vol.h6', vol.h6, nonNeg, PLAUS_MAX.usd), h24: F('vol.h24', vol.h24, nonNeg, PLAUS_MAX.usd) },
+    chg: { m5: F('chg.m5', ch.m5, num, PLAUS_MAX.pct), h1: F('chg.h1', ch.h1, num, PLAUS_MAX.pct), h6: F('chg.h6', ch.h6, num, PLAUS_MAX.pct), h24: F('chg.h24', ch.h24, num, PLAUS_MAX.pct) },
     txns: { m5: normTxn(tx.m5), h1: normTxn(tx.h1), h6: normTxn(tx.h6), h24: normTxn(tx.h24) },
     pairCreatedAt: nonNeg(p.pairCreatedAt), boostsActive: int((p.boosts || {}).active) || 0,
     links: [...normLinks(info.websites, 'label').map(l => ({ ...l, type: 'website' })), ...normLinks(info.socials, 'type')],
     fetchedAt
   };
 }
-function normGtPool(item, fetchedAt) {
-  if (!item || typeof item !== 'object' || !item.attributes) return null;
+function normGtPool(item, fetchedAt, dq) {
+  if (dq) dq.records++;
+  if (!item || typeof item !== 'object' || !item.attributes) return dqReject(dq, 'Datensatz ohne Attribute', fetchedAt);
   const a = item.attributes, rel = item.relationships || {};
   const baseId = ((rel.base_token || {}).data || {}).id;
   const mint = typeof baseId === 'string' && baseId.startsWith('solana_') ? baseId.slice(7) : null;
-  if (!isMint(mint) || NON_MEME.has(mint)) return null;
+  if (!isMint(mint)) return dqReject(dq, 'ungültige Mint-Adresse', fetchedAt);
+  if (NON_MEME.has(mint)) return null;
   const name = str(a.name, 80);
   const v = a.volume_usd || {}, c = a.price_change_percentage || {}, tx = a.transactions || {};
-  const price = nonNeg(a.base_token_price_usd);
+  const F = (nm, raw, parse, max) => dqField(dq, nm, raw, parse(raw), max, fetchedAt);
+  const price = F('priceUsd', a.base_token_price_usd, x => { const n = nonNeg(x); return n && n > 0 ? n : null; }, PLAUS_MAX.price);
+  if (dq) dq.accepted++;
   const created = typeof a.pool_created_at === 'string' ? Date.parse(a.pool_created_at) : NaN;
   return {
     source: 'geckoterminal', id: tokenIdOf(mint), mint, symbol: (name.split('/')[0] || '').trim().slice(0, 24) || '?', name,
     pairAddress: isMint(a.address) ? a.address : null, dexId: str(((rel.dex || {}).data || {}).id, 24) || null, url: null, quoteSymbol: null,
     priceUsd: price && price > 0 ? price : null, priceRaw: null, priceNative: null,
-    marketCap: nonNeg(a.market_cap_usd), fdv: nonNeg(a.fdv_usd), liquidityUsd: nonNeg(a.reserve_in_usd),
-    vol: { m5: nonNeg(v.m5), m15: nonNeg(v.m15), h1: nonNeg(v.h1), h6: nonNeg(v.h6), h24: nonNeg(v.h24) },
-    chg: { m5: num(c.m5), m15: num(c.m15), h1: num(c.h1), h6: num(c.h6), h24: num(c.h24) },
+    marketCap: F('marketCap', a.market_cap_usd, nonNeg, PLAUS_MAX.usd), fdv: F('fdv', a.fdv_usd, nonNeg, PLAUS_MAX.usd), liquidityUsd: F('liquidityUsd', a.reserve_in_usd, nonNeg, PLAUS_MAX.usd),
+    vol: { m5: F('vol.m5', v.m5, nonNeg, PLAUS_MAX.usd), m15: F('vol.m15', v.m15, nonNeg, PLAUS_MAX.usd), h1: F('vol.h1', v.h1, nonNeg, PLAUS_MAX.usd), h6: F('vol.h6', v.h6, nonNeg, PLAUS_MAX.usd), h24: F('vol.h24', v.h24, nonNeg, PLAUS_MAX.usd) },
+    chg: { m5: F('chg.m5', c.m5, num, PLAUS_MAX.pct), m15: F('chg.m15', c.m15, num, PLAUS_MAX.pct), h1: F('chg.h1', c.h1, num, PLAUS_MAX.pct), h6: F('chg.h6', c.h6, num, PLAUS_MAX.pct), h24: F('chg.h24', c.h24, num, PLAUS_MAX.pct) },
     txns: { m5: normTxn(tx.m5), m15: normTxn(tx.m15), h1: normTxn(tx.h1), h24: normTxn(tx.h24) },
     pairCreatedAt: Number.isFinite(created) ? created : null, boostsActive: 0, links: [], fetchedAt
   };
 }
-function normOhlcv(data) {
+function normOhlcv(data, dq) {
   const list = arr(((data || {}).data || {}).attributes ? data.data.attributes.ohlcv_list : null);
   const seen = new Set(); const out = [];
   for (const r of list) {
-    if (!Array.isArray(r) || r.length < 6) continue;
+    if (dq) dq.records++;
+    if (!Array.isArray(r) || r.length < 6) { dqReject(dq, 'Kerze unvollständig'); continue; }
     const [t, o, h, l, c, v] = r.map(Number);
-    if (![t, o, h, l, c, v].every(Number.isFinite) || o <= 0 || h <= 0 || l <= 0 || c <= 0 || v < 0 || h < l) continue;
+    if (![t, o, h, l, c, v].every(Number.isFinite) || o <= 0 || h <= 0 || l <= 0 || c <= 0 || v < 0 || h < l) { dqReject(dq, 'Kerze ungültig (NaN/≤0/High<Low)'); continue; }
+    if (dq) dq.accepted++;
     const ts = t < 1e12 ? t * 1000 : t;
     if (seen.has(ts)) continue; seen.add(ts);
     out.push({ t: ts, o, h, l, c, v });
@@ -2561,6 +2585,7 @@ function createCore(opts) {
     hist: { equity: [], risk: [], api: [], scanner: [] },
     paramVersions: [], activeParam: 1, configLog: [], auditLog: [], sessions: [], session: null, stratStats: {}, falseSignals: [],
     secQueue: [], secBusy: false, regime: { tags: ['UNKNOWN'] }, storageOk: true, lastSaveAt: 0, ui: {}, loadInfo: {},
+    dataQuality: { dexscreener: newDq(), geckoterminal: newDq(), ohlcv: newDq() },
     learn: freshLearn(), research: freshResearch(), models: freshModels(null, 0), patterns: {}
   };
   const S = () => state.settings;
@@ -2718,7 +2743,7 @@ function createCore(opts) {
       try {
         const r = await http.request('gecko', `${GT_API}/networks/solana/${kind}?page=1`, { cacheMs: 10 * SEC, headers: GT_HEADERS, validate: gtValidator, keepRaw: S().rawApiLog });
         for (const it of r.data.data) {
-          const sn = normGtPool(it, r.fetchedAt); if (!sn) continue;
+          const sn = normGtPool(it, r.fetchedAt, state.dataQuality.geckoterminal); if (!sn) continue;
           const t = ensureToken(sn.mint, 'GeckoTerminal ' + (kind === 'new_pools' ? 'New' : 'Trending'));
           if (t) applyAlt(t, sn, r.fetchedAt);
         }
@@ -2731,7 +2756,7 @@ function createCore(opts) {
     const r = await http.request('dexPairs', DEX_API + '/tokens/v1/solana/' + mints.join(','), { cacheMs: noCache ? 0 : 800, noCache: !!noCache, validate: listValidator, keepRaw: S().rawApiLog });
     const best = {}, solRatios = [];
     for (const p of r.data) {
-      const sn = normDexPair(p, r.fetchedAt);
+      const sn = normDexPair(p, r.fetchedAt, state.dataQuality.dexscreener);
       if (sn && p.quoteToken && p.quoteToken.address === WSOL && sn.priceNative > 0 && sn.priceUsd > 0) solRatios.push(sn.priceUsd / sn.priceNative);
       if (!sn || !mints.includes(sn.mint)) continue;
       const cur = best[sn.mint];
@@ -2776,7 +2801,7 @@ function createCore(opts) {
       const r = await http.request('dexSol', DEX_API + '/tokens/v1/solana/' + WSOL, { cacheMs: 10 * SEC, validate: listValidator });
       let best = null;
       for (const p of r.data) {
-        const sn = normDexPair(p, r.fetchedAt);
+        const sn = normDexPair(p, r.fetchedAt, state.dataQuality.dexscreener);
         const q = p && p.quoteToken && p.quoteToken.address;
         if (!sn || sn.mint !== WSOL || (q !== USDC && q !== USDT) || !isNum(sn.priceUsd)) continue;
         if (!best || (sn.liquidityUsd || 0) > (best.liquidityUsd || 0)) best = sn;
@@ -2798,7 +2823,7 @@ function createCore(opts) {
     if (!pairs.length) return;
     try {
       const r = await http.request('gecko', `${GT_API}/networks/solana/pools/multi/${pairs.join(',')}`, { headers: GT_HEADERS, validate: gtValidator, keepRaw: S().rawApiLog });
-      for (const it of r.data.data) { const sn = normGtPool(it, r.fetchedAt); if (!sn) continue; const t = state.markets.get(sn.id); if (t) applyAlt(t, sn, r.fetchedAt); }
+      for (const it of r.data.data) { const sn = normGtPool(it, r.fetchedAt, state.dataQuality.geckoterminal); if (!sn) continue; const t = state.markets.get(sn.id); if (t) applyAlt(t, sn, r.fetchedAt); }
     } catch (e) { noteApiError('gecko', e); }
   }
   async function fetchOhlcv(id, tf = '1m', force = false) {
@@ -2810,7 +2835,7 @@ function createCore(opts) {
       cacheMs: force ? 0 : 30 * SEC, noCache: force, headers: GT_HEADERS,
       validate: d => (d && d.data && d.data.attributes && Array.isArray(d.data.attributes.ohlcv_list) ? null : 'unerwartetes OHLCV-Schema')
     });
-    const candles = normOhlcv(r.data);
+    const candles = normOhlcv(r.data, state.dataQuality.ohlcv);
     t.ohlcv[tf] = { candles, fetchedAt: r.fetchedAt, pair, cached: r.cached };
     return t.ohlcv[tf];
   }
@@ -4387,14 +4412,11 @@ function createCore(opts) {
   function hydrate(d) {
     if (!d) return;
     state.settings = validateSettings(d.settings || d.settingsIn || {}, defaultSettings()).settings;
-    /* Einmalige Migration (< v2.1.1): Loss-Cooldown/Globale Pause standen zuvor hart auf
-       10/5 min. Nur die noch unveränderten alten Default-Werte werden auf 0 korrigiert –
-       ein bewusst höher gesetzter eigener Wert bleibt unangetastet. Nach dem nächsten
-       Speichern (gespeicherte Version ≥ 2.1.1) greift das nicht mehr erneut. */
-    if (verLt(d.app, '2.1.1')) {
-      if (state.settings.lossCooldownMin === 10) state.settings.lossCooldownMin = 0;
-      if (state.settings.globalPauseMin === 5) state.settings.globalPauseMin = 0;
-    }
+    /* Seit 2.3.0 gelten wieder harte Untergrenzen (Loss-Cooldown 10 min, globale Pause 5 min).
+       Niedrigere gespeicherte Werte (z. B. 0 aus 2.1.1–2.2.x) hebt validateSettings an – sichtbar protokolliert. */
+    const rawS = (d.settings && typeof d.settings === 'object') ? d.settings : {}, raised = [];
+    for (const [k, lim, name] of [['lossCooldownMin', HARD_LIMITS.MIN_LOSS_COOLDOWN_MIN, 'Loss-Cooldown'], ['globalPauseMin', HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN, 'Globale Pause']])
+      if (isNum(rawS[k]) && rawS[k] < lim) { log.warn('RISK', `${name}: gespeicherter Wert ${rawS[k]} min auf harte Untergrenze ${lim} min angehoben`); raised.push({ key: k, from: rawS[k], to: state.settings[k] }); }
     state.strategies = validateStrategies(d.strategies, defaultStrategies()).strategies;
     if (['SIMULATION', 'PAPER', 'READ_ONLY'].includes(d.mode)) state.mode = d.mode;
     if (d.bot && typeof d.bot === 'object') {
@@ -4435,6 +4457,7 @@ function createCore(opts) {
     if (d.ui && typeof d.ui === 'object') state.ui = d.ui;
     if (isNum(d.tradeSeq)) state.tradeSeq = d.tradeSeq;
     if (d.reconciliation && d.reconciliation.required === true) state.reconciliation = { required: true, issues: arr(d.reconciliation.issues).map(x => str(String(x), 200)), at: isNum(d.reconciliation.at) ? d.reconciliation.at : env.now() };
+    if (raised.length) state.configLog.unshift({ ts: env.now(), who: 'MIGRATION', kind: 'settings', changes: raised });
     const lp = loadLearnParts(d);
     state.learn = lp.learn; state.research = lp.research; state.patterns = lp.patterns;
     if (lp.models) state.models = lp.models;
@@ -4482,6 +4505,8 @@ function createCore(opts) {
   }
   function init(o = {}) {
     const loaded = store.load();
+    const rn = parseJSON(opts.backend.get(RESTORE_NOTE_KEY));
+    if (rn) opts.backend.remove(RESTORE_NOTE_KEY);
     state.loadInfo = { migrated: loaded.migrated || 0, corrupted: arr(loaded.corrupted).length > 0, hadData: !!loaded.data };
     hydrate(loaded.data);
     reconcile({ seqs: loaded.data && loaded.data.seqs, corrupted: arr(loaded.corrupted).filter(c => ['runtime', 'positions', 'trades', 'v2'].includes(c)) });
@@ -4490,6 +4515,7 @@ function createCore(opts) {
     if (!state.models.versions[0].ts) state.models = freshModels(learnParamsNow(), env.now());
     state.learn.corrupted = arr(loaded.corrupted).filter(c => LEARN_STORAGE_KEYS.includes(c));
     try { learnBackfill(); } catch (e) { log.error('LEARNING', 'Migration der Lerndaten fehlgeschlagen: ' + e.message); }
+    if (rn && isNum(rn.at)) { audit('USER', 'RESTORE', `Sicherung vom ${str(String(rn.from), 30)} (v${str(String(rn.app), 12)}) wiederhergestellt`); log.info('STORAGE', `Sicherung vom ${str(String(rn.from), 30)} wiederhergestellt`); }
     for (const p of state.positions) ensureToken(p.mint, 'Position');
     for (const id of Object.keys(state.watchlist)) ensureToken(mintOfId(id), 'Watchlist');
     rpcEndpoints();
@@ -4508,6 +4534,7 @@ function createCore(opts) {
       const rows = state.journal.map(j => [j.id, j.mode, j.status, j.symbol, j.mint, j.pair, isoTime(j.openedAt), isoTime(j.closedAt), j.sizeUsd, j.feesUsd, j.slippageUsd, j.result ? j.result.pnlUsd : '', j.result && isNum(j.result.pnlPct) ? j.result.pnlPct.toFixed(2) : '', j.score, j.confidence, j.risk ? j.risk.total : '', j.strategy, j.signals.map(s => s.type).join('|'), j.exitReason, j.holdMs ? (j.holdMs / MIN).toFixed(1) : '', j.reason]);
       return { name: `smartlab-journal-${ts}.csv`, mime: 'text/csv', data: [cols, ...rows].map(r => r.map(csvCell).join(',')).join('\n') };
     }
+    if (kind === 'backup-json') return { name: `smartlab-backup-${ts}.json`, mime: 'application/json', data: JSON.stringify(exportBackup()) };
     if (kind === 'learning-report-csv') {
       const cols = ['tradeId', 'symbol', 'strategy', 'openedAt', 'closedAt', 'pnlUsd', 'pnlPct', 'win', 'lossFamily', 'secondary', 'evidence', 'avoidable', 'dataCompleteness', 'dataQuality', 'signalQuality', 'exitQuality', 'executionQuality', 'regimeFit', 'score', 'regime', 'mae2m', 'mfe2m', 'maxRunupPct', 'followUpMaxPct', 'exitReason', 'legacy'];
       const rows = state.learn.records.map(r => { const l = r.labels || {}; return [r.tradeId, r.symbol, r.strategy || 'manuell', isoTime(r.openedAt), isoTime(r.closedAt), r.outcome.pnlUsd, r.outcome.pnlPct, r.outcome.win, l.lossFamily || '', arr(l.secondary).join('|'), l.lossFamily ? (l.evidence || {})[l.lossFamily] : '', l.avoidable, l.dataCompleteness, l.dataQuality, l.signalQuality, l.exitQuality, l.executionQuality, l.regimeFit, r.entry ? r.entry.finalScore : '', arr(r.regimeTags).join('|'), r.path.mae2m, r.path.mfe2m, r.path.maxRunupPct, r.followUp ? r.followUp.maxAfterPct : '', r.exit.reason, !!r.legacy]; });
@@ -4525,6 +4552,42 @@ function createCore(opts) {
     };
     if (!payloads[kind]) throw new Error('Unbekannter Export');
     return { name: `smartlab-${kind.replace('-json', '')}-${ts}.json`, mime: 'application/json', data: JSON.stringify({ app: APP_VERSION, exportedAt: isoTime(env.now()), kind, ...payloads[kind]() }, null, 2) };
+  }
+  /* Voll-Backup: alle Speicherbereiche (smartlab.v3.*) in einer Datei – z. B. zur Sicherung oder zum Übertragen auf ein anderes Gerät.
+     Enthält keine Passwörter oder Keys; nur selbst eingetragene RPC-URLs stehen in den Einstellungen. */
+  function exportBackup() {
+    persistNow();
+    const storage = {};
+    for (const [k, key] of Object.entries(STORAGE_KEYS)) { const d = parseJSON(opts.backend.get(key)); if (d && typeof d === 'object') storage[k] = d; }
+    return { app: APP_VERSION, storageVersion: STORAGE_VERSION, exportedAt: isoTime(env.now()), kind: 'backup', storage };
+  }
+  function validateBackup(obj) {
+    if (!obj || typeof obj !== 'object' || obj.kind !== 'backup' || !obj.storage || typeof obj.storage !== 'object' || Array.isArray(obj.storage)) return 'Keine Smart-Lab-Sicherung (Kennung „backup“ fehlt)';
+    if (obj.storageVersion !== STORAGE_VERSION) return `Speicherversion ${String(obj.storageVersion).slice(0, 8)} wird nicht unterstützt (erwartet ${STORAGE_VERSION})`;
+    if (typeof obj.app !== 'string' || !/^\d+\.\d+\.\d+$/.test(obj.app)) return 'App-Version der Sicherung fehlt';
+    if (verLt(APP_VERSION, obj.app)) return `Sicherung stammt aus der neueren Version ${obj.app} – bitte zuerst die App aktualisieren`;
+    const unknown = Object.keys(obj.storage).filter(k => !STORAGE_KEYS[k]);
+    if (unknown.length) return 'Unbekannte Bereiche in der Sicherung: ' + unknown.slice(0, 3).join(', ');
+    if (!obj.storage.settings) return 'Sicherung enthält keine Einstellungen';
+    for (const [k, d] of Object.entries(obj.storage)) if (!d || typeof d !== 'object' || d.v !== STORAGE_VERSION) return `Bereich „${k}“ ist beschädigt`;
+    return null;
+  }
+  /* Wiederherstellen: prüfen → in einer isolierten Instanz vollständig laden (wie ein echter Start) → erst dann schreiben.
+     Danach ist der Speicher eingefroren, bis die Seite neu geladen wird (kein Überschreiben durch den laufenden Bot). */
+  function restoreBackup(obj) {
+    const err = validateBackup(obj); if (err) return { ok: false, error: err };
+    try {
+      const mem = createMemoryBackend();
+      for (const [k, d] of Object.entries(obj.storage)) mem.set(STORAGE_KEYS[k], JSON.stringify(d));
+      const probe = createCore({ env: { ...env, fetch: async () => { throw new Error('Probe ohne Netzwerk'); } }, backend: mem });
+      probe.init({ autoStart: false });
+      if (probe.state.loadInfo.corrupted) return { ok: false, error: 'Sicherung lässt sich nicht fehlerfrei laden (beschädigte Bereiche)' };
+    } catch (e) { return { ok: false, error: 'Sicherung lässt sich nicht laden: ' + str(e.message, 120) }; }
+    stopScanner(); storageFrozen = true;
+    for (const [k, key] of Object.entries(STORAGE_KEYS)) { if (obj.storage[k]) opts.backend.set(key, JSON.stringify(obj.storage[k])); else opts.backend.remove(key); }
+    opts.backend.remove(STORAGE_KEY_V2);
+    opts.backend.set(RESTORE_NOTE_KEY, JSON.stringify({ at: env.now(), from: obj.exportedAt, app: obj.app }));
+    return { ok: true };
   }
   function importSettings(text) {
     const d = parseJSON(text); if (!d || typeof d !== 'object') return { ok: false, errors: [{ msg: 'Datei ist kein gültiges JSON' }] };
@@ -4597,7 +4660,7 @@ function createCore(opts) {
     executeBuy, executeSell, execCheck: (t, o) => execCheck(t, t.A, o), globalBlockers, buildCtx, estFees, estImpact, equityInfo, portfolioRisk, positionCorrelations,
     systemHealth, diagnostics, botHealth, readiness, candidateChain, liveReadiness, preLiveChecks, ackReconciliation, requestSignature, rpcEndpoints, fetchOhlcv, fetchCandlesForBacktest, walletConnect, walletDisconnect, walletBalance, walletNetwork,
     updateSettings, updateStrategies, rollbackTo, addWatch, removeWatch, updateWatch, select, exportData, importSettings, resetSettings, resetPortfolio, freshStart,
-    learnView, learnDecision, learnPromote, learnReject, learnRollback, learnRunNow: () => { const r = learnRun(true); persistNow(); return r; },
+    learnView, learnDecision, learnPromote, learnReject, learnRollback, exportBackup, validateBackup, restoreBackup, learnRunNow: () => { const r = learnRun(true); persistNow(); return r; },
     newSession, factoryReset, persistNow, enqueueSecurity, clearFeed: () => { state.feed = []; persist(); },
     _t: { scanOnce, updateSolPrice, applySnapshot, applyAlt, fetchChunk, reconcile, analyzeAll, startScanner, stopScanner, timers, managePositions, closePosition, processQueue, enqueue, checkSecurity, ensureToken, maybeAutoTrade, setBotState, learnRun, learnOnClose, learnFollowUps, finishFollowUp, createChallenger, shadowEval, liveEval, addRecord }
   };
@@ -4728,6 +4791,59 @@ const SELF_TESTS = [
     assert(Object.isFrozen(HARD_LIMITS) && !Object.keys(TUNING_BOUNDS).some(k => ['maxBuysPerCoin', 'sellCooldownMin', 'lossCooldownMin', 'globalPauseMin', 'maxExposurePct'].includes(k)), 'Auto-Tuning darf harte Limits nicht verändern');
     return `${errors.length} Validierungsfehler korrekt erkannt`;
   }],
+  ['Grundlagen', 'Grenzwert-Fuzz: harte Limits durch keine Eingabe umgehbar', async () => {
+    const pool = [-1e9, -1, 0, 0.4, 1, 2, 3, 4, 7, 50, 51, 99, 1e9, NaN, Infinity, -Infinity, '12', '-5', 'abc', '', null, true, {}, [], '1e308'];
+    const keys = ['maxBuysPerCoin', 'sellCooldownMin', 'lossCooldownMin', 'lossStreakLimit', 'globalPauseMin', 'minTradesForTuning', 'maxExposurePct', 'maxPositionPct', 'minScore', 'stopLossPct', 'simCapitalUsd', 'maxSlippagePct'];
+    const rnd = prng(4242);
+    for (let i = 0; i < 400; i++) {
+      const input = {}; for (const k of keys) if (rnd() < 0.7) input[k] = pool[Math.floor(rnd() * pool.length)];
+      const { settings: o } = validateSettings(input);
+      const bad = [];
+      if (!(o.maxBuysPerCoin <= HARD_LIMITS.MAX_BUYS_PER_COIN)) bad.push('maxBuysPerCoin');
+      if (!(o.sellCooldownMin >= HARD_LIMITS.MIN_SELL_COOLDOWN_MIN)) bad.push('sellCooldownMin');
+      if (!(o.lossCooldownMin >= HARD_LIMITS.MIN_LOSS_COOLDOWN_MIN)) bad.push('lossCooldownMin');
+      if (!(o.lossStreakLimit <= HARD_LIMITS.MAX_LOSS_STREAK_LIMIT)) bad.push('lossStreakLimit');
+      if (!(o.globalPauseMin >= HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN)) bad.push('globalPauseMin');
+      if (!(o.minTradesForTuning >= HARD_LIMITS.MIN_TRADES_FOR_TUNING)) bad.push('minTradesForTuning');
+      if (!(o.maxExposurePct <= HARD_LIMITS.MAX_EXPOSURE_PCT && o.maxPositionPct <= HARD_LIMITS.MAX_POSITION_PCT && o.maxPositionPct <= o.maxExposurePct)) bad.push('exposure/position');
+      for (const k of keys) if (!isNum(o[k])) bad.push(k + ' nicht endlich');
+      assert(!bad.length, `Eingabe ${JSON.stringify(input)} verletzt: ${bad.join(', ')}`);
+    }
+    const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1); core._t.analyzeAll();
+    const eq = core.equityInfo().equity, S = core.S();
+    for (const sz of [null, -5, 0, NaN, 4.99, 1e9, eq * S.maxPositionPct / 100 + 0.01]) {
+      const x = core.execCheck(t, { sizeUsd: sz, auto: false });
+      if (x.sizing.size > 0) assert(x.sizing.size <= eq * S.maxPositionPct / 100 + 1e-6 && x.sizing.size <= core.state.portfolio.cash + 1e-6, `Größe ${x.sizing.size} über Limit (Eingabe ${sz})`);
+      else assert(x.blockers.some(b => b.code === 'SIZE_ZERO'), `ungültige Größe ${sz} nicht blockiert`);
+    }
+    return '400 Zufallseingaben · alle harten Grenzen gehalten · Positionsgröße nie über Max./Cash';
+  }],
+  ['Daten', 'Datenvalidierung: NaN/Infinity/negativ/unplausibel → null (nie 0) und gezählt', async () => {
+    const dq = newDq(), m = tMint(3);
+    const sn = normDexPair({ chainId: 'solana', baseToken: { address: m, symbol: 'X' }, priceUsd: '0', liquidity: { usd: -500 }, volume: { h1: 'NaN', m5: 'Infinity', h24: 5e15 }, priceChange: { m5: 1e9, h1: '12.5' }, marketCap: 'abc', fdv: 1000 }, 1, dq);
+    assert(sn && sn.priceUsd === null && sn.liquidityUsd === null && sn.vol.h1 === null && sn.vol.m5 === null && sn.vol.h24 === null && sn.chg.m5 === null && sn.chg.h1 === 12.5 && sn.marketCap === null && sn.fdv === 1000, 'ungültige Werte nicht verworfen: ' + JSON.stringify(sn));
+    assert(dq.invalidFields === 7 && dq.accepted === 1 && dq.byField.liquidityUsd === 1, 'Zählung falsch: ' + JSON.stringify(dq));
+    assert(normDexPair({ chainId: 'solana', baseToken: { address: 'kein-mint' } }, 1, dq) === null && normDexPair({ chainId: 'eth' }, 1, dq) === null && dq.rejected === 2, 'verworfene Datensätze nicht gezählt');
+    const c = normOhlcv({ data: { attributes: { ohlcv_list: [[1, 1, 2, 0.5, 1.5, 10], [2, 1, 0.5, 2, 1, 10], [3, NaN, 1, 1, 1, 1], [4, 1, 1, 1, 1, -1]] } } }, dq);
+    assert(c.length === 1, 'ungültige Kerzen übernommen');
+    return `${dq.invalidFields} ungültige Felder und ${dq.rejected} verworfene Datensätze korrekt erkannt`;
+  }],
+  ['System', 'Voll-Backup: Export → Prüfung → Wiederherstellen; defekte/neuere Sicherungen abgelehnt', async () => {
+    const H = makeTestHarness(); const core = await testCore(H, { minScore: 72 });
+    const t = await prepToken(core, H, 1);
+    assert((await core.executeBuy(t.id, { sizeUsd: 20 })).ok, 'Buy fehlgeschlagen');
+    const b = core.exportBackup();
+    assert(b.kind === 'backup' && b.storage.settings && b.storage.positions && b.storage.learning && !JSON.stringify(b).includes('loginPass'), 'Backup unvollständig');
+    const bad = [[{ ...b, kind: 'x' }, /Kennung/], [{ ...b, app: '99.0.0' }, /neueren Version/], [{ ...b, storage: { ...b.storage, trades: { v: 2 } } }, /beschädigt/], [{ ...b, storage: { ...b.storage, evil: { v: 3 } } }, /Unbekannte/], [{ ...b, storageVersion: 2 }, /Speicherversion/]];
+    for (const [x, rx] of bad) { const r = core.validateBackup(x); assert(r && rx.test(r), 'nicht abgelehnt: ' + r); }
+    const H2 = makeTestHarness(); const target = await testCore(H2);
+    const r = target.restoreBackup(JSON.parse(JSON.stringify(b)));
+    assert(r.ok, 'Wiederherstellen fehlgeschlagen: ' + r.error);
+    const c3 = createCore({ env: H2.env, backend: H2.backend }); c3.init({ autoStart: false });
+    assert(c3.state.positions.length === 1 && c3.state.positions[0].id === core.state.positions[0].id && c3.S().minScore === 72 && !c3.state.reconciliation.required, 'Stand nach Wiederherstellen abweichend');
+    assert(c3.state.auditLog.some(a => a.what === 'RESTORE'), 'Wiederherstellen nicht protokolliert');
+    return 'Export vollständig · 5 fehlerhafte Varianten abgelehnt · Stand 1:1 wiederhergestellt · protokolliert';
+  }],
   ['Trading', 'Max. 2 Käufe pro Coin (Buy #3 BLOCKED)', async () => {
     const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1);
     const r1 = await core.executeBuy(t.id, { sizeUsd: 20 }); assert(r1.ok, 'Buy #1 fehlgeschlagen: ' + codes(r1).join(',') + (r1.error || ''));
@@ -4746,27 +4862,40 @@ const SELF_TESTS = [
     const r2 = await core.executeBuy(t.id, { sizeUsd: 20 }); assert(!codes(r2).includes('COOLDOWN_ACTIVE'), 'Cooldown nach 15 min noch aktiv');
     return 'Cooldown aktiv direkt nach Verkauf, frei nach 15 min';
   }],
-  ['Trading', 'Loss-Cooldown & globale Pause deaktiviert (Wartezeit 0)', async () => {
-    assert(HARD_LIMITS.MIN_LOSS_COOLDOWN_MIN === 0 && HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN === 0, 'Cooldown-Grenzen nicht auf 0 gesetzt');
-    const H = makeTestHarness(); const core = await testCore(H);
+  ['Trading', 'Loss-Cooldown 10 min & globale Pause 5 min (hart, nicht unterschreitbar)', async () => {
+    assert(HARD_LIMITS.MIN_LOSS_COOLDOWN_MIN === 10 && HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN === 5, 'harte Cooldown-Grenzen nicht 10/5');
+    const v = validateSettings({ lossCooldownMin: 0, globalPauseMin: -3 }).settings;
+    assert(v.lossCooldownMin === 10 && v.globalPauseMin === 5, 'Cooldowns unter die harte Grenze gesetzt: ' + v.lossCooldownMin + '/' + v.globalPauseMin);
+    const H = makeTestHarness(); const core = await testCore(H, { lossCooldownMin: 0, globalPauseMin: 0 });
+    assert(core.S().lossCooldownMin === 10 && core.S().globalPauseMin === 5, 'updateSettings unterschreitet harte Grenze');
+    const refresh = async () => { await core._t.updateSolPrice(true); };
     for (let i = 1; i <= 3; i++) {
       const t = await prepToken(core, H, i);
       const b = await core.executeBuy(t.id, { sizeUsd: 20 }); assert(b.ok, `Buy ${i} fehlgeschlagen: ` + codes(b).join(','));
       const s = await core.executeSell(core.state.positions[0].id, 'ALL', 'MANUAL'); assert(s.ok, 'Sell fehlgeschlagen');
-      if (i < 3) { const probe = await core.executeBuy((await prepToken(core, H, 7)).id, { sizeUsd: 20 }); assert(!codes(probe).includes('LOSS_COOLDOWN'), 'Loss-Cooldown blockiert trotz Wartezeit 0: ' + codes(probe).join(',')); }
+      const probe = await core.executeBuy((await prepToken(core, H, 10 + i)).id, { sizeUsd: 20 });
+      assert(codes(probe).includes('LOSS_COOLDOWN'), `Loss-Cooldown greift nach Verlust ${i} nicht: ` + codes(probe).join(','));
+      if (i === 3) break;
+      H.env.advance(10 * MIN + SEC); await refresh();
+      const free = await core.executeBuy((await prepToken(core, H, 20 + i)).id, { sizeUsd: 1 });
+      assert(!codes(free).includes('LOSS_COOLDOWN'), 'Loss-Cooldown nach 10 min noch aktiv');
     }
     assert(core.state.risk.lossStreak === 3, 'Verlustserie ' + core.state.risk.lossStreak);
-    const t8 = await prepToken(core, H, 8);
-    assert(!codes(await core.executeBuy(t8.id, { sizeUsd: 20 })).includes('GLOBAL_PAUSE'), 'globale Pause blockiert trotz Wartezeit 0');
-    return '3 Verluste gezählt · Loss-Cooldown/Global-Pause blockieren mit Wartezeit 0 nicht mehr';
+    const p8 = await core.executeBuy((await prepToken(core, H, 8)).id, { sizeUsd: 20 });
+    assert(codes(p8).includes('GLOBAL_PAUSE'), 'globale Pause nach 3 Verlusten fehlt: ' + codes(p8).join(','));
+    H.env.advance(10 * MIN + SEC); await refresh();
+    const p9 = await core.executeBuy((await prepToken(core, H, 9)).id, { sizeUsd: 20 });
+    assert(!codes(p9).includes('GLOBAL_PAUSE') && !codes(p9).includes('LOSS_COOLDOWN'), 'Pause/Cooldown laufen nicht ab: ' + codes(p9).join(','));
+    return 'Grenzen 10/5 min nicht unterschreitbar · Cooldown nach jedem Verlust · Pause nach 3 Verlusten · beide laufen ab';
   }],
   ['Trading', 'Frischer Start: Startkapital & Positionen neu, Analysedaten bleiben', async () => {
     const H = makeTestHarness(); const core = await testCore(H);
     const t1 = await prepToken(core, H, 1);
     assert((await core.executeBuy(t1.id, { sizeUsd: 20 })).ok, 'Buy 1 fehlgeschlagen');
     assert((await core.executeSell(core.state.positions[0].id, 'ALL', 'MANUAL')).ok, 'Sell fehlgeschlagen');
+    H.env.advance(10 * MIN + SEC); await core._t.updateSolPrice(true); // Loss-Cooldown (Gebühren = kleiner Verlust) abwarten
     const t2 = await prepToken(core, H, 2);
-    assert((await core.executeBuy(t2.id, { sizeUsd: 20 })).ok, 'Buy 2 fehlgeschlagen');
+    const b2 = await core.executeBuy(t2.id, { sizeUsd: 20 }); assert(b2.ok, 'Buy 2 fehlgeschlagen: ' + codes(b2).join(','));
     const st = core.state, openId = st.positions[0].id, journalBefore = st.journal.length, closedBefore = st.journal.filter(j => j.status === 'CLOSED').length;
     const pvBefore = st.paramVersions.length, logsBefore = core.log.entries.length, perfBefore = JSON.stringify(perfStats(st.journal));
     const r = core.freshStart(); assert(r.ok && r.dropped === 1, 'freshStart: ' + JSON.stringify(r));
@@ -6064,6 +6193,9 @@ function renderSystem(sec) {
     <div class="panel tw"><h3 style="margin-top:0">API Health Center</h3><table class="tbl"><thead><tr><th>Quelle</th><th>Status</th><th class="r">Latenz</th><th>Letzter Erfolg</th><th>Letzter Fehler</th><th class="r">Fehlerrate</th><th class="r">Rate Limit</th><th>Backoff / Reset</th><th class="r">Datenalter</th><th>Letzte Meldung</th></tr></thead><tbody>
       ${names.map(x => html`<tr><td>${x.label}${optional.has(x.name) ? html` <span class="chip">optional</span>` : ''}</td><td class="st-${x.status}"><b>${x.status}</b></td><td class="r num">${x.latency != null ? Math.round(x.latency) + ' ms' : '—'}</td><td class="num">${x.lastSuccess ? fmtTime(x.lastSuccess) : '—'}</td><td class="num">${x.lastFailure ? fmtTime(x.lastFailure) : '—'}</td><td class="r num">${x.errorRate != null ? (x.errorRate * 100).toFixed(0) + '%' : '—'}</td><td class="r num">${x.used}/${x.limitPerMin}/min${x.rateLimited ? ' · ' + x.rateLimited + '× limitiert' : ''}</td><td class="num">${x.backoffUntil > now ? 'noch ' + fmtAge(x.backoffUntil - now) : x.resetAt ? fmtTime(x.resetAt) : '—'}</td><td class="r num">${x.dataAge != null ? fmtAge(x.dataAge) : '—'}</td><td class="mut">${x.lastError || ''}</td></tr>`)}
     </tbody></table><p class="note">SOL-Preis: ${st.sol ? fmtUsd(st.sol.usd) + ' · ' + fmtAge(now - st.sol.at) + ' alt · ' + (st.sol.derived ? 'abgeleitet aus ' + st.sol.n + ' SOL-Pools (priceUsd / priceNative)' : 'SOL/USDC-Pool') : 'unbekannt'}</p></div>
+    <div class="panel tw"><h3 style="margin-top:0">Datenvalidierung (Eingangsdaten dieser Sitzung)</h3><table class="tbl"><thead><tr><th>Quelle</th><th class="r">Datensätze</th><th class="r">übernommen</th><th class="r">verworfen</th><th class="r">ungültige Felder</th><th>häufigste Felder</th><th>letzte Auffälligkeit</th></tr></thead><tbody>
+      ${Object.entries(st.dataQuality).map(([k, q]) => html`<tr><td>${{ dexscreener: 'DexScreener', geckoterminal: 'GeckoTerminal', ohlcv: 'OHLCV-Kerzen' }[k] || k}</td><td class="r num">${q.records}</td><td class="r num">${q.accepted}</td><td class="r num ${q.rejected ? 'dn' : ''}">${q.rejected}</td><td class="r num ${q.invalidFields ? 'dn' : ''}">${q.invalidFields}</td><td class="mut">${Object.entries(q.byField).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([f, n]) => f + ' ' + n).join(', ') || '—'}</td><td class="mut">${q.lastIssue ? q.lastIssue + (q.lastIssueAt ? ' · ' + fmtTime(q.lastIssueAt) : '') : '—'}</td></tr>`)}
+    </tbody></table><p class="note">Ungültige Werte (NaN, Infinity, negativ, Preis 0, unplausibel groß) werden verworfen und als unbekannt behandelt – nie als 0. Ohne gültigen Preis, frische Daten und Security gibt es keinen Kauf.</p></div>
     <div class="grid2"><div class="panel"><h3 style="margin-top:0">API-Latenz (ms)</h3><div class="chartbox small"><canvas data-chart="apiLat"></canvas></div><h3>API-Fehlerrate (%)</h3><div class="chartbox small"><canvas data-chart="apiFail"></canvas></div></div>
     <div class="panel"><h3 style="margin-top:0">Scanner-Graph (Ø je Scan / Minute)</h3><div class="chartbox small"><canvas data-chart="scanner"></canvas></div>
       <h3>Metriken</h3><div class="grid3">${kv('Scans/s', (st.scanner.scansWindow.length / 10).toFixed(2))}${kv('Scans gesamt', c.scans)}${kv('Tokens gescannt', st.markets.size)}${kv('Kandidaten', (st.metrics.scanStats || {}).fastPass || 0)}${kv('Buy-Signale', c.buySignals)}${kv('Abgelehnt (Pre-Trade)', c.rejected)}${kv('Ausgeführt', c.executed)}${kv('Win Rate', wr != null ? (wr * 100).toFixed(0) + '%' : '—')}${kv('PnL realisiert', fmtSigned(st.portfolio.realized), 'SIMULATED')}${kv('Drawdown max', (st.portfolio.maxDD || 0).toFixed(2) + '%')}${kv('Offene Positionen', st.positions.length)}${kv('API-Fehler', c.apiErrors)}${kv('Verspätete Antworten verworfen', st.scanner.lateIgnored)}${kv('Übersprungene Scans', st.scanner.skipped)}${kv('Security-Queue', st.secQueue.length)}</div>
@@ -6115,6 +6247,8 @@ function renderSettings(sec) {
     <details class="panel"><summary><b>Export / Import / Reset</b></summary><div class="row" style="margin-top:10px">
       <button class="btn sm" data-act="export" data-kind="settings-json">⬇ Settings JSON</button><button class="btn sm" data-act="export" data-kind="journal-json">⬇ Journal JSON</button><button class="btn sm" data-act="export" data-kind="journal-csv">⬇ Journal CSV</button><button class="btn sm" data-act="export" data-kind="analytics-json">⬇ Analytics JSON</button><button class="btn sm" data-act="export" data-kind="logs-json">⬇ Logs JSON</button>
       <button class="btn sm" data-act="importSettings">⬆ Settings/Watchlist importieren</button></div>
+      <div class="row" style="margin-top:10px"><button class="btn sm" data-act="export" data-kind="backup-json">⬇ Voll-Backup (alle Daten)</button><button class="btn sm" data-act="restoreBackup">⬆ Backup wiederherstellen</button></div>
+      <p class="note">Das Voll-Backup enthält Einstellungen, Positionen, Journal, Logs, Statistiken und Lerndaten – damit lässt sich der Stand auch auf ein anderes Gerät übertragen. Keine Passwörter oder Keys; selbst eingetragene RPC-URLs sind enthalten, die Datei daher vertraulich behandeln. Vor dem Wiederherstellen wird die Datei vollständig geprüft und der aktuelle Stand automatisch als Backup heruntergeladen.</p>
       <div class="row" style="margin-top:10px"><button class="btn sm warn" data-act="freshStart">↺ Frischer Start (Startkapital, Positionen leeren, Analysedaten behalten)</button><button class="btn sm warn" data-act="resetSettings">Einstellungen zurücksetzen</button><button class="btn sm warn an" data-act="resetPortfolio">Sim-Portfolio zurücksetzen</button><button class="btn sm bad" data-act="factoryReset">Factory Reset</button></div></details>
     <details class="panel"><summary><b>Config Change Log & Audit Trail</b></summary>
       <h3>Konfigurationsänderungen</h3>${st.configLog.length ? html`<div class="tw"><table class="tbl">${st.configLog.slice(0, 40).map(c => html`<tr><td class="num">${fmtDateTime(c.ts)}</td><td>${c.who}</td><td>${c.kind}</td><td class="mut">${c.changes.map(x => x.key + ': ' + x.from + ' → ' + x.to).join(' · ')}</td></tr>`)}</table></div>` : html`<p class="mut">Keine Änderungen.</p>`}
@@ -6613,6 +6747,28 @@ const ACTIONS = {
   learnReject: async el => { if (await confirmDialog('Challenger verwerfen?', `${el.dataset.id} wird verworfen; die zugrunde liegende Hypothese wird erst mit deutlich mehr Daten erneut getestet.`)) { const r = core.learnReject(el.dataset.id); toast(r.ok ? 'SUCCESS' : 'ERROR', r.ok ? 'Challenger verworfen' : r.error); renderView(true); } },
   learnRollback: async el => { if (await confirmDialog('Rollback des gelernten Modells?', 'Die vom Modell gesetzten Einstellungen werden auf die vorherigen Werte zurückgesetzt (nur solange du sie nicht selbst geändert hast) und gelernte Regeln entfernt.', { danger: true })) { const r = core.learnRollback(el.dataset.id, 'USER', 'manuell'); toast(r.ok ? 'SUCCESS' : 'ERROR', r.ok ? 'Rollback ausgeführt' : r.error, r.ok && r.skipped.length ? 'Nicht überschrieben (von dir geändert): ' + r.skipped.join(', ') : ''); renderView(true); } },
   export: el => { try { const f = core.exportData(el.dataset.kind); download(f.name, f.mime, f.data); toast('SUCCESS', 'Export erstellt', f.name); } catch (e) { toast('ERROR', 'Export fehlgeschlagen', e.message); } },
+  restoreBackup: () => {
+    const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'application/json,.json';
+    inp.addEventListener('change', () => {
+      const f = inp.files && inp.files[0]; if (!f) return;
+      if (f.size > 15e6) { toast('ERROR', 'Datei zu groß'); return; }
+      const rd = new FileReader();
+      rd.onload = async () => {
+        const obj = parseJSON(String(rd.result));
+        const err = core.validateBackup(obj);
+        if (err) { toast('ERROR', 'Backup ungültig', err); return; }
+        const n = obj.storage.positions && Array.isArray(obj.storage.positions.positions) ? obj.storage.positions.positions.length : 0, j = obj.storage.trades && Array.isArray(obj.storage.trades.journal) ? obj.storage.trades.journal.length : 0;
+        if (!(await confirmDialog('Backup wiederherstellen?', `Sicherung vom ${str(String(obj.exportedAt), 30)} (v${obj.app}) mit ${n} offenen Position(en) und ${j} Journal-Einträgen. Alle aktuellen Daten auf diesem Gerät werden ersetzt. Vorher wird der aktuelle Stand automatisch als Backup heruntergeladen. Danach lädt die Seite neu (erneuter Login).`, { danger: true }))) return;
+        try { const cur = core.exportData('backup-json'); download(cur.name, cur.mime, cur.data); } catch (e) { toast('ERROR', 'Sicherung des aktuellen Stands fehlgeschlagen – Abbruch', e.message); return; }
+        const r = core.restoreBackup(obj);
+        if (!r.ok) { toast('ERROR', 'Wiederherstellen fehlgeschlagen', r.error); return; }
+        toast('SUCCESS', 'Backup wiederhergestellt', 'Seite lädt neu …');
+        setTimeout(() => location.reload(), 900);
+      };
+      rd.readAsText(f);
+    });
+    inp.click();
+  },
   importSettings: () => {
     const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'application/json,.json';
     inp.addEventListener('change', () => { const f = inp.files && inp.files[0]; if (!f) return; if (f.size > 2e6) { toast('ERROR', 'Datei zu groß'); return; } const rd = new FileReader(); rd.onload = () => { const r = core.importSettings(String(rd.result)); toast(r.ok ? 'SUCCESS' : 'ERROR', r.ok ? `Import ok (${r.watchlist} Watchlist-Einträge)` : 'Import fehlgeschlagen', r.errors.filter(e => !e.soft).map(e => e.msg).slice(0, 3).join('; ')); renderView(true); }; rd.onerror = () => toast('ERROR', 'Datei nicht lesbar'); rd.readAsText(f); }, { once: true });
@@ -6631,6 +6787,7 @@ const ACTIONS = {
   wlRemove: el => { core.removeWatch(el.dataset.id); renderView(true); }
 };
 document.addEventListener('click', e => {
+  if (!authed) return; // gesperrt: keine App-Aktionen (das Login-Formular hat eigene Handler)
   const mb = e.target.closest('[data-modal]');
   if (mb) { closeModal(mb.dataset.modal); return; }
   if (e.target.id === 'modal') { closeModal(null); return; }
@@ -6694,6 +6851,7 @@ document.addEventListener('input', e => {
 });
 const selTokFromModal = () => (buyModalToken ? tok(buyModalToken) : null);
 document.addEventListener('keydown', e => {
+  if (!authed) return;
   if (e.key === 'Escape') { if (modalState) { closeModal(null); return; } const c = document.getElementById('ctx'); if (c && !c.hidden) { closeCtx(); return; } if (core.state.selected) { closeDetail(); return; } }
   if (e.key === 'Enter' || e.key === ' ') {
     const row = e.target.closest && e.target.closest('.mrow');
@@ -6744,19 +6902,28 @@ function startApp() {
    kann, kann diese Sperre technisch umgehen (z. B. JS patchen). Für produktive
    Hochsicherheit wäre ein Backend mit serverseitiger Prüfung nötig.
    Damit die Zugangsdaten trotzdem nicht im Klartext im Quelltext/Git-Verlauf stehen,
-   wird nur ein SHA-256-Hash von "Kontext:Benutzername:Passwort" hinterlegt und beim
-   Login-Versuch derselbe Hash über die Web Crypto API berechnet und verglichen – das
-   Passwort selbst wird nie gespeichert. Der authentifizierte Zustand lebt nur im
-   Arbeitsspeicher (kein localStorage) – ein Reload verlangt daher immer erneut den
-   Login, bevor Scanner/Bot initialisiert werden. */
-const AUTH_HASH_CTX = 'smartlab-login-v1:';
-const AUTH_HASH = '5298afe5df9d0982e4be65ef596f85c566c371522d90465b6a028b87809ab774';
+   wird nur ein PBKDF2-SHA256-Hash (600.000 Iterationen, eigenes Salt) von
+   "Kontext:Benutzername:Passwort" hinterlegt. Jeder Rateversuch kostet dadurch spürbar
+   Rechenzeit (auch offline). Das Passwort selbst wird nie gespeichert oder geloggt.
+   Zustände: GESPERRT (Start, nach Reload, nach Logout) → ENTSPERRT (nach Login).
+   Der authentifizierte Zustand lebt nur im Arbeitsspeicher – ein Reload verlangt immer
+   erneut den Login, bevor Scanner/Bot initialisiert werden. Nach 5 Fehlversuchen folgt
+   eine Wartezeit (30 s, danach verdoppelt bis max. 15 min), gespeichert ohne Passwortdaten. */
+const AUTH_KDF = Object.freeze({ ctx: 'smartlab-login-v2:', salt: 'a2b71190e1efbbefd27969a804c15ecb', iterations: 600000, hash: '266861d12437e783157d4e99a6c8bb3e3d99c3c217132f54901c936e059fa064' });
+const AUTH_GUARD_KEY = 'smartlab.auth.guard', AUTH_MAX_FAILS = 5;
 let authed = false;
 
-async function sha256Hex(str) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+async function pbkdf2Hex(str, saltHex, iterations) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(str), 'PBKDF2', false, ['deriveBits']);
+  const salt = new Uint8Array(saltHex.match(/../g).map(h => parseInt(h, 16)));
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations }, key, 256);
+  return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
+/* Vergleich ohne frühen Abbruch (gleiche Laufzeit unabhängig von der ersten abweichenden Stelle). */
+const sameHex = (a, b) => { if (typeof a !== 'string' || a.length !== b.length) return false; let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i); return d === 0; };
+function authGuard() { try { const g = JSON.parse(localStorage.getItem(AUTH_GUARD_KEY) || 'null'); return g && isNum(g.fails) && isNum(g.until) ? g : { fails: 0, until: 0 }; } catch (e) { return { fails: 0, until: 0 }; } }
+function authGuardSet(g) { try { if (g.fails) localStorage.setItem(AUTH_GUARD_KEY, JSON.stringify(g)); else localStorage.removeItem(AUTH_GUARD_KEY); } catch (e) { /* ohne Speicher gilt die Sperre nur für diese Seite */ } }
+const authLockMs = fails => (fails >= AUTH_MAX_FAILS ? Math.min(15 * MIN, 30 * SEC * Math.pow(2, Math.floor(fails / AUTH_MAX_FAILS) - 1)) : 0);
 
 async function attemptLogin(user, pass) {
   const errEl = document.getElementById('loginErr');
@@ -6767,13 +6934,21 @@ async function attemptLogin(user, pass) {
     if (passEl) { passEl.value = ''; passEl.focus(); }
     return false;
   };
+  const g = authGuard(), now = Date.now();
+  if (g.until > now) return fail(`Zu viele Fehlversuche – bitte noch ${Math.ceil((g.until - now) / 1000)} s warten.`);
   if (!user || !pass) return fail('Anmeldename oder Passwort ist falsch.');
   if (!(window.crypto && window.crypto.subtle)) return fail('Login in dieser Umgebung nicht möglich (kein sicherer Kontext für Web Crypto). Bitte über https oder lokal per file:// öffnen.');
-  if (submitBtn) submitBtn.disabled = true;
-  let hash;
-  try { hash = await sha256Hex(AUTH_HASH_CTX + user + ':' + pass); }
-  finally { if (submitBtn) submitBtn.disabled = false; }
-  if (hash !== AUTH_HASH) return fail('Anmeldename oder Passwort ist falsch.');
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Prüfe …'; }
+  let hash = null;
+  try { hash = await pbkdf2Hex(AUTH_KDF.ctx + user + ':' + pass, AUTH_KDF.salt, AUTH_KDF.iterations); }
+  catch (e) { hash = null; }
+  finally { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Anmelden'; } }
+  if (!sameHex(hash, AUTH_KDF.hash)) {
+    const fails = g.fails + 1, lock = authLockMs(fails);
+    authGuardSet({ fails, until: lock ? Date.now() + lock : 0 });
+    return fail(lock ? `Anmeldename oder Passwort ist falsch. ${fails} Fehlversuche – Login für ${Math.round(lock / 1000)} s gesperrt.` : 'Anmeldename oder Passwort ist falsch.');
+  }
+  authGuardSet({ fails: 0, until: 0 });
   if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
   if (passEl) passEl.value = '';
   authed = true;
@@ -6786,6 +6961,7 @@ async function attemptLogin(user, pass) {
 function doLogout() {
   if (!authed) return;
   authed = false;
+  try { if (modalState) closeModal(null); closeCtx(); if (core.state.selected) closeDetail(); } catch (e) { /* UI noch nicht aufgebaut */ }
   document.body.classList.remove('authed');
   const who = document.getElementById('whoami'); if (who) who.hidden = true;
   const userEl = document.getElementById('loginUser'), passEl = document.getElementById('loginPass'), errEl = document.getElementById('loginErr');
