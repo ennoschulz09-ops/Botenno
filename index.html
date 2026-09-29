@@ -467,7 +467,7 @@ pre.raw{white-space:pre-wrap;word-break:break-all;font:11px/1.4 var(--mono);back
    ===================================================================== */
 
 /* ============================== KONSTANTEN ============================== */
-const APP_VERSION = '2.4.0';
+const APP_VERSION = '2.5.0';
 /* true, wenn Version a älter als b ist (fehlende Version = sehr alt). */
 const verLt = (a, b) => { if (typeof a !== 'string') return true; const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const STRATEGY_VERSION = '1.0.0';
@@ -2717,6 +2717,12 @@ const ORDER_TRANSITIONS = {
   COMPLETED: [], FAILED: [], CANCELLED: [], REJECTED: []
 };
 const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'REJECTED']);
+/* Positions-Lebenszyklus: PLANNED → PENDING → OPEN → (CLOSING ↔ PARTIAL) → CLOSED → RECONCILED.
+   UNKNOWN = Zustand unklar → Abgleich nötig (wird nie still als offen/geschlossen interpretiert). */
+const POSITION_TRANSITIONS = { PLANNED: ['PENDING', 'FAILED'], PENDING: ['OPEN', 'FAILED'], OPEN: ['CLOSING', 'UNKNOWN'], PARTIAL: ['CLOSING', 'UNKNOWN'], CLOSING: ['OPEN', 'PARTIAL', 'CLOSED', 'UNKNOWN'], CLOSED: ['RECONCILED', 'UNKNOWN'], RECONCILED: [], UNKNOWN: ['OPEN', 'PARTIAL', 'CLOSED'], FAILED: [] };
+const POS_LC_DE = { PLANNED: 'geplant', PENDING: 'Order läuft', OPEN: 'offen', PARTIAL: 'teilverkauft', CLOSING: 'wird verkauft', CLOSED: 'geschlossen', RECONCILED: 'abgeglichen', UNKNOWN: 'unklar – Abgleich nötig', FAILED: 'fehlgeschlagen' };
+/* Fehlercodes der Ausführung (auditierbar in jeder Order) */
+const EXEC_FAIL = { PRE_TRADE_BLOCKED: 'Pre-Trade-Prüfung hat blockiert', NO_ROUTER: 'Kein Swap-/Routing-Provider (LIVE nicht verfügbar)', QUOTE_FAILED: 'Kein gültiges Angebot (Preis/Liquidität/Gebühren)', PREFLIGHT_FAILED: 'Preflight fehlgeschlagen', SIGNATURE_DISABLED: 'Signieren deaktiviert', SEND_FAILED: 'Senden fehlgeschlagen', CONFIRM_FAILED: 'Bestätigung fehlgeschlagen', EMERGENCY_STOP: 'Emergency Stop während der Ausführung', INTERNAL: 'Interner Fehler' };
 const BOT_TRANSITIONS = {
   STOPPED: ['STARTING', 'EMERGENCY_STOP'],
   STARTING: ['RECOVERING', 'RUNNING', 'PAUSED', 'ERROR', 'STOPPED', 'EMERGENCY_STOP'],
@@ -3371,6 +3377,70 @@ function createCore(opts) {
   function stratStat(id, field) { if (!id) return; const st = state.stratStats[id] || (state.stratStats[id] = { signals: 0, accepted: 0, rejected: 0, executed: 0, profitable: 0, unprofitable: 0 }); st[field] = (st[field] || 0) + 1; }
   function sourcesUsed(t) { const s = []; if (t.snap) s.push('DexScreener'); if (t.alt) s.push('GeckoTerminal'); if (t.sec && t.sec.sources.rpc) s.push('Solana RPC'); if (t.sec && t.sec.sources.rug) s.push('RugCheck'); return s; }
 
+  /* ---------- Positions-Lebenszyklus ---------- */
+  function posTransition(pos, to, note) {
+    const from = pos.lc || 'OPEN';
+    if (from === to) return true;
+    if (!(POSITION_TRANSITIONS[from] || []).includes(to)) { log.warn('TRADE', `Ungültiger Positions-Übergang ${from} → ${to} (${pos.symbol}) ignoriert`); return false; }
+    pos.lc = to;
+    const h = pos.lcHistory || (pos.lcHistory = []);
+    h.push({ s: to, ts: env.now(), note: note ? str(String(note), 140) : undefined }); if (h.length > 30) h.splice(0, h.length - 30);
+    return true;
+  }
+  const lcBack = pos => (pos.exits.length ? 'PARTIAL' : 'OPEN');
+  /* ---------- Execution-Provider: Quote → Build → Preflight → Sign → Send → Confirm ----------
+     SIMULATION ist vollständig (Live-Preis + geschätzter Price Impact + Gebühren, keine Transaktion).
+     LIVE ist nicht angebunden: jeder Schritt liefert NO_ROUTER / SIGNATURE_DISABLED – es wird nie etwas signiert oder gesendet. */
+  const simProvider = {
+    id: 'SIMULATION', available: true,
+    quote(req) {
+      const snap = req.snap, price = snap && snap.priceUsd, liq = snap && snap.liquidityUsd;
+      if (!isNum(price) || price <= 0) return { ok: false, code: 'QUOTE_FAILED', msg: 'kein gültiger Coin-Preis' };
+      if (req.side === 'BUY') {
+        const impact = estImpact(req.sizeUsd, liq), fees = estFees(req.sizeUsd);
+        if (impact == null || !fees) return { ok: false, code: 'QUOTE_FAILED', msg: impact == null ? 'Price Impact nicht schätzbar' : 'Gebühren unbekannt' };
+        const fillPrice = price * (1 + impact);
+        return { ok: true, side: 'BUY', refPrice: price, impact, fees, fillPrice, qty: (req.sizeUsd - fees.total) / fillPrice, route: 'SIMULIERT (AMM-Schätzung)' };
+      }
+      let imp = estImpact(req.qty * price, liq); const impEst = imp == null;
+      if (imp == null) imp = S().maxSlippagePct / 100;
+      const fillPrice = price * (1 - imp), proceeds = req.qty * fillPrice, fees = estFees(proceeds);
+      if (!fees) return { ok: false, code: 'QUOTE_FAILED', msg: 'Gebühren unbekannt' };
+      return { ok: true, side: 'SELL', refPrice: price, impact: imp, impactEstimated: impEst, fees, fillPrice, qty: req.qty, proceeds, net: proceeds - fees.total, route: 'SIMULIERT (AMM-Schätzung)' };
+    },
+    build: () => ({ ok: true, note: 'keine Transaktion (Simulation)' }),
+    preflight: q => (q.qty > 0 && isNum(q.fillPrice) && q.fillPrice > 0 ? { ok: true } : { ok: false, code: 'PREFLIGHT_FAILED', msg: 'Menge nach Gebühren ≤ 0' }),
+    sign: () => ({ ok: true, simulated: true }),
+    send: () => ({ ok: true, sig: null }),
+    confirm: q => ({ ok: true, fillPrice: q.fillPrice })
+  };
+  const liveProvider = {
+    id: 'LIVE', available: false,
+    quote: () => ({ ok: false, code: 'NO_ROUTER', msg: EXEC_FAIL.NO_ROUTER }), build: () => ({ ok: false, code: 'NO_ROUTER', msg: EXEC_FAIL.NO_ROUTER }),
+    preflight: () => ({ ok: false, code: 'NO_ROUTER', msg: EXEC_FAIL.NO_ROUTER }), sign: () => ({ ok: false, code: 'SIGNATURE_DISABLED', msg: EXEC_FAIL.SIGNATURE_DISABLED }),
+    send: () => ({ ok: false, code: 'NO_ROUTER', msg: EXEC_FAIL.NO_ROUTER }), confirm: () => ({ ok: false, code: 'NO_ROUTER', msg: EXEC_FAIL.NO_ROUTER })
+  };
+  const execProvider = mode => ((mode || state.mode) === 'LIVE' ? liveProvider : simProvider);
+  /* Führt Build → Preflight → Sign → Send → Confirm aus; bricht beim ersten Fehler mit Fehlercode ab. */
+  function runProviderSteps(P, q, ord, onSubmit) {
+    for (const step of ['build', 'preflight', 'sign', 'send']) {
+      const r = P[step](q); if (!r.ok) return { ok: false, code: r.code, msg: r.msg || EXEC_FAIL[r.code] };
+      if (step === 'preflight') { transition(ord, 'SUBMITTING', `${P.id}: Preflight ok – keine echte Order`); const stop = onSubmit && onSubmit(); if (stop) return stop; }
+    }
+    transition(ord, 'SUBMITTED', `${P.id}: ${P.id === 'SIMULATION' ? 'simulierte Übermittlung – keine Transaktion' : 'gesendet'}`);
+    transition(ord, 'CONFIRMING');
+    const c = P.confirm(q); if (!c.ok) return { ok: false, code: c.code, msg: c.msg || EXEC_FAIL[c.code] };
+    return { ok: true, fillPrice: c.fillPrice };
+  }
+  function failOrder(ord, key, code, msg) {
+    ord.failureCode = code;
+    const to = ['FAILED', 'REJECTED', 'CANCELLED'].find(x => (ORDER_TRANSITIONS[ord.state] || []).includes(x));
+    if (to) transition(ord, to, `${code}: ${msg || EXEC_FAIL[code] || ''}`); else ord.state = 'FAILED';
+    if (key) state.usedKeys.delete(key);
+    log.error('TRADE', `${ord.side} ${ord.symbol} abgebrochen – ${code}: ${msg || EXEC_FAIL[code] || ''}`);
+    persistNow();
+    return { ok: false, order: ord, error: msg || EXEC_FAIL[code], code };
+  }
   async function executeBuy(tokenId, o = {}) {
     const { auto = false, sizeUsd = null, reason = '', lead = null, fromQueue = false } = o;
     const t0 = env.now();
@@ -3396,22 +3466,23 @@ function createCore(opts) {
       ord.decision = immutableDecision(t, A, D, ex, blockers);
       if (blockers.length) {
         delete ord.decision.features; // Feature-Snapshot nur für ausgeführte Trades nötig (Speicher sparen)
+        ord.failureCode = 'PRE_TRADE_BLOCKED';
         ord.blockers = blockers; transition(ord, 'REJECTED', blockers[0].code + ': ' + blockers[0].msg);
         state.usedKeys.delete(key); recordRejection(blockers); stratStat(lead || D.strategy, 'rejected');
         log.risk(`Buy ${t.symbol} abgelehnt: ${blockers.slice(0, 3).map(b => b.code).join(', ')}`);
         persistNow();
         return { ok: false, order: ord, blockers };
       }
-      const size = ex.sizing.size, snap = t.snap, price = snap.priceUsd;
-      const impact = estImpact(size, snap.liquidityUsd), fees = estFees(size);
-      ord.sizeUsd = size; ord.estPrice = price; ord.expSlipPct = impact * 100; ord.estFees = fees;
-      transition(ord, 'APPROVED', 'Alle Pre-Trade-Checks bestanden');
-      transition(ord, 'SUBMITTING', state.mode + ' – keine echte Order');
-      if (state.bot.emergency) { transition(ord, 'CANCELLED', 'Emergency Stop während Ausführung'); state.usedKeys.delete(key); persistNow(); return { ok: false, order: ord, blockers: [mkBlocker('EMERGENCY_STOP')] }; }
-      transition(ord, 'SUBMITTED', 'Simulierte Übermittlung – keine Transaktion');
-      transition(ord, 'CONFIRMING');
-      const fillPrice = price * (1 + impact);
-      const qty = (size - fees.total) / fillPrice;
+      const size = ex.sizing.size, snap = t.snap, P = execProvider();
+      ord.provider = P.id;
+      const q = P.quote({ side: 'BUY', sizeUsd: size, snap });
+      if (!q.ok) return failOrder(ord, key, q.code, q.msg);
+      const price = q.refPrice, impact = q.impact, fees = q.fees;
+      ord.sizeUsd = size; ord.estPrice = price; ord.expSlipPct = impact * 100; ord.estFees = fees; ord.route = q.route;
+      transition(ord, 'APPROVED', `Alle Pre-Trade-Checks bestanden · Quote ${P.id}: ${q.route}`);
+      const run = runProviderSteps(P, q, ord, () => (state.bot.emergency ? { ok: false, code: 'EMERGENCY_STOP', msg: EXEC_FAIL.EMERGENCY_STOP } : null));
+      if (!run.ok) { const r = failOrder(ord, key, run.code, run.msg); if (run.code === 'EMERGENCY_STOP') r.blockers = [mkBlocker('EMERGENCY_STOP')]; return r; }
+      const fillPrice = run.fillPrice, qty = q.qty;
       if (!(qty > 0)) throw new Error('Menge nach Gebühren ≤ 0');
       transition(ord, 'CONFIRMED', 'Simulierte Füllung: Live-Preis + geschätzter Price Impact');
       ord.fillPrice = fillPrice; ord.qty = qty; ord.fees = fees; ord.priceAt = snap.fetchedAt; ord.latencyMs = env.now() - t0;
@@ -3431,6 +3502,7 @@ function createCore(opts) {
       persistNow(); emit('trade', { order: ord });
       return { ok: true, order: ord };
     } catch (e) {
+      ord.failureCode = ord.failureCode || 'INTERNAL';
       if (!TERMINAL.has(ord.state)) { try { transition(ord, 'FAILED', e.message); } catch (x) { ord.state = 'FAILED'; } }
       state.usedKeys.delete(key);
       log.error('TRADE', `Buy ${t.symbol} fehlgeschlagen: ${e.message}`);
@@ -3449,11 +3521,13 @@ function createCore(opts) {
         highest: f.refPrice, stop: null, stopType: 'PERCENT', tps: [], tpHit: [false, false, false], breakEven: false, trailing: false,
         strategy: f.lead || null, entryLiq: A.liq.usd, lastPrice: f.refPrice, lastPriceAt: now, priceLabel: 'LIVE', value: null, pnlUsd: null, pnlPct: null,
         mae2m: 0, timeExitFlag: false, exitPending: null, paramVersion: state.activeParam, entryScore: A.finalScore,
-        path: newPath(), learnVersion: state.models.champion, equityAtEntry: m2(equityInfo().equity)
+        path: newPath(), learnVersion: state.models.champion, equityAtEntry: m2(equityInfo().equity),
+        lc: 'OPEN', lcHistory: [{ s: 'PLANNED', ts: o.createdAt, note: 'Order ' + o.id }, { s: 'PENDING', ts: (o.history.find(h => h.s === 'SUBMITTING') || { ts: now }).ts, note: (o.provider || 'SIMULATION') + ' · ' + (o.route || '') }, { s: 'OPEN', ts: now, note: 'gefüllt' }]
       };
       state.positions.unshift(pos);
       journalOpen(pos, t, A, D, o);
     }
+    if (pos.entries.length) { pos.lcHistory = pos.lcHistory || []; pos.lcHistory.push({ s: pos.lc || 'OPEN', ts: now, note: `Nachkauf #${pos.entries.length + 1} (Order ${o.id})` }); }
     pos.entries.push({ orderId: o.id, ts: now, price: f.price, refPrice: f.refPrice, qty: f.qty, usd: f.size, fees: f.fees.total, impactPct: f.impact * 100, latencyMs: o.latencyMs });
     const sq = sum(pos.entries.map(e => e.qty));
     pos.entryPrice = sum(pos.entries.map(e => e.price * e.qty)) / sq;
@@ -3534,6 +3608,7 @@ function createCore(opts) {
     const ord = newOrder(t || { id: pos.tokenId, mint: pos.mint, symbol: pos.symbol }, 'SELL', { key, auto, reason: reasonCode + (detail ? ' – ' + detail : ''), strategy: pos.strategy, positionId: pos.id });
     state.orders.unshift(ord); trimOrders();
     const t0 = env.now();
+    posTransition(pos, 'CLOSING', `${reasonCode}${detail ? ' – ' + detail : ''} (Order ${ord.id})`);
     try {
       transition(ord, 'ANALYZING', emergency ? 'Emergency Exit – Pre-Exit-Check' : 'Pre-Exit-Check');
       persistNow();
@@ -3545,20 +3620,22 @@ function createCore(opts) {
       if (!estFees(1)) B.push(mkBlocker('FEE_UNKNOWN'));
       if (B.length) {
         pos.exitPending = { code: reasonCode, since: pos.exitPending ? pos.exitPending.since : env.now(), blocker: B[0].msg };
-        ord.blockers = B; transition(ord, 'REJECTED', B[0].msg); state.usedKeys.delete(key); persistNow();
+        ord.failureCode = 'PRE_TRADE_BLOCKED';
+        ord.blockers = B; transition(ord, 'REJECTED', B[0].msg); state.usedKeys.delete(key);
+        posTransition(pos, lcBack(pos), 'Verkauf ausgesetzt: ' + B[0].msg); persistNow();
         return { ok: false, order: ord, blockers: B };
       }
-      const p = es.snap.priceUsd, liq = es.snap.liquidityUsd;
+      const p = es.snap.priceUsd, P = execProvider();
       let qty = frac === 'ALL' ? pos.qty : Math.min(pos.qty, pos.initialQty * frac);
       if (pos.qty - qty < pos.initialQty * 0.01) qty = pos.qty;
-      const gross = qty * p;
-      let imp = estImpact(gross, liq); const impEst = imp == null;
-      if (imp == null) imp = S().maxSlippagePct / 100;
-      const fillPrice = p * (1 - imp), proceeds = qty * fillPrice, fees = estFees(proceeds), net = proceeds - fees.total;
-      transition(ord, 'APPROVED', 'Pre-Exit-Check bestanden' + (impEst ? ' (Impact geschätzt: max. Slippage)' : ''));
-      transition(ord, 'SUBMITTING', state.mode + ' – keine echte Order');
-      transition(ord, 'SUBMITTED', 'Simulierte Übermittlung – keine Transaktion');
-      transition(ord, 'CONFIRMING');
+      ord.provider = P.id;
+      const q = P.quote({ side: 'SELL', qty, snap: es.snap });
+      if (!q.ok) { posTransition(pos, lcBack(pos), 'Quote fehlgeschlagen'); return failOrder(ord, key, q.code, q.msg); }
+      const imp = q.impact, impEst = q.impactEstimated, fillPrice = q.fillPrice, proceeds = q.proceeds, fees = q.fees, net = q.net;
+      ord.route = q.route;
+      transition(ord, 'APPROVED', 'Pre-Exit-Check bestanden' + (impEst ? ' (Impact geschätzt: max. Slippage)' : '') + ` · Quote ${P.id}`);
+      const run = runProviderSteps(P, q, ord, null);
+      if (!run.ok) { posTransition(pos, lcBack(pos), 'Ausführung abgebrochen: ' + run.code); return failOrder(ord, key, run.code, run.msg); }
       transition(ord, 'CONFIRMED', 'Simulierte Füllung');
       const costPortion = pos.costUsd * (qty / pos.qty);
       const realized = net - costPortion;
@@ -3581,13 +3658,15 @@ function createCore(opts) {
       if (/STOP|BREAK_EVEN/.test(reasonCode)) alert('STOP_HIT', t, `${pos.symbol}: ${reasonCode} ${detail}`, 'WARNING', { cooldownMs: 0, key: ord.id });
       else if (/^TP/.test(reasonCode)) alert('TP_HIT', t, `${pos.symbol}: ${reasonCode} ${fmtSigned(realized)}`, 'SUCCESS', { cooldownMs: 0, key: ord.id });
       else alert('TRADE', t, `${pos.mode} SELL ${pos.symbol} (${reasonCode}): ${fmtSigned(realized)}`, 'INFO', { cooldownMs: 0, key: ord.id });
-      if (pos.qty <= 0) closePosition(pos, reasonCode); else journalUpdate(pos);
+      if (pos.qty <= 0) closePosition(pos, reasonCode); else { posTransition(pos, 'PARTIAL', `${reasonCode}: ${fmtNum(qty, 2)} verkauft, Rest ${fmtNum(pos.qty, 2)}`); journalUpdate(pos); }
       checkDailyLimit();
       persistNow(); emit('trade', { order: ord });
       return { ok: true, order: ord };
     } catch (e) {
+      ord.failureCode = ord.failureCode || 'INTERNAL';
       if (!TERMINAL.has(ord.state)) { try { transition(ord, 'FAILED', e.message); } catch (x) { ord.state = 'FAILED'; } }
       state.usedKeys.delete(key);
+      if (pos.lc === 'CLOSING') posTransition(pos, lcBack(pos), 'Fehler: ' + e.message);
       log.error('TRADE', `Sell ${pos.symbol} fehlgeschlagen: ${e.message}`);
       persistNow();
       return { ok: false, order: ord, error: e.message };
@@ -3596,6 +3675,8 @@ function createCore(opts) {
   function closePosition(pos, reason) {
     const now = env.now(), s = S(), r = state.risk;
     pos.status = 'CLOSED'; pos.closedAt = now; pos.exitReason = reason;
+    if (!pos.lc || pos.lc === 'OPEN' || pos.lc === 'PARTIAL') posTransition(pos, 'CLOSING', reason);
+    posTransition(pos, 'CLOSED', reason);
     state.positions = state.positions.filter(p => p.id !== pos.id);
     const pnl = pos.realizedUsd, win = pnl > 0;
     if (!win) {
@@ -3612,6 +3693,10 @@ function createCore(opts) {
     journalClose(pos);
     stratStat(pos.strategy, win ? 'profitable' : 'unprofitable');
     const j = state.journal.find(x => x.id === pos.id);
+    // Abgleich: Journal muss dasselbe Ergebnis tragen wie das Portfolio – sonst UNKNOWN statt stiller Annahme
+    if (j && j.status === 'CLOSED' && j.result && Math.abs(j.result.pnlUsd - m6(pos.realizedUsd)) < 1e-6 && pos.qty === 0) posTransition(pos, 'RECONCILED', 'Journal & Portfolio stimmen überein');
+    else { posTransition(pos, 'UNKNOWN', 'Journal weicht ab'); state.reconciliation = { required: true, issues: [...state.reconciliation.issues, `Position ${pos.id} (${pos.symbol}): Journal weicht beim Schließen ab`].slice(-40), at: now }; }
+    if (j) { j.lc = pos.lc; j.lcHistory = deepClone(pos.lcHistory || []); }
     if (j && isNum(pos.mae2m) && pos.mae2m <= -5 && j.signals.some(x => x.strength >= 70)) {
       state.falseSignals.unshift({ ts: now, tradeId: pos.id, symbol: pos.symbol, signals: j.signals.filter(x => x.strength >= 70).map(x => x.type), mae2m: pos.mae2m, pnlUsd: pnl });
       if (state.falseSignals.length > 60) state.falseSignals.length = 60;
@@ -3956,7 +4041,7 @@ function createCore(opts) {
       { name: 'Emergency Stop aus', ok: !state.bot.emergency, detail: state.bot.emergency ? 'aktiv' : 'aus' },
       { name: 'System Health ausreichend', ok: h.score >= s.minSystemHealth, detail: `${h.score} / min. ${s.minSystemHealth}` },
       { name: 'Kein offener Abgleich', ok: !state.reconciliation.required, detail: state.reconciliation.required ? 'RECONCILIATION REQUIRED' : 'ok' },
-      { name: 'Swap-/Routing-Provider', ok: false, detail: 'NOT AVAILABLE – nicht integriert (REQUIRES EXTERNAL PROVIDER)' },
+      { name: 'Swap-/Routing-Provider', ok: false, detail: `NOT AVAILABLE – Execution-Provider „${liveProvider.id}“ ist nicht angebunden (${EXEC_FAIL.NO_ROUTER}); aktiv: ${simProvider.id}` },
       { name: 'Signatur-Workflow', ok: false, detail: 'vorbereitet, aber deaktiviert – keine Transaktionen werden signiert' }
     ];
     return { ready: checks.every(c => c.ok), checks };
@@ -4134,21 +4219,22 @@ function createCore(opts) {
     try { const g = await rpcCall('getGenesisHash', [], { cacheMs: 10 * MIN }); state.wallet.network = GENESIS[g] || 'unbekannt'; state.wallet.networkAt = env.now(); }
     catch (e) { state.wallet.network = null; state.wallet.error = 'Netzwerk nicht verifiziert: ' + e.message; }
   }
-  async function walletConnect() {
+  /* silent: stille Wiederverbindung nur, wenn die Wallet dieser Seite bereits vertraut (onlyIfTrusted) – kein Popup, keine Signatur. */
+  async function walletConnect(o = {}) {
     if (state.wallet.status === 'CONNECTING') return { ok: false, error: 'Verbindung läuft bereits' };
     const prov = env.walletProvider ? env.walletProvider() : null;
-    if (!prov || typeof prov.connect !== 'function') { walletReset('NO_PROVIDER'); return { ok: false, error: 'Kein Wallet-Provider gefunden (z. B. Phantom- oder Solflare-Extension bzw. deren In-App-Browser).' }; }
+    if (!prov || typeof prov.connect !== 'function') { if (!o.silent) walletReset('NO_PROVIDER'); return { ok: false, error: 'Kein Wallet-Provider gefunden (z. B. Phantom- oder Solflare-Extension bzw. deren In-App-Browser).' }; }
     state.wallet.status = 'CONNECTING';
     try {
-      const r = await prov.connect();
+      const r = await (o.silent ? prov.connect({ onlyIfTrusted: true }) : prov.connect());
       const pkObj = (r && r.publicKey) || prov.publicKey; const pk = pkObj && typeof pkObj.toString === 'function' ? pkObj.toString() : null;
       if (!isMint(pk)) throw new Error('Wallet lieferte keinen gültigen Public Key');
       state.wallet = { status: 'CONNECTED', pubkey: pk, provider: providerName(prov), network: null, networkAt: 0, balanceLamports: null, balanceAt: 0, error: '' };
       hookProvider(prov);
-      audit('USER', 'WALLET_CONNECT', shortAddr(pk)); log.info('SYSTEM', `Wallet verbunden (nur lesend): ${shortAddr(pk)}`);
+      audit('USER', o.silent ? 'WALLET_RECONNECT' : 'WALLET_CONNECT', shortAddr(pk)); log.info('SYSTEM', `Wallet ${o.silent ? 'wieder' : ''}verbunden (nur lesend): ${shortAddr(pk)}`);
       await Promise.all([walletBalance(), walletNetwork()]);
       return { ok: true };
-    } catch (e) { walletReset('ERROR', str(e && e.message, 120) || 'Verbindung abgelehnt'); return { ok: false, error: state.wallet.error }; }
+    } catch (e) { if (o.silent) { walletReset('NOT_CONNECTED'); return { ok: false, error: 'stille Wiederverbindung nicht möglich' }; } walletReset('ERROR', str(e && e.message, 120) || 'Verbindung abgelehnt'); return { ok: false, error: state.wallet.error }; }
   }
   async function walletBalance() {
     if (state.wallet.status !== 'CONNECTED') return;
@@ -4219,6 +4305,7 @@ function createCore(opts) {
       { name: 'RPC', status: rpcs.includes('ONLINE') ? 'OK' : rpcs.includes('DEGRADED') || rpcs.includes('UNKNOWN') ? 'DEGRADED' : 'ERROR', detail: rpcs.join(' / ') || 'keine RPC konfiguriert' },
       { name: 'Risk', status: r.dailyLimitHit || r.globalPauseUntil > now ? 'DEGRADED' : 'OK', detail: r.dailyLimitHit ? 'Tageslimit erreicht' : r.globalPauseUntil > now ? 'globale Pause' : 'normal' },
       { name: 'Execution', status: failedRecent ? 'DEGRADED' : 'OK', detail: `${state.orders.filter(o => !TERMINAL.has(o.state)).length} aktiv, ${failedRecent} Fehler (10 min) · LIVE nicht verfügbar` },
+      { name: 'Portfolio', status: (() => { const pi = portfolioIntegrity(); return pi.ok ? 'OK' : pi.issues.some(i => ['NEGATIVE_CASH', 'QTY_MISMATCH', 'DOUBLE_FILL', 'DUPLICATE_POSITION'].includes(i.code)) ? 'ERROR' : 'DEGRADED'; })(), detail: (() => { const pi = portfolioIntegrity(); return pi.ok ? `${state.positions.length} Position(en) konsistent` : pi.issues.slice(0, 2).map(i => i.code).join(', '); })() },
       { name: 'Storage', status: state.storageOk ? 'OK' : 'ERROR', detail: state.storageOk ? `gespeichert ${fmtAge(now - state.lastSaveAt)}` : store.status().lastError },
       { name: 'UI', status: rl == null ? 'OK' : rl < 50 ? 'OK' : rl < 200 ? 'DEGRADED' : 'ERROR', detail: rl == null ? '—' : `Render ${rl} ms` }
     ];
@@ -4608,6 +4695,27 @@ function createCore(opts) {
     return { stats: learnCache.stats, base: learnCache.base, fam: learnCache.fam || familyStats(state.learn.records), champion: champion(), challenger: challenger(), rulesText: rulesText(state.models.rules), params: curParams() };
   }
 
+  /* ---------- Portfolio-Integrität: eine Quelle der Wahrheit, Invarianten sichtbar prüfen ---------- */
+  function portfolioIntegrity() {
+    const issues = [], now = env.now(), pf = state.portfolio, add = (code, msg) => issues.push({ code, msg });
+    if (!isNum(pf.cash) || pf.cash < -1e-6) add('NEGATIVE_CASH', `Cash ${fmtUsd(pf.cash)} negativ/ungültig`);
+    const seen = new Set();
+    for (const p of state.positions) {
+      if (seen.has(p.tokenId)) add('DUPLICATE_POSITION', `${p.symbol}: mehrere offene Positionen für denselben Token`); seen.add(p.tokenId);
+      const qIn = sum(p.entries.map(e => e.qty || 0)), qOut = sum(p.exits.map(e => e.qty || 0));
+      if (Math.abs(qIn - qOut - p.qty) > Math.max(1e-9, qIn * 1e-6)) add('QTY_MISMATCH', `${p.symbol}: Menge ${fmtNum(p.qty, 4)} ≠ Käufe ${fmtNum(qIn, 4)} − Verkäufe ${fmtNum(qOut, 4)}`);
+      if (!(p.qty > 0)) add('EMPTY_OPEN_POSITION', `${p.symbol}: offene Position ohne Menge`);
+      if (new Set(p.entries.map(e => e.orderId)).size !== p.entries.length || new Set(p.exits.map(e => e.orderId)).size !== p.exits.length) add('DOUBLE_FILL', `${p.symbol}: dieselbe Order mehrfach verbucht`);
+      const j = state.journal.find(x => x.id === p.id); if (!j || j.status !== 'OPEN') add('JOURNAL_MISSING', `${p.symbol}: kein offener Journal-Eintrag`);
+      if (!['OPEN', 'PARTIAL', 'CLOSING'].includes(p.lc)) add('LIFECYCLE', `${p.symbol}: Lebenszyklus ${p.lc || '—'}`);
+      if (p.lc === 'CLOSING' && !state.locks.has('pos:' + p.id)) add('LIFECYCLE', `${p.symbol}: „wird verkauft“ ohne laufende Order`);
+      if (p.staleSince && now - p.staleSince > 5 * MIN) add('ORPHANED', `${p.symbol}: seit ${fmtAge(now - p.staleSince)} keine Preisdaten`);
+    }
+    for (const o of state.orders) if (!TERMINAL.has(o.state) && now - o.createdAt > 2 * MIN) add('STUCK_ORDER', `Order ${o.id} (${o.side} ${o.symbol}) hängt in ${o.state}`);
+    for (const j of state.journal) if (j.status === 'OPEN' && !state.positions.some(p => p.id === j.id)) add('ORPHAN_JOURNAL', `Journal ${j.id} (${j.symbol}) offen ohne Position`);
+    return { ok: !issues.length, issues, checkedAt: now };
+  }
+
   /* ---------- Persistenz (versioniert) & Recovery ---------- */
   let persistTimer = null, storageFrozen = false;
   function persist() { if (persistTimer || storageFrozen) return; persistTimer = env.setTimeout(() => { persistTimer = null; persistNow(); }, 5000); }
@@ -4667,7 +4775,7 @@ function createCore(opts) {
     const pf = d.portfolio;
     state.portfolio = pf && isNum(pf.cash) && isNum(pf.startCapital) ? { ...freshPortfolio(pf.startCapital), ...Object.fromEntries(Object.entries(pf).filter(([, v]) => isNum(v))) } : freshPortfolio(state.settings.simCapitalUsd);
     state.positions = arr(d.positions).filter(p => p && p.status === 'OPEN' && isMint(p.mint) && isNum(p.qty) && p.qty > 0 && isNum(p.entryPrice) && p.entryPrice > 0 && Array.isArray(p.entries));
-    for (const p of state.positions) { p.value = null; p.pnlUsd = null; p.pnlPct = null; p.priceLabel = 'STALE'; }
+    for (const p of state.positions) { p.value = null; p.pnlUsd = null; p.pnlPct = null; p.priceLabel = 'STALE'; if (!POSITION_TRANSITIONS[p.lc]) { p.lc = p.exits.length ? 'PARTIAL' : 'OPEN'; p.lcHistory = [{ s: p.lc, ts: env.now(), note: 'Lebenszyklus aus Positionsdaten abgeleitet (Migration)' }]; } }
     state.orders = arr(d.orders).filter(o => o && typeof o.id === 'string' && ORDER_TRANSITIONS[o.state] && Array.isArray(o.history));
     state.journal = arr(d.journal).filter(j => j && typeof j.id === 'string' && isMint(j.mint));
     state.feed = arr(d.feed).filter(f => f && typeof f.id === 'string').slice(0, 120);
@@ -4706,6 +4814,7 @@ function createCore(opts) {
       issues.push(`Order ${o.id} (${o.side} ${o.symbol}) war ${from} → ${filled ? 'COMPLETED' : 'CANCELLED'}`);
     }
     for (const [k, v] of [...state.usedKeys.entries()]) if (v === 'pending') state.usedKeys.delete(k);
+    for (const p of state.positions) if (p.lc === 'CLOSING' || p.lc === 'UNKNOWN') { const to = p.exits.length ? 'PARTIAL' : 'OPEN'; if (p.lc === 'CLOSING') posTransition(p, 'UNKNOWN', 'Neustart während eines Verkaufs'); posTransition(p, to, 'Abgleich: Menge aus bestätigten Füllungen'); issues.push(`Position ${p.symbol}: Verkauf beim Neustart unterbrochen → ${to} (Menge aus bestätigten Füllungen)`); }
     for (const j of state.journal) if (j.status === 'OPEN' && !state.positions.some(p => p.id === j.id)) { j.status = 'UNRESOLVED'; issues.push(`Journal ${j.id} (${j.symbol}) offen ohne Position → UNRESOLVED`); }
     for (const p of state.positions) if (!state.journal.some(j => j.id === p.id)) {
       state.journal.unshift({ id: p.id, tokenId: p.tokenId, symbol: p.symbol, name: p.name || '', mint: p.mint, pair: p.pair, dexId: p.dexId, mode: p.mode, status: 'OPEN', openedAt: p.openedAt, closedAt: null, entries: deepClone(p.entries), exits: deepClone(p.exits), sizeUsd: p.investedUsd, feesUsd: p.feesUsd, slippageUsd: p.slippageUsd, score: p.entryScore, confidence: null, risk: null, signals: [], strategy: p.strategy, auto: null, reason: 'Aus Positionsdaten rekonstruiert (Abgleich)', sources: [], tags: ['RECONCILED'], regime: [], decision: null, paramVersion: p.paramVersion, result: null, exitReason: null, mae2m: null, holdMs: null });
@@ -4889,11 +4998,11 @@ function createCore(opts) {
     state, log, http, env, on, init, S, HARD_LIMITS,
     start, pause, stop, emergencyStop, releaseEmergency, setMode, setAutoTrading, setSafeMode,
     executeBuy, executeSell, execCheck: (t, o) => execCheck(t, t.A, o), globalBlockers, buildCtx, estFees, estImpact, equityInfo, portfolioRisk, positionCorrelations,
-    systemHealth, diagnostics, botHealth, readiness, drawdownPct, candidateChain, liveReadiness, preLiveChecks, ackReconciliation, requestSignature, rpcEndpoints, fetchOhlcv, fetchCandlesForBacktest, walletConnect, walletDisconnect, walletBalance, walletNetwork,
+    systemHealth, diagnostics, botHealth, readiness, drawdownPct, portfolioIntegrity, execProvider: m => execProvider(m).id, candidateChain, liveReadiness, preLiveChecks, ackReconciliation, requestSignature, rpcEndpoints, fetchOhlcv, fetchCandlesForBacktest, walletConnect, walletDisconnect, walletBalance, walletNetwork,
     updateSettings, updateStrategies, rollbackTo, addWatch, removeWatch, updateWatch, select, exportData, importSettings, resetSettings, resetPortfolio, freshStart,
     learnView, learnDecision, learnPromote, learnReject, learnRollback, exportBackup, validateBackup, restoreBackup, learnRunNow: () => { const r = learnRun(true); persistNow(); return r; },
     newSession, factoryReset, persistNow, enqueueSecurity, clearFeed: () => { state.feed = []; persist(); },
-    _t: { scanOnce, updateSolPrice, applySnapshot, applyAlt, fetchChunk, reconcile, analyzeAll, startScanner, stopScanner, timers, managePositions, closePosition, processQueue, enqueue, checkSecurity, ensureToken, maybeAutoTrade, setBotState, learnRun, learnOnClose, learnFollowUps, finishFollowUp, createChallenger, shadowEval, liveEval, addRecord }
+    _t: { posTransition, runProviderSteps, liveProvider, simProvider, scanOnce, updateSolPrice, applySnapshot, applyAlt, fetchChunk, reconcile, analyzeAll, startScanner, stopScanner, timers, managePositions, closePosition, processQueue, enqueue, checkSecurity, ensureToken, maybeAutoTrade, setBotState, learnRun, learnOnClose, learnFollowUps, finishFollowUp, createChallenger, shadowEval, liveEval, addRecord }
   };
 }
 
@@ -5297,6 +5406,71 @@ const SELF_TESTS = [
     assert(core.globalBlockers({ auto: true }).some(b => b.code === 'LOW_QUALITY_MARKET') && !core.globalBlockers({ auto: false }).some(b => b.code === 'LOW_QUALITY_MARKET'), 'No-Trade-Zone wirkt nicht (nur Auto)');
     return `Abschläge ${[...new Set([...dd.factors.adj, ...pen.factors.adj].map(a => a.code))].join(', ')} · Drawdown-Grenze & No-Trade-Zone nur für Auto`;
   }],
+  ['Portfolio & Execution', 'Positions-Lebenszyklus: OPEN → CLOSING → PARTIAL → CLOSED → RECONCILED, ungültige Übergänge verboten', async () => {
+    const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1);
+    assert((await core.executeBuy(t.id, { sizeUsd: 40 })).ok, 'Buy fehlgeschlagen');
+    const pos = core.state.positions[0];
+    assert(pos.lc === 'OPEN' && pos.lcHistory.map(h => h.s).join('>') === 'PLANNED>PENDING>OPEN', 'Start-Lebenszyklus falsch: ' + pos.lcHistory.map(h => h.s).join('>'));
+    assert((await core.executeSell(pos.id, 0.25, 'MANUAL')).ok && pos.lc === 'PARTIAL', 'Teilverkauf nicht PARTIAL: ' + pos.lc);
+    assert(!core._t.posTransition(pos, 'RECONCILED') && pos.lc === 'PARTIAL', 'ungültiger Übergang erlaubt');
+    assert((await core.executeSell(pos.id, 'ALL', 'MANUAL')).ok, 'Restverkauf fehlgeschlagen');
+    const j = core.state.journal.find(x => x.id === pos.id);
+    assert(j.lc === 'RECONCILED' && j.lcHistory.map(h => h.s).join('>') === 'PLANNED>PENDING>OPEN>CLOSING>PARTIAL>CLOSING>CLOSED>RECONCILED', 'Lebenszyklus unvollständig: ' + j.lcHistory.map(h => h.s).join('>'));
+    return j.lcHistory.map(h => h.s).join(' → ');
+  }],
+  ['Portfolio & Execution', 'Portfolio-Integrität: keine Doppelbuchung bei parallelen Verkäufen, Abweichungen sichtbar', async () => {
+    const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1);
+    assert((await core.executeBuy(t.id, { sizeUsd: 40 })).ok, 'Buy fehlgeschlagen');
+    const pos = core.state.positions[0];
+    const [a, b] = await Promise.all([core.executeSell(pos.id, 0.25, 'MANUAL'), core.executeSell(pos.id, 0.25, 'MANUAL')]);
+    assert([a, b].filter(r => r.ok).length === 1 && [a, b].some(r => codes(r).includes('TRADE_LOCKED')), 'paralleler Verkauf nicht verhindert');
+    assert(pos.exits.length === 1 && core.portfolioIntegrity().ok, 'Integrität nach Teilverkauf verletzt: ' + JSON.stringify(core.portfolioIntegrity().issues));
+    pos.qty *= 2;
+    const pi = core.portfolioIntegrity();
+    assert(!pi.ok && pi.issues.some(i => i.code === 'QTY_MISMATCH') && core.botHealth().find(x => x.name === 'Portfolio').status === 'ERROR', 'Mengenabweichung nicht erkannt');
+    return 'paralleler Verkauf → 1× gebucht, 1× TRADE_LOCKED · Mengenabweichung erkannt (Portfolio ERROR)';
+  }],
+  ['Portfolio & Execution', 'Execution-Provider: Simulation vollständig, LIVE ohne Router/Signatur, Fehlercodes auditierbar', async () => {
+    const H = makeTestHarness(); const core = await testCore(H); const T = core._t;
+    const lq = T.liveProvider.quote({ side: 'BUY', sizeUsd: 10, snap: { priceUsd: 1, liquidityUsd: 1e6 } });
+    assert(!lq.ok && lq.code === 'NO_ROUTER' && T.liveProvider.sign({}).code === 'SIGNATURE_DISABLED' && !T.liveProvider.available, 'LIVE-Provider nicht gesperrt');
+    assert(core.execProvider('LIVE') === 'LIVE' && core.execProvider() === 'SIMULATION', 'Provider-Auswahl falsch');
+    const t = await prepToken(core, H, 1);
+    const r = await core.executeBuy(t.id, { sizeUsd: 20 });
+    assert(r.ok && r.order.provider === 'SIMULATION' && /AMM/.test(r.order.route) && r.order.history.some(h => h.s === 'SUBMITTING' && /Preflight ok/.test(h.note)), 'Provider-Schritte fehlen im Order-Verlauf');
+    H.rpcFail = true; H.rugFail = true; const t2 = await prepToken(core, H, 2);
+    const r2 = await core.executeBuy(t2.id, { sizeUsd: 20 });
+    assert(!r2.ok && r2.order.failureCode === 'PRE_TRADE_BLOCKED', 'Fehlercode fehlt: ' + (r2.order && r2.order.failureCode));
+    const sq = T.simProvider.quote({ side: 'BUY', sizeUsd: 10, snap: { priceUsd: null } });
+    assert(!sq.ok && sq.code === 'QUOTE_FAILED', 'ungültige Quote nicht abgewiesen');
+    return 'SIMULATION: Quote→Preflight→Sign→Send→Confirm · LIVE: NO_ROUTER / SIGNATURE_DISABLED · Codes PRE_TRADE_BLOCKED, QUOTE_FAILED';
+  }],
+  ['Portfolio & Execution', 'Neustart während Verkauf → Abgleich statt stiller Annahme', async () => {
+    const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1);
+    assert((await core.executeBuy(t.id, { sizeUsd: 20 })).ok, 'Buy fehlgeschlagen');
+    const pos = core.state.positions[0]; core._t.posTransition(pos, 'CLOSING', 'Test: Absturz während Verkauf'); core.persistNow();
+    const c2 = createCore({ env: H.env, backend: H.backend }); c2.init({ autoStart: false });
+    const p2 = c2.state.positions[0];
+    assert(p2 && p2.lc === 'OPEN' && p2.lcHistory.some(h => h.s === 'UNKNOWN') && c2.state.reconciliation.required && c2.state.reconciliation.issues.some(x => /unterbrochen/.test(x)), 'unterbrochener Verkauf nicht abgeglichen');
+    return 'CLOSING beim Neustart → UNKNOWN → OPEN (aus bestätigten Füllungen) + RECONCILIATION REQUIRED';
+  }],
+  ['Portfolio & Execution', 'Wallet: nur lesend, stille Wiederverbindung nur mit Vertrauen, nie signieren', async () => {
+    const H = makeTestHarness(); let trusted = false; const calls = [], signCalls = [];
+    const prov = { isPhantom: true, connect: async o => { calls.push(o || null); if (o && o.onlyIfTrusted && !trusted) throw new Error('User rejected'); return { publicKey: { toString: () => tMint(5) } }; }, on() {}, signTransaction: async () => signCalls.push(1), signAllTransactions: async () => signCalls.push(1), signMessage: async () => signCalls.push(1) };
+    H.env.walletProvider = () => prov;
+    const core = await testCore(H);
+    const s1 = await core.walletConnect({ silent: true });
+    assert(!s1.ok && core.state.wallet.status === 'NOT_CONNECTED' && calls[0] && calls[0].onlyIfTrusted, 'stille Verbindung ohne Vertrauen nicht sauber abgelehnt');
+    const s2 = await core.walletConnect();
+    assert(s2.ok && core.state.wallet.status === 'CONNECTED' && core.state.wallet.pubkey === tMint(5), 'Verbindung fehlgeschlagen');
+    const sig = await core.requestSignature();
+    assert(!sig.ok && sig.code === 'SIGNING_DISABLED' && !signCalls.length, 'Signatur-Pfad nicht gesperrt');
+    assert(!/secret|seed|private/i.test(JSON.stringify(core.state.wallet)), 'Wallet-State enthält sensible Felder');
+    core.walletDisconnect(); assert(core.state.wallet.status === 'NOT_CONNECTED', 'Trennen fehlgeschlagen');
+    trusted = true; const s3 = await core.walletConnect({ silent: true });
+    assert(s3.ok && core.state.wallet.status === 'CONNECTED' && !signCalls.length, 'stille Wiederverbindung mit Vertrauen fehlgeschlagen');
+    return 'onlyIfTrusted ohne Vertrauen → abgelehnt · manuell verbunden · Signatur gesperrt (0 Aufrufe) · Wiederverbindung ok';
+  }],
   ['Daten', 'Pump wird nie als Buy interpretiert', async () => {
     const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1, { c5: 75, v5: 60000, v1: 90000, b5: 290, s5: 10 });
     core._t.analyzeAll();
@@ -5670,7 +5844,7 @@ const env = {
 };
 const core = createCore({ env, backend: createLocalBackend() });
 const UI = { alertsSeenAt: 0, view: 'scanner', sort: 'score', dir: -1, q: '', onlyRec: false, safeOnly: false, age: '', maxRisk: 100, minConf: 0, detailTab: 'overview', chartTf: 'live', logCat: 'ALL', logQ: '', logPaused: false, hq: '', hMode: '', hRes: '', rankBy: 'opportunity', kbQ: '', lastTouch: 0, tests: null, testsRunning: false, bt: null, btBusy: false, pro: false };
-const UI_PERSIST = ['alertsSeenAt', 'view', 'sort', 'dir', 'onlyRec', 'safeOnly', 'age', 'maxRisk', 'minConf', 'detailTab', 'chartTf', 'logCat', 'rankBy', 'pro'];
+const UI_PERSIST = ['alertsSeenAt', 'view', 'sort', 'dir', 'onlyRec', 'safeOnly', 'age', 'maxRisk', 'minConf', 'detailTab', 'chartTf', 'logCat', 'rankBy', 'pro', 'walletAuto'];
 const $ = id => { const e = document.getElementById(id); if (!e) domMissing(id); return e; };
 const missingDom = new Set();
 function domMissing(id) { if (!missingDom.has(id)) { missingDom.add(id); core.log.warn('UI', `DOM-Element #${id} nicht gefunden`); } }
@@ -5715,7 +5889,7 @@ function loadUi() {
   if (views.has(u.view)) UI.view = u.view;
   if (SORTS.some(s => s[0] === u.sort)) UI.sort = u.sort;
   if (u.dir === 1 || u.dir === -1) UI.dir = u.dir;
-  for (const k of ['onlyRec', 'safeOnly']) if (typeof u[k] === 'boolean') UI[k] = u[k];
+  for (const k of ['onlyRec', 'safeOnly', 'walletAuto']) if (typeof u[k] === 'boolean') UI[k] = u[k];
   if (['', 'NEW', 'EARLY', 'ESTABLISHED', 'MATURE'].includes(u.age)) UI.age = u.age;
   if (isNum(u.maxRisk)) UI.maxRisk = clamp(u.maxRisk, 0, 100);
   if (isNum(u.minConf)) UI.minConf = clamp(u.minConf, 0, 100);
@@ -6187,7 +6361,8 @@ function positionCard(p) {
   const pnlOk = isNum(p.pnlUsd);
   const eq = core.equityInfo(), r = mcRatio(p, t);
   const tpTxt = (i) => html`${pxMc(p.tps[i], r)}${p.tpHit[i] ? ' ✓' : ''}`;
-  return html`<div class="card"><div class="ch"><b>${p.symbol}</b><span class="chip vio">${p.mode}</span><span class="chip">${p.strategy || 'manuell'}</span>${lbl(p.priceLabel || 'UNKNOWN')}<span class="ag">Haltedauer ${fmtAge(now - p.openedAt)}</span></div>
+  const lcCls = { OPEN: 'ok', PARTIAL: 'info', CLOSING: 'warn', UNKNOWN: 'bad' }[p.lc] || '';
+  return html`<div class="card"><div class="ch"><b>${p.symbol}</b><span class="chip ${lcCls}" title="Lebenszyklus">${POS_LC_DE[p.lc] || p.lc || 'offen'}</span><span class="chip vio">${p.mode}</span><span class="chip">${p.strategy || 'manuell'}</span>${lbl(p.priceLabel || 'UNKNOWN')}<span class="ag">Haltedauer ${fmtAge(now - p.openedAt)}</span></div>
     <div class="grid4" style="margin-top:8px">
       ${kv('Einstieg', pxMc(p.entryPrice, r), null, 'Ø Füll-Coin-Preis und die daraus abgeleitete MC')}${kv('Aktuell', pxMc(p.lastPrice, r), p.priceLabel)}
       ${kv('PnL (fee-adj.)', pnlOk ? fmtSigned(p.pnlUsd) : 'nicht verfügbar', pnlOk ? 'SIMULATED' : 'UNKNOWN')}${kv('PnL %', pnlOk ? fmtPct(p.pnlPct) : '—')}
@@ -6198,6 +6373,7 @@ function positionCard(p) {
     </div>
     ${p.timeExitFlag ? html`<p class="note warn">⏱ Time Exit Candidate – erwartete Bewegung blieb aus.</p>` : ''}
     ${p.exitPending ? html`<p class="note bad">Exit ausgesetzt (${p.exitPending.code}): ${p.exitPending.blocker}</p>` : ''}
+    ${arr(p.lcHistory).length ? html`<details class="an"><summary class="mut">Lebenszyklus (${p.lcHistory.length} Schritte)</summary><ul class="trace">${p.lcHistory.map(h => html`<li><b>${fmtTime(h.ts)}</b><span>${POS_LC_DE[h.s] || h.s}${h.note ? ' – ' + h.note : ''}</span></li>`)}</ul></details>` : ''}
     <div class="row" style="margin-top:8px"><button class="btn sm" data-act="select" data-id="${p.tokenId}">Details</button><button class="btn sm warn" data-act="sell" data-id="${p.id}" data-frac="0.25">Verkaufen 25 %</button><button class="btn sm warn" data-act="sell" data-id="${p.id}" data-frac="0.5">50 %</button><button class="btn sm bad" data-act="sell" data-id="${p.id}" data-frac="ALL">100 %</button></div></div>`;
 }
 function renderPositions(sec) {
@@ -6206,7 +6382,8 @@ function renderPositions(sec) {
   patch(sec, html`<h2>💼 Positionen <span class="lbl SIMULATED">SIMULATED</span></h2>
     <div class="row" style="margin:0 0 10px"><button class="btn sm warn" data-act="freshStart" title="Startkapital wiederherstellen und Positionen verwerfen – gesammelte Analysedaten bleiben erhalten">↺ Frischer Start (Startkapital ${fmtUsd(core.S().simCapitalUsd)})</button></div>
     <div class="grid4">${kv('Equity', fmtUsd(eq.equity), eq.estimated ? 'ESTIMATED' : 'SIMULATED')}${kv('Cash', fmtUsd(pf.cash))}${kv('Exposure', fmtUsd(eq.exposure) + ' · ' + eq.exposurePct.toFixed(1) + '%')}${kv('Unrealisiert', fmtSigned(unreal))}${kv('Realisiert', fmtSigned(pf.realized))}${kv('Fees gesamt', fmtUsd(pf.fees, 2))}${kv('Startkapital', fmtUsd(pf.startCapital))}${kv('Max Drawdown', (pf.maxDD || 0).toFixed(2) + '%')}</div>
-    <p class="note">Alle Positionen sind virtuell (SIMULATION/PAPER) mit echten Marktdaten, geschätzter Slippage und Gebühren. Es gibt keine echten Orders.</p>
+    <p class="note">Alle Positionen sind virtuell (SIMULATION/PAPER) mit echten Marktdaten, geschätzter Slippage und Gebühren. Es gibt keine echten Orders. Ausführung: Provider ${core.execProvider()} (LIVE: nicht angebunden).</p>
+    ${(() => { const pi = core.portfolioIntegrity(); return pi.ok ? html`<p class="note an">✓ Portfolio-Integrität: Mengen, Füllungen, Journal und Orders konsistent.</p>` : html`<div class="panel bad"><b>Portfolio-Integrität: ${pi.issues.length} Auffälligkeit(en)</b>${pi.issues.map(i => html`<div class="check"><span class="ic fail">${i.code}</span><div><small>${i.msg}</small></div></div>`)}<p class="note">Unklare Zustände werden nicht still als offen oder geschlossen gewertet. Diagnose → Abgleich prüfen.</p></div>`; })()}
     ${st.positions.length ? html`<div class="cards2">${st.positions.map(positionCard)}</div>` : html`<div class="empty">Keine offenen Positionen.</div>`}`);
 }
 
@@ -6224,6 +6401,7 @@ function orderModal(id) {
   openModal({ title: 'Order Receipt · ' + o.id, body: html`
     <div class="grid2">${kv('Token', o.symbol)}${kv('Seite', o.side + (o.buyNo ? ' #' + o.buyNo : ''))}${kv('Status', o.state)}${kv('Modus', o.mode)}${kv('Größe', o.sizeUsd != null ? fmtUsd(o.sizeUsd) : '—')}${kv('Menge', o.qty != null ? fmtNum(o.qty, 2) : '—')}${kv('Referenz', pxMc(o.estPrice, r))}${kv('Füllung', pxMc(o.fillPrice, r), o.fillPrice ? 'SIMULATED' : null)}${kvA('Price Impact', isNum(o.expSlipPct) ? o.expSlipPct.toFixed(3) + '%' : '—', 'ESTIMATED')}${kv('Fees', o.fees ? fmtUsd(o.fees.total, 4) : '—', 'ESTIMATED')}${kvA('Latenz', o.latencyMs != null ? o.latencyMs + ' ms' : '—')}${kv('Transaktion', 'keine (Simulation)')}</div>
     ${o.reason ? html`<p class="note">${o.reason}</p>` : ''}
+    <p class="note">Provider: ${o.provider || 'SIMULATION'}${o.route ? ' · ' + o.route : ''}${o.failureCode ? html` · <span class="chip bad">${o.failureCode}</span> ${EXEC_FAIL[o.failureCode] || ''}` : ''}</p>
     <p class="note mono">Mint: ${o.mint}<span class="an"> · Key: ${o.key || '—'}</span></p>
     ${o.blockers ? html`<div class="an"><h3>Blocker</h3>${o.blockers.map(b => html`<div class="check"><span class="ic fail">P${b.prio}</span><div><b>${b.code}</b><small>${b.msg}</small></div></div>`)}</div>` : ''}
     <div class="an"><h3>State Machine</h3><ul class="trace">${o.history.map(h => html`<li><b>${fmtTime(h.ts)}</b><span>${h.s}${h.note ? ' – ' + h.note : ''}</span></li>`)}</ul></div>
@@ -7149,8 +7327,8 @@ const ACTIONS = {
   clearFeed: () => { core.clearFeed(); renderView(true); },
   logsPause: () => { UI.logPaused = !UI.logPaused; renderLogs(); },
   logCat: el => { UI.logCat = el.dataset.k; saveUi(); renderLogs(); },
-  wallet: async () => { closeModal(null); const r = await core.walletConnect(); toast(r.ok ? 'SUCCESS' : 'WARNING', r.ok ? 'Wallet verbunden (nur lesend)' : 'Wallet nicht verbunden', r.error || ''); scheduleRender(true); renderView(true); },
-  walletOff: () => { core.walletDisconnect(); closeModal(null); renderView(true); scheduleRender(true); },
+  wallet: async () => { closeModal(null); const r = await core.walletConnect(); UI.walletAuto = !!r.ok; saveUi(); toast(r.ok ? 'SUCCESS' : 'WARNING', r.ok ? 'Wallet verbunden (nur lesend)' : 'Wallet nicht verbunden', r.error || ''); scheduleRender(true); renderView(true); },
+  walletOff: () => { UI.walletAuto = false; saveUi(); core.walletDisconnect(); closeModal(null); renderView(true); scheduleRender(true); },
   walletBal: async () => { await Promise.all([core.walletBalance(), core.walletNetwork()]); closeModal(null); renderView(true); scheduleRender(true); },
   ackReview: () => { core.state.risk.reviewRequired = false; core.persistNow(); renderView(true); renderBanner(); },
   wlAdd: () => { const i = document.getElementById('wlAdd'); const v = i ? i.value.trim() : ''; const r = core.addWatch(v); toast(r.ok ? 'SUCCESS' : 'ERROR', r.ok ? 'Zur Watchlist hinzugefügt' : r.error); if (r.ok) renderView(true); },
@@ -7259,6 +7437,8 @@ function startApp() {
   renderFilterForm(); updateNotifyBtn();
   showView(UI.view);
   renderAll(true);
+  // Wallet: stille Wiederverbindung nur, wenn sie zuletzt verbunden war und die Wallet dieser Seite vertraut (kein Popup)
+  if (UI.walletAuto) core.walletConnect({ silent: true }).then(() => scheduleRender(true)).catch(() => {});
   setInterval(() => { renderTop(); if (UI.view === 'risk' || UI.view === 'positions') renderNav(); }, 1000);
   if (core.state.loadInfo.migrated) toast('INFO', `Daten aus Version ${core.state.loadInfo.migrated} übernommen`, 'Einstellungen, Watchlist, Positionen und Alarme wurden migriert');
   if (core.state.reconciliation.required) toast('WARNING', 'Abgleich erforderlich', 'Neue Käufe blockiert, bis der Abgleich bestätigt ist');
