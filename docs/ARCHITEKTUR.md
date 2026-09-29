@@ -1,6 +1,6 @@
 # Smart Lab – Architektur & technischer Audit
 
-Stand: Phase 6 des Master-Prompts „Ganzheitliche Optimierung“ (App-Version 2.7.0).
+Stand: Phase 6 des Master-Prompts „Ganzheitliche Optimierung“ (App-Version 2.8.0).
 Dieses Dokument wird in jeder Phase fortgeschrieben (siehe „Änderungsprotokoll“ am Ende).
 
 ## 1. Überblick
@@ -80,7 +80,7 @@ UI-Schicht (DOM): Views, Detail-Panel, Modals, Charts (Canvas), Toasts, Alarm-Fe
 
 - Jeder Schlüssel trägt `v: 3`; beschädigte Kernbereiche → RECONCILIATION REQUIRED (keine Käufe bis Bestätigung); beschädigte Lernbereiche → leere Defaults.
 - Geschrieben wird nur, was sich geändert hat; bei vollem Speicher werden Logs/Stats/Journal/Lerndaten rotiert.
-- Laufzeit-Migrationen: v1 → v2 → v3, Journal → Learning Records (2.2.0), Cooldowns unter 10/5 min → auf harte Untergrenze angehoben und im Config-Log vermerkt (2.3.0).
+- Laufzeit-Migrationen: v1 → v2 → v3, Journal → Learning Records (2.2.0), Cooldowns unter 10/5 min → auf harte Untergrenze angehoben und im Config-Log vermerkt (2.3.0), gespeicherte Loss-Cooldown-/Pause-Werte aus Versionen vor 2.8.0 → einmalig 0 min, laufende Pause/Cooldown beendet, im Config-Log vermerkt (2.8.0).
 - Voll-Backup: Export aller Bereiche; Wiederherstellen erst nach Prüfung (Kennung, Version, jeder Bereich) und Probe-Laden in einer isolierten Instanz, vorher automatische Sicherung des aktuellen Stands, danach Neustart mit Login.
 
 ## 5. Startfluss
@@ -145,13 +145,14 @@ Kein Hotspot gefunden, der eine Optimierung rechtfertigt. Render ist bereits ged
 
 ## 11. Bewusste Abweichungen / Entscheidungen
 
-- Loss-Cooldown / globale Pause: ab Phase 1 wieder harte Untergrenze 10 / 5 min (Entscheidung Nutzer, 2026-09-29).
+- Loss-Cooldown / globale Pause: in Phase 1 auf harte Untergrenze 10 / 5 min gesetzt; ab 2.8.0 auf Wunsch des Nutzers wieder 0 min (Standard und Untergrenze, weiterhin einstellbar). Folge: nach Verlusten bzw. einer Verlustserie gibt es keine automatische Handelspause mehr – Verlustserien lösen nur noch einen Review-Hinweis aus. Tageslimit, Drawdown-Grenze, Overtrading-Schutz und Coin-Cooldown (15 min) bleiben unverändert.
 - Einzeldatei bleibt; `app.js` wird gelöscht (Entscheidung Nutzer).
 - Umsetzung phasenweise, jede Phase einzeln getestet und gemergt.
 
 ## Änderungsprotokoll
 
 - Phase 0: Audit erstellt.
+- 2.8.0 (Nutzerwunsch): Loss-Cooldown und globale Pause wieder 0 min (Standard und Untergrenze), einmalige Umstellung gespeicherter Werte inkl. Beenden laufender Pausen, protokolliert. **Verhaltensänderung:** nach Verlusten keine automatische Handelspause mehr. Selbsttest und Migrations-E2E angepasst.
 - Phase 6 (2.7.0): Fehlerklassen & „erwartbarer Verlust?“ (geplanter Stop wird ab jetzt je Position gespeichert; ältere Verluste werden beim Laden ergänzt, Stop aus den aktuellen Einstellungen als gekennzeichnete Näherung), Near-Miss-Tracking mit Opportunity-Cost-Auswertung je Filter (ohne automatische Lockerung), Tabelle „Aktive Parameter“ mit Herkunft und Grund, naive Parameter-Suche des alten Auto-Tunings entfernt (Einstellung überwacht nur noch Versionen und rollt schlechtere zurück), Lern-Report-CSV um Fehlerklasse ergänzt. Login: Eingaben während der PBKDF2-Prüfung gesperrt (verhinderte, dass eine neue Eingabe beim Fehlschlag des vorherigen Versuchs gelöscht wurde). 4 neue Selbsttests.
 - Phase 5 (2.6.0): Backtest reproduzierbar und versioniert (Run-ID aus Datensatz-Hash + Parametern + Code-Version), Walk-Forward immer aktiv, Stress-Tests inkl. Einstiegsverzögerung ohne Look-Ahead, Monte-Carlo-Drawdown, Auswertung je Regime, Trade-CSV-Export, Lauf-Historie (gespeichert, max. 20). 3 neue Selbsttests, neuer E2E-Test für den Backtest-Bericht.
 - Phase 4 (2.5.0): Positions-Lebenszyklus mit Verlauf (Migration für bestehende Positionen, unterbrochene Verkäufe → Abgleich), Execution-Provider-Abstraktion mit Fehlercodes, Portfolio-Integrität (Positionen-Ansicht, Bot Health), stille Wallet-Wiederverbindung. 5 neue Selbsttests.
