@@ -467,7 +467,7 @@ pre.raw{white-space:pre-wrap;word-break:break-all;font:11px/1.4 var(--mono);back
    ===================================================================== */
 
 /* ============================== KONSTANTEN ============================== */
-const APP_VERSION = '2.6.0';
+const APP_VERSION = '2.7.0';
 /* true, wenn Version a älter als b ist (fehlende Version = sehr alt). */
 const verLt = (a, b) => { if (typeof a !== 'string') return true; const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const STRATEGY_VERSION = '1.0.0';
@@ -808,7 +808,7 @@ const SETTINGS_SCHEMA = [
   { k: 'ffRugcheck', s: 'System', l: 'Feature: RugCheck-Sicherheitsdaten', t: 'bool', def: true },
   { k: 'ffHolderAnalysis', s: 'System', l: 'Feature: Holder-Analyse via RPC', t: 'bool', def: true },
   { k: 'ffShadowMode', s: 'System', l: 'Feature: Shadow Mode (deaktivierte Strategien mitrechnen)', t: 'bool', def: true },
-  { k: 'ffAutoTuning', s: 'System', l: 'Feature: Safe Auto-Tuning (nur Simulation)', t: 'bool', def: false },
+  { k: 'ffAutoTuning', s: 'System', l: 'Feature: Parameter-Versionen überwachen & schlechtere zurückrollen (nur Simulation; neue Parameter nur über die Lern-KI)', t: 'bool', def: false },
   { k: 'minTradesForTuning', s: 'System', l: 'Min. abgeschlossene Trades für Optimierung', t: 'int', def: 20, min: HARD_LIMITS.MIN_TRADES_FOR_TUNING, max: 1000, hard: true },
   { k: 'resetBuyCountOnSession', s: 'System', l: 'Buy-Zähler bei neuer Session zurücksetzen (nur ohne offene Position)', t: 'bool', def: true },
   // Lern-KI (Adaptive Loss Intelligence) – verändert nie HARD_LIMITS, Security, Emergency Stop oder LIVE-Gating
@@ -2166,7 +2166,11 @@ const LEARN_BOUNDS = Object.freeze({
   minConfidence: [50, 90], minLiq: [5000, 250000], minPairAgeMin: [0, 120], regimeScoreBump: [0, 15], volumeConfirmPct: [0, 5]
 });
 const LEARN_SETTING_KEYS = ['minScore', 'minConfidence', 'minLiq', 'minPairAgeMin', 'stopLossPct', 'trailPct', 'requireVerifiedSecurity'];
-const LEARN_CAPS = { records: 200, samplesKeep: 120, patterns: 300, obs: 20, falseSignals: 150, lessons: 80, timeline: 200, experiments: 60, hypotheses: 80, queue: 40, reviews: 20, versions: 30 };
+/* Tabelle „Aktive Parameter“: entscheidungsrelevante Einstellungen mit Herkunft (wer, wann, warum). */
+const PARAM_TABLE_KEYS = ['minScore', 'minConfidence', 'minLiq', 'minPairAgeMin', 'requireVerifiedSecurity', 'maxRiskScore', 'consensusMinWeight', 'stopLossPct', 'trailPct', 'trailActivatePct', 'tp1Pct', 'maxPositionPct', 'maxExposurePct', 'maxOpenPositions', 'maxSlippagePct', 'dailyLossLimitPct', 'ddReducePct', 'ddStopPct', 'lossCooldownMin', 'globalPauseMin', 'lossStreakLimit'];
+const PARAM_SOURCE = { USER: 'USER', LEARNING: 'LEARNED', LEARNING_ROLLBACK: 'ROLLBACK', USER_ROLLBACK: 'ROLLBACK', AUTO_ROLLBACK: 'ROLLBACK', AUTO_TUNING: 'AUTO_TUNING', MIGRATION: 'MIGRATION', IMPORT: 'IMPORT', TEST: 'TEST' };
+const PARAM_SOURCE_DE = { DEFAULT: 'Standardwert', USER: 'manuell geändert', LEARNED: 'von der Lern-KI übernommen', ROLLBACK: 'Rollback', AUTO_TUNING: 'altes Auto-Tuning (vor 2.7.0, ohne Out-of-Sample-Nachweis)', MIGRATION: 'beim Laden auf harte Grenze angehoben', IMPORT: 'aus Einstellungs-Import', TEST: 'Selbsttest', UNTRACKED: 'geändert vor Beginn des Änderungsprotokolls' };
+const LEARN_CAPS = { records: 200, samplesKeep: 120, patterns: 300, obs: 20, falseSignals: 150, lessons: 80, timeline: 200, experiments: 60, hypotheses: 80, queue: 40, reviews: 20, versions: 30, nearMiss: 200, nearMissOpen: 40 };
 const emptyRules = () => ({ blocks: [], regimeScoreBump: {}, volumeConfirmPct: 0, blockPostPump: false });
 
 /* ---- Statistik-Helfer (deterministisch) ---- */
@@ -2277,6 +2281,7 @@ function buildLearningRecord(pos, j, o) {
       givebackPct: isNum(pnlPct) ? lr2(Math.max(0, p.maxRun - pnlPct)) : null, minLiqPct: lr2(p.minLiqPct), samples: p.samples.slice(), n: p.n
     },
     exit: { reason: pos.exitReason || (j && j.exitReason) || null, price: last ? last.refPrice : null, marketPnlPct: lr2(marketPnl), holdMs: pos.closedAt - pos.openedAt, exits: pos.exits.length },
+    plan: { stopPct: isNum(pos.plannedStopPct) ? lr2(pos.plannedStopPct) : null },
     outcome: { pnlUsd: lr2(isNum(res.pnlUsd) ? res.pnlUsd : pos.realizedUsd), pnlPct: lr2(pnlPct), win: isNum(res.pnlUsd) ? res.pnlUsd > 0 : pos.realizedUsd > 0 },
     labels: null, followUp: null, cf: null, revisions: []
   };
@@ -2332,7 +2337,12 @@ function labelTrade(rec, ctx) {
   const regimeFit = att && (att.evidence.REGIME_MISMATCH || 0) >= 50 ? 'MISFIT' : coh && coh.n >= 5 ? 'FIT' : 'UNKNOWN';
   const primary = att ? att.primaryCause : null;
   const avoidable = !att ? 'NO' : att.unknown ? 'UNKNOWN' : primary === 'NOISE_OR_RANDOM' ? 'NO' : (att.evidence[primary] || 0) >= 65 ? 'LIKELY' : 'POSSIBLE';
-  return { lossFamily: primary, secondary: att ? att.secondaryCauses : [], evidence: att ? att.evidence : {}, why: att ? att.why : {}, dataCompleteness: att ? att.dataCompleteness : null, avoidable, dataQuality, signalQuality, executionQuality, exitQuality, regimeFit };
+  const labels = { lossFamily: primary, secondary: att ? att.secondaryCauses : [], evidence: att ? att.evidence : {}, why: att ? att.why : {}, dataCompleteness: att ? att.dataCompleteness : null, avoidable, dataQuality, signalQuality, executionQuality, exitQuality, regimeFit };
+  return withErrorClass(labels, rec, ctx.S);
+}
+function withErrorClass(labels, rec, S) {
+  const ec = errorClassify({ ...rec, labels }, S || {});
+  return Object.assign(labels, { errorClass: ec ? ec.cls : null, errorWhy: ec ? ec.why : null, lossVerdict: ec ? ec.verdict : null, expectedLoss: ec ? ec.expected : null });
 }
 
 /* 4) Counterfactual Engine – historische Simulationen aus dem gespeicherten Preispfad (Näherung). */
@@ -2705,11 +2715,89 @@ function lossStreakReview(recs, streak, drift, hyps, now) {
   };
 }
 
+/* 11b) Fehlerklassen – nicht jeder Verlust ist ein Fehler. Verlustfamilie → eine von sechs Klassen,
+   dazu die Prüfung „erwartbarer Verlust?“: lag der Verlust im geplanten Risiko (Stop beim Einstieg + Slippage-Toleranz + Kosten)? */
+const ERROR_CLASS_OF = { NOISE_OR_RANDOM: 'STATISTICAL', EXECUTION: 'EXECUTION', LIQUIDITY_FAILURE: 'EXECUTION', DATA_QUALITY: 'DATA', SECURITY_RELATED: 'SECURITY', SIGNAL_FALSE_POSITIVE: 'MODEL', REGIME_MISMATCH: 'MODEL', MOMENTUM_EXHAUSTION: 'MODEL', VOLUME_DECOUPLING: 'MODEL', EXIT_TOO_LATE: 'MODEL', EXIT_TOO_EARLY: 'MODEL', RISK_OVERSIZING: 'PROCESS', UNKNOWN: 'UNKNOWN' };
+const ERROR_CLASSES = ['STATISTICAL', 'EXECUTION', 'DATA', 'SECURITY', 'MODEL', 'PROCESS', 'UNKNOWN'];
+const ERROR_CLASS_DE = { STATISTICAL: 'Normaler statistischer Verlust', EXECUTION: 'Execution-Fehler', DATA: 'Datenfehler', SECURITY: 'Security-Fehler', MODEL: 'Modell-/Strategiefehler', PROCESS: 'Prozessfehler', UNKNOWN: 'Unklar (zu wenig Daten)' };
+const LOSS_VERDICT_DE = { EXPECTED: 'erwartbar – im geplanten Risiko, keine systematische Ursache', WITHIN_PLAN_WITH_CAUSE: 'im geplanten Risiko, aber mit belegter Ursache (Lernkandidat)', WITHIN_PLAN: 'im geplanten Risiko, Ursache unklar', OVER_PLAN: 'größer als geplant – prüfen', UNKNOWN: 'kein geplanter Stop bekannt' };
+function expectedLossCheck(rec, S) {
+  const o = (rec && rec.outcome) || {}, x = (rec && rec.execution) || {};
+  if (o.win || !isNum(o.pnlPct)) return null;
+  const fromPlan = !!(rec.plan && isNum(rec.plan.stopPct)), planned = fromPlan ? rec.plan.stopPct : S && isNum(S.stopLossPct) ? S.stopLossPct : null;
+  if (!isNum(planned)) return { verdict: 'UNKNOWN', plannedPct: null, actualPct: lr2(o.pnlPct), tolPct: null, source: 'NONE' };
+  const costPct = isNum(x.sizeUsd) && x.sizeUsd > 0 ? ((x.feesUsd || 0) + (x.slippageUsd || 0)) / x.sizeUsd * 100 : 0;
+  const tolPct = lr2(Math.max(1, isNum(S && S.maxSlippagePct) ? S.maxSlippagePct : 0) + costPct);
+  return { verdict: -o.pnlPct <= planned + tolPct ? 'WITHIN_PLAN' : 'OVER_PLAN', plannedPct: lr2(planned), actualPct: lr2(o.pnlPct), tolPct, source: fromPlan ? 'PLAN' : 'SETTINGS' };
+}
+function errorClassify(rec, S) {
+  const l = (rec && rec.labels) || {}, o = (rec && rec.outcome) || {}, f = (rec && rec.entry) || {};
+  if (o.win || !l.lossFamily) return null;
+  const exp = expectedLossCheck(rec, S);
+  let cls = ERROR_CLASS_OF[l.lossFamily] || 'UNKNOWN', why = (l.why || {})[l.lossFamily] || ERROR_CLASS_DE[cls];
+  if (isNum(f.blockerCount) && f.blockerCount > 0) { cls = 'PROCESS'; why = `Einstieg trotz ${f.blockerCount} aktiver Analyse-Blocker (manuell)`; }
+  else if (exp && exp.verdict === 'OVER_PLAN' && (cls === 'STATISTICAL' || cls === 'UNKNOWN')) { cls = 'EXECUTION'; why = `Stop nicht zum geplanten Kurs ausgeführt (Kurslücke/Latenz): ${fmtPct(exp.actualPct)} statt ≈ −${exp.plannedPct} %`; }
+  const verdict = !exp ? 'UNKNOWN' : exp.verdict === 'OVER_PLAN' ? 'OVER_PLAN' : exp.verdict === 'UNKNOWN' ? 'UNKNOWN' : cls === 'STATISTICAL' ? 'EXPECTED' : cls === 'UNKNOWN' ? 'WITHIN_PLAN' : 'WITHIN_PLAN_WITH_CAUSE';
+  return { cls, why, verdict, expected: exp };
+}
+function errorClassStats(recs) {
+  const classes = Object.fromEntries(ERROR_CLASSES.map(c => [c, 0])), verdicts = { EXPECTED: 0, WITHIN_PLAN_WITH_CAUSE: 0, WITHIN_PLAN: 0, OVER_PLAN: 0, UNKNOWN: 0 };
+  let n = 0;
+  for (const r of recs) { const l = r.labels; if (r.outcome.win || !l || !l.errorClass) continue; n++; classes[l.errorClass] = (classes[l.errorClass] || 0) + 1; verdicts[l.lossVerdict || 'UNKNOWN'] = (verdicts[l.lossVerdict || 'UNKNOWN'] || 0) + 1; }
+  return { n, classes, verdicts };
+}
+
+/* 11c) Near-Misses – knapp nicht gehandelte Kandidaten 15 min beobachten: Opportunity Cost vs. vermiedener Verlust je Filter.
+   Reine Messung: Filter werden daraus nie automatisch gelockert (die Lern-KI darf ausschließlich verschärfen). */
+const NEAR_MISS_WINDOW = 15 * MIN, NEAR_MISS_MIN_N = 10;
+const NM_SKIP = new Set(['NO_SIGNAL', 'PRICE_MISSING', 'DATA_STALE', 'DATA_CONFLICT', 'DATA_FALLBACK', 'MCAP_RANGE', 'SECURITY_CRITICAL', 'SECURITY_UNKNOWN', 'SECURITY_STALE', 'SECURITY_UNVERIFIED']);
+const NM_SYSTEM = new Set(['AUTO_TRADING_OFF', 'PAPER_MANUAL', 'RECOVERING', 'BOT_NOT_RUNNING', 'MODE_READ_ONLY', 'LIVE_UNAVAILABLE', 'OFFLINE', 'SYSTEM_UNHEALTHY', 'FEE_UNKNOWN', 'EMERGENCY_STOP', 'SAFE_MODE', 'RECONCILIATION_REQUIRED', 'SECURITY_SOURCES_DOWN', 'TRADE_LOCKED', 'MAX_ACTIVE_ORDERS']);
+const NM_OUTCOME_DE = { MISSED_GAIN: 'verpasster Gewinn', AVOIDED_LOSS: 'vermiedener Verlust', NEUTRAL: 'neutral', NO_DATA: 'keine Daten' };
+function nearMissOf(A, D, S) {
+  if (!A || !D || !A.core || !isNum(A.core.price) || !(A.core.price > 0) || D.decision === 'APPROVED') return null;
+  if (D.decision === 'BUY_CANDIDATE') {
+    if (D.execBlockers.some(b => NM_SYSTEM.has(b.code))) return null; // kein Filter-Entscheid, sondern Systemzustand
+    const b = D.execBlockers[0]; return b ? { code: b.code, kind: 'RISK', gap: null, msg: b.msg } : null;
+  }
+  if (!D.fastPass || !D.secOk || D.analysisBlockers.length !== 1) return null;
+  const b = D.analysisBlockers[0]; if (NM_SKIP.has(b.code)) return null;
+  let gap = null;
+  if (b.code === 'SCORE_TOO_LOW') { gap = S.minScore - A.finalScore; if (gap > 10) return null; }
+  else if (b.code === 'CONFIDENCE_LOW') { gap = S.minConfidence - A.confidence.total; if (gap > 10) return null; }
+  else if (b.code === 'RISK_TOO_HIGH') { gap = A.risk.total - S.maxRiskScore; if (A.risk.level === 'CRITICAL' || gap > 10) return null; }
+  return { code: b.code, kind: 'ANALYSIS', gap, msg: b.msg };
+}
+/* Ergebnis nach 15 min: TP1 vor Stop → verpasster Gewinn, Stop vor TP1 → vermiedener Verlust. simPct = Exit-Simulation ohne Kosten (Näherung). */
+function nearMissOutcome(m, S) {
+  const s = arr(m.samples);
+  if (s.length < 3) return { outcome: 'NO_DATA', simPct: null };
+  const r = simulateExit(s, { stopPct: S.stopLossPct, trailActPct: S.trailActivatePct, trailPct: S.trailPct, tp3Pct: S.tp3Pct });
+  const outcome = m.hit === 'TP' ? 'MISSED_GAIN' : m.hit === 'STOP' ? 'AVOIDED_LOSS' : 'NEUTRAL';
+  return { outcome, simPct: r ? lr2(r.pnlPct) : null };
+}
+function nearMissStats(done) {
+  const by = {}, tot = { n: 0, missed: 0, avoided: 0, neutral: 0, noData: 0, gainPct: 0, lossPct: 0 };
+  for (const m of done) {
+    const g = by[m.code] || (by[m.code] = { code: m.code, kind: m.kind, n: 0, missed: 0, avoided: 0, neutral: 0, noData: 0, sim: [] });
+    if (m.outcome === 'NO_DATA') { g.noData++; tot.noData++; continue; }
+    g.n++; tot.n++;
+    if (m.outcome === 'MISSED_GAIN') { g.missed++; tot.missed++; } else if (m.outcome === 'AVOIDED_LOSS') { g.avoided++; tot.avoided++; } else { g.neutral++; tot.neutral++; }
+    if (isNum(m.simPct)) { g.sim.push(m.simPct); if (m.simPct > 0) tot.gainPct += m.simPct; else tot.lossPct -= m.simPct; }
+  }
+  const rows = Object.values(by).map(g => {
+    const avgSim = g.sim.length ? lr2(avg(g.sim)) : null;
+    const verdict = g.n < NEAR_MISS_MIN_N || avgSim == null ? 'NOT_ENOUGH_DATA' : avgSim > 0 ? 'FILTER_COSTLY' : 'FILTER_HELPS';
+    return { code: g.code, kind: g.kind, n: g.n, missed: g.missed, avoided: g.avoided, neutral: g.neutral, noData: g.noData, avgSimPct: avgSim, verdict };
+  }).sort((a, b) => b.n - a.n || (a.code < b.code ? -1 : 1));
+  return { ...tot, gainPct: lr2(tot.gainPct), lossPct: lr2(tot.lossPct), rows };
+}
+
 /* 12) Research-Priorität (0–100) */
 function researchPriority(f) { const w = { impact: 0.25, evidence: 0.2, recency: 0.15, breadth: 0.1, certainty: 0.1, cheap: 0.1, safety: 0.1 }; return Math.round(100 * sum(Object.entries(w).map(([k, x]) => x * clamp(f[k] || 0, 0, 1)))); }
 
 /* 13) Lern-Zustand: Defaults & Validierung beim Laden (beschädigte Teile → leere Defaults, kein Einfluss auf den Handel) */
-const freshLearn = () => ({ v: LEARN_VERSION, records: [], followUps: [], falseSignals: [], lessons: [], timeline: [], reviews: [], calibration: null, drift: null, lossModel: null, lastRunAt: 0, lastModelN: 0, backfilled: false, corrupted: [] });
+const freshLearn = () => ({ v: LEARN_VERSION, records: [], followUps: [], falseSignals: [], lessons: [], timeline: [], reviews: [], calibration: null, drift: null, lossModel: null, lastRunAt: 0, lastModelN: 0, backfilled: false, corrupted: [], nearMiss: freshNearMiss() });
+const freshNearMiss = () => ({ open: [], done: [], skipped: 0 });
 const freshResearch = () => ({ hypotheses: [], experiments: [], queue: [] });
 const pickLearn = P => Object.fromEntries(LEARN_SETTING_KEYS.map(k => [k, P[k]]));
 const freshModels = (params, now) => ({ seq: 1, champion: 'M-1', challenger: null, rules: emptyRules(), versions: [{ id: 'M-1', ts: now, status: 'BASELINE', params: params || {}, rules: emptyRules(), basedOn: null, change: null, applied: null, experimentId: null, hypothesisId: null, note: 'Baseline – Ausgangsparameter vor dem Lernen', shadow: null, live: null }] });
@@ -2738,6 +2826,12 @@ function loadLearnParts(d) {
     for (const k of ['calibration', 'drift', 'lossModel']) ol[k] = L[k] && typeof L[k] === 'object' ? L[k] : null;
     if (ol.lossModel && ol.lossModel.w && !(Array.isArray(ol.lossModel.w) && ol.lossModel.w.length === LM_FEATS.length + 2 && ol.lossModel.w.every(isNum))) ol.lossModel = null;
     ol.lastRunAt = isNum(L.lastRunAt) ? L.lastRunAt : 0; ol.lastModelN = isNum(L.lastModelN) ? L.lastModelN : 0; ol.backfilled = L.backfilled === true;
+    const NM = L.nearMiss && typeof L.nearMiss === 'object' ? L.nearMiss : {}; // ab 2.7.0 – ältere Stände starten leer
+    ol.nearMiss = {
+      open: objs(NM.open, LEARN_CAPS.nearMissOpen, m => typeof m.tokenId === 'string' && typeof m.code === 'string' && isNum(m.ts) && isNum(m.price) && m.price > 0).map(m => ({ ...m, samples: arr(m.samples).filter(s => Array.isArray(s) && isNum(s[0]) && isNum(s[1])).slice(-60) })),
+      done: objs(NM.done, LEARN_CAPS.nearMiss, m => typeof m.code === 'string' && isNum(m.ts) && typeof m.outcome === 'string'),
+      skipped: isNum(NM.skipped) ? NM.skipped : 0
+    };
   }
   if (R && typeof R === 'object') {
     out.research.hypotheses = objs(R.hypotheses, LEARN_CAPS.hypotheses, h => typeof h.id === 'string' && HYP_DEF[h.type] && h.change && typeof h.change === 'object').map(h => ({ ...h, experimentIds: arr(h.experimentIds), source: h.source && typeof h.source === 'object' ? h.source : {} }));
@@ -3600,7 +3694,7 @@ function createCore(opts) {
       const a = atr(oh.candles, 14);
       if (a) { const as = e - s.atrMult * a; if (as > stop && as < e) { stop = as; type = 'ATR'; } }
     }
-    if (!pos.trailing && !pos.breakEven) { pos.stop = stop; pos.stopType = type; }
+    if (!pos.trailing && !pos.breakEven) { pos.stop = stop; pos.stopType = type; pos.plannedStopPct = e > 0 ? (1 - stop / e) * 100 : null; } // geplantes Risiko für „erwartbarer Verlust?“
     pos.tps = [s.tp1Pct, s.tp2Pct, s.tp3Pct].map(p => e * (1 + p / 100));
   }
   function exitDecision(pos, t, p, pnlPct, liq, now) {
@@ -3851,6 +3945,7 @@ function createCore(opts) {
     const solT = state.sol ? { usd: state.sol.usd, h1: state.sol.chg ? state.sol.chg.h1 : null, h24: state.sol.chg ? state.sol.chg.h24 : null } : null;
     state.regime = computeRegime(analyses, solT);
     try { shadowDecisions(now); } catch (e) { log.error('LEARNING', 'Shadow-Bewertung: ' + e.message); }
+    try { nearMissTick(now); } catch (e) { log.error('LEARNING', 'Near-Miss-Tracking: ' + e.message); }
   }
   function runAlerts() {
     const s = S();
@@ -4185,7 +4280,10 @@ function createCore(opts) {
     for (const [k, [lo, hi]] of Object.entries(TUNING_BOUNDS)) if (isNum(params[k])) patch[k] = clamp(params[k], lo, hi);
     return updateSettings(patch, who, { noVersion: true });
   }
-  /* Safe Auto-Tuning: nur SIMULATION, nur TUNING_BOUNDS, min. 20 Trades, automatischer Rollback. Harte Limits unveränderbar. */
+  /* Parameter-Versionen überwachen: Kennzahlen je Version, automatischer Rollback schlechterer Kandidaten (nur SIMULATION).
+     Neue Parameter entstehen seit 2.7.0 ausschließlich über die Lern-KI (Train/Validation/Test, Walk-Forward, Shadow, Rollback) –
+     die frühere naive Suche über alle Trades (ohne Out-of-Sample-Nachweis) ist entfernt. Harte Limits unveränderbar. */
+  let tuneHintAt = -Infinity;
   function maybeTune() {
     const s = S(); if (!s.ffAutoTuning || state.mode !== 'SIMULATION') return;
     const cur = state.paramVersions.find(p => p.version === state.activeParam); if (!cur) return;
@@ -4207,21 +4305,7 @@ function createCore(opts) {
       cur.status = 'STABLE';
     }
     cur.perf = perf;
-    if (s.learnEnabled) return; // Parameter-Suche übernimmt die Lern-KI (zeitlich getrennt validiert, Shadow, Rollback)
-    const all = state.journal.filter(j => j.status === 'CLOSED' && j.mode === 'SIMULATION' && isNum(j.score) && j.result);
-    const [lo, hi] = TUNING_BOUNDS.minScore; let best = { s: s.minScore, e: perf.expectancy };
-    for (let c = Math.max(lo, s.minScore - 5); c <= Math.min(hi, s.minScore + 5); c += 5) {
-      if (c === s.minScore) continue;
-      const sub = all.filter(j => j.score >= c); if (sub.length < 10) continue;
-      const e = avg(sub.map(j => j.result.pnlUsd));
-      if (isNum(best.e) ? e > best.e + Math.abs(best.e) * 0.1 : e > 0) best = { s: c, e };
-    }
-    if (best.s !== s.minScore) {
-      const params = { ...pickTunable(), minScore: best.s };
-      applyTunable(params, 'AUTO_TUNING');
-      newParamVersion(params, 'CANDIDATE', `Auto-Tuning: minScore ${s.minScore} → ${best.s} (${all.length} Trades, keine Garantie)`);
-      log.info('RISK', `Auto-Tuning: neue Parameter-Version (minScore ${s.minScore} → ${best.s})`);
-    }
+    if (!s.learnEnabled && env.now() - tuneHintAt > DAY) { tuneHintAt = env.now(); log.info('LEARNING', 'Auto-Tuning schlägt keine Parameter vor, solange die Lern-KI aus ist – Optimierung nur mit Out-of-Sample-Nachweis über die Lern-KI'); }
   }
   function rollbackTo(version) {
     const pv = state.paramVersions.find(p => p.version === version); if (!pv) return { ok: false, error: 'Version nicht gefunden' };
@@ -4488,6 +4572,36 @@ function createCore(opts) {
     touch('learning'); learnDue = true;
   }
 
+  /* Near-Misses: nach jeder Analyse neue Kandidaten erfassen, laufende 15 min fortschreiben (nur Messung, kein Handelseinfluss). */
+  function nearMissTick(now) {
+    const s = S(); if (!s.learnEnabled) return;
+    const N = state.learn.nearMiss; let changed = false;
+    for (const m of [...N.open]) {
+      const t = state.markets.get(m.tokenId), sn = t && t.snap;
+      if (sn && isNum(sn.priceUsd) && sn.priceUsd > 0 && sn.fetchedAt >= m.ts && sn.fetchedAt > m.lastAt && now - sn.fetchedAt <= s.staleAfterSec * SEC) {
+        const tRel = sn.fetchedAt - m.ts, pct = lr2((sn.priceUsd / m.price - 1) * 100);
+        m.lastAt = sn.fetchedAt; m.n++;
+        m.maxPct = isNum(m.maxPct) ? Math.max(m.maxPct, pct) : pct; m.minPct = isNum(m.minPct) ? Math.min(m.minPct, pct) : pct; m.endPct = pct;
+        if (!m.hit && pct >= s.tp1Pct) { m.hit = 'TP'; m.hitT = Math.round(tRel / 1000); } else if (!m.hit && pct <= -s.stopLossPct) { m.hit = 'STOP'; m.hitT = Math.round(tRel / 1000); }
+        if (tRel - m.lastT >= 15 * SEC || m.hit && m.hitT === Math.round(tRel / 1000)) { m.samples.push([Math.round(tRel / 1000), pct]); m.lastT = tRel; if (m.samples.length > 60) m.samples = m.samples.filter((_, i, a) => i % 2 === 0 || i === a.length - 1); }
+      }
+      if (now >= m.ts + NEAR_MISS_WINDOW) {
+        N.open = N.open.filter(x => x !== m);
+        const r = nearMissOutcome(m, s), { samples, lastT, lastAt, ...keep } = m; // Preispfad nicht dauerhaft speichern (Speicher)
+        N.done.unshift({ ...keep, ...r, closedAt: now }); changed = true;
+        if (N.done.length > LEARN_CAPS.nearMiss) N.done.length = LEARN_CAPS.nearMiss;
+      }
+    }
+    for (const t of state.markets.values()) {
+      const nm = t.A && t.D ? nearMissOf(t.A, t.D, s) : null; if (!nm) continue;
+      if (N.open.some(m => m.tokenId === t.id) || N.done.some(m => m.tokenId === t.id && now - m.ts < 2 * NEAR_MISS_WINDOW) || openPos(t.id)) continue;
+      if (N.open.length >= LEARN_CAPS.nearMissOpen) { N.skipped++; continue; }
+      N.open.push({ id: 'NM-' + hashStr(t.id + ':' + now).toString(36).toUpperCase(), tokenId: t.id, symbol: t.symbol, ts: now, price: t.A.core.price, mc: t.A.core.mc, score: t.A.finalScore, code: nm.code, kind: nm.kind, gap: nm.gap, msg: str(nm.msg, 160), regime: [...arr(state.regime.tags)], samples: [[0, 0]], n: 1, lastT: 0, lastAt: t.snap ? t.snap.fetchedAt : now, maxPct: 0, minPct: 0, endPct: 0, hit: null, hitT: null });
+      changed = true;
+    }
+    if (changed) touch('learning'); // Zwischenstände laufender Beobachtungen werden mit dem nächsten Speichern mitgenommen
+  }
+
   /* ---- Periodischer Lernlauf ---- */
   function learnBase(recs) { const pct = recs.map(r => r.outcome.pnlPct).filter(isNum); return { n: recs.length, expPct: pct.length ? avg(pct) : 0, winRate: recs.length ? recs.filter(r => r.outcome.win).length / recs.length : null, totalLoss: -sum(recs.filter(r => !r.outcome.win && isNum(r.outcome.pnlUsd)).map(r => r.outcome.pnlUsd)) }; }
   function familyStats(recs) {
@@ -4745,7 +4859,24 @@ function createCore(opts) {
   }
   function learnView() {
     if (learnCache.at < 0 && state.learn.records.length) { const base = learnBase(state.learn.records); Object.assign(learnCache, { at: env.now(), stats: patternStatsAll(base), base, fam: familyStats(state.learn.records) }); }
-    return { stats: learnCache.stats, base: learnCache.base, fam: learnCache.fam || familyStats(state.learn.records), champion: champion(), challenger: challenger(), rulesText: rulesText(state.models.rules), params: curParams() };
+    return { stats: learnCache.stats, base: learnCache.base, fam: learnCache.fam || familyStats(state.learn.records), champion: champion(), challenger: challenger(), rulesText: rulesText(state.models.rules), params: curParams(), errors: errorClassStats(state.learn.records), nearMiss: nearMissStats(state.learn.nearMiss.done), nearMissOpen: state.learn.nearMiss.open.length, nearMissSkipped: state.learn.nearMiss.skipped };
+  }
+  /* Aktive Parameter mit Herkunft: letzter Eintrag im Änderungsprotokoll bzw. aktives gelerntes Modell. Unbekanntes bleibt als solches markiert. */
+  function activeParams() {
+    const s = S(), champ = champion();
+    return PARAM_TABLE_KEYS.filter(k => k in s).map(k => {
+      const def = SETTINGS_SCHEMA.find(x => x.k === k) || {};
+      let last = null;
+      for (const c of state.configLog) { const ch = arr(c.changes).find(x => x.key === k); if (ch) { last = { ts: c.ts, who: c.who, from: ch.from, to: ch.to }; break; } }
+      const learned = !!(champ && champ.applied && champ.applied[k] && champ.applied[k].to === s[k] && (!last || last.who === 'LEARNING'));
+      let source, reason, since = null;
+      if (learned) { source = 'LEARNED'; since = champ.promotedAt || (last && last.ts); reason = `${champ.id}: ${champ.note || ''}${champ.experimentId ? ' · Experiment ' + champ.experimentId : ''} · ${champ.applied[k].from} → ${champ.applied[k].to}`; }
+      else if (last && last.to === s[k]) { source = PARAM_SOURCE[last.who] || last.who; since = last.ts; reason = `${last.from} → ${last.to}`; }
+      else if (s[k] === def.def) { source = 'DEFAULT'; reason = 'unverändert'; }
+      else { source = 'UNTRACKED'; reason = last ? `letzter protokollierter Wert ${last.to}` : 'kein Eintrag im Änderungsprotokoll (max. 200)'; }
+      const lb = LEARN_BOUNDS[k];
+      return { key: k, label: def.l || k, unit: def.u || '', value: s[k], def: def.def, source, reason, since, learnable: LEARN_SETTING_KEYS.includes(k), bounds: lb ? `${lb[0]}–${lb[1]} (lernbar, nur verschärfend)` : LEARN_SETTING_KEYS.includes(k) ? 'lernbar, nur einschaltbar' : isNum(def.min) ? `${def.min}–${def.max}${def.hard ? ' (harte Grenze)' : ''}` : '—' };
+    });
   }
 
   /* ---------- Portfolio-Integrität: eine Quelle der Wahrheit, Invarianten sichtbar prüfen ---------- */
@@ -4909,6 +5040,10 @@ function createCore(opts) {
     if (!state.models.versions[0].ts) state.models = freshModels(learnParamsNow(), env.now());
     state.learn.corrupted = arr(loaded.corrupted).filter(c => LEARN_STORAGE_KEYS.includes(c));
     try { learnBackfill(); } catch (e) { log.error('LEARNING', 'Migration der Lerndaten fehlgeschlagen: ' + e.message); }
+    // Ab 2.7.0: Fehlerklasse & „erwartbarer Verlust?“ für bereits ausgewertete Verluste ergänzen (Ursache bleibt unverändert)
+    let ecAdded = 0;
+    for (const r of state.learn.records) if (r.labels && !r.outcome.win && !('errorClass' in r.labels)) { withErrorClass(r.labels, r, S()); ecAdded++; }
+    if (ecAdded) { touch('learning'); log.info('LEARNING', `Migration: Fehlerklasse für ${ecAdded} ausgewertete Verluste ergänzt (ohne geplanten Stop → aktueller Stop-Loss als Näherung)`); }
     if (rn && isNum(rn.at)) { audit('USER', 'RESTORE', `Sicherung vom ${str(String(rn.from), 30)} (v${str(String(rn.app), 12)}) wiederhergestellt`); log.info('STORAGE', `Sicherung vom ${str(String(rn.from), 30)} wiederhergestellt`); }
     for (const p of state.positions) ensureToken(p.mint, 'Position');
     for (const id of Object.keys(state.watchlist)) ensureToken(mintOfId(id), 'Watchlist');
@@ -4930,8 +5065,8 @@ function createCore(opts) {
     }
     if (kind === 'backup-json') return { name: `smartlab-backup-${ts}.json`, mime: 'application/json', data: JSON.stringify(exportBackup()) };
     if (kind === 'learning-report-csv') {
-      const cols = ['tradeId', 'symbol', 'strategy', 'openedAt', 'closedAt', 'pnlUsd', 'pnlPct', 'win', 'lossFamily', 'secondary', 'evidence', 'avoidable', 'dataCompleteness', 'dataQuality', 'signalQuality', 'exitQuality', 'executionQuality', 'regimeFit', 'score', 'regime', 'mae2m', 'mfe2m', 'maxRunupPct', 'followUpMaxPct', 'exitReason', 'legacy'];
-      const rows = state.learn.records.map(r => { const l = r.labels || {}; return [r.tradeId, r.symbol, r.strategy || 'manuell', isoTime(r.openedAt), isoTime(r.closedAt), r.outcome.pnlUsd, r.outcome.pnlPct, r.outcome.win, l.lossFamily || '', arr(l.secondary).join('|'), l.lossFamily ? (l.evidence || {})[l.lossFamily] : '', l.avoidable, l.dataCompleteness, l.dataQuality, l.signalQuality, l.exitQuality, l.executionQuality, l.regimeFit, r.entry ? r.entry.finalScore : '', arr(r.regimeTags).join('|'), r.path.mae2m, r.path.mfe2m, r.path.maxRunupPct, r.followUp ? r.followUp.maxAfterPct : '', r.exit.reason, !!r.legacy]; });
+      const cols = ['tradeId', 'symbol', 'strategy', 'openedAt', 'closedAt', 'pnlUsd', 'pnlPct', 'win', 'lossFamily', 'secondary', 'evidence', 'avoidable', 'dataCompleteness', 'dataQuality', 'signalQuality', 'exitQuality', 'executionQuality', 'regimeFit', 'score', 'regime', 'mae2m', 'mfe2m', 'maxRunupPct', 'followUpMaxPct', 'exitReason', 'legacy', 'errorClass', 'lossVerdict', 'plannedStopPct'];
+      const rows = state.learn.records.map(r => { const l = r.labels || {}; return [r.tradeId, r.symbol, r.strategy || 'manuell', isoTime(r.openedAt), isoTime(r.closedAt), r.outcome.pnlUsd, r.outcome.pnlPct, r.outcome.win, l.lossFamily || '', arr(l.secondary).join('|'), l.lossFamily ? (l.evidence || {})[l.lossFamily] : '', l.avoidable, l.dataCompleteness, l.dataQuality, l.signalQuality, l.exitQuality, l.executionQuality, l.regimeFit, r.entry ? r.entry.finalScore : '', arr(r.regimeTags).join('|'), r.path.mae2m, r.path.mfe2m, r.path.maxRunupPct, r.followUp ? r.followUp.maxAfterPct : '', r.exit.reason, !!r.legacy, l.errorClass || '', l.lossVerdict || '', l.expectedLoss && isNum(l.expectedLoss.plannedPct) ? l.expectedLoss.plannedPct : '']; });
       return { name: `smartlab-learning-report-${ts}.csv`, mime: 'text/csv', data: [cols, ...rows].map(r => r.map(csvCell).join(',')).join('\n') };
     }
     const payloads = {
@@ -5060,9 +5195,9 @@ function createCore(opts) {
     executeBuy, executeSell, execCheck: (t, o) => execCheck(t, t.A, o), globalBlockers, buildCtx, estFees, estImpact, equityInfo, portfolioRisk, positionCorrelations,
     systemHealth, diagnostics, botHealth, readiness, drawdownPct, portfolioIntegrity, execProvider: m => execProvider(m).id, candidateChain, liveReadiness, preLiveChecks, ackReconciliation, requestSignature, rpcEndpoints, fetchOhlcv, fetchCandlesForBacktest, walletConnect, walletDisconnect, walletBalance, walletNetwork,
     updateSettings, updateStrategies, rollbackTo, addWatch, removeWatch, updateWatch, select, exportData, importSettings, resetSettings, resetPortfolio, freshStart,
-    learnView, learnDecision, learnPromote, learnReject, learnRollback, exportBackup, validateBackup, restoreBackup, recordBacktest, learnRunNow: () => { const r = learnRun(true); persistNow(); return r; },
+    learnView, learnDecision, learnPromote, learnReject, learnRollback, activeParams, exportBackup, validateBackup, restoreBackup, recordBacktest, learnRunNow: () => { const r = learnRun(true); persistNow(); return r; },
     newSession, factoryReset, persistNow, enqueueSecurity, clearFeed: () => { state.feed = []; persist(); },
-    _t: { posTransition, runProviderSteps, liveProvider, simProvider, scanOnce, updateSolPrice, applySnapshot, applyAlt, fetchChunk, reconcile, analyzeAll, startScanner, stopScanner, timers, managePositions, closePosition, processQueue, enqueue, checkSecurity, ensureToken, maybeAutoTrade, setBotState, learnRun, learnOnClose, learnFollowUps, finishFollowUp, createChallenger, shadowEval, liveEval, addRecord }
+    _t: { posTransition, runProviderSteps, liveProvider, simProvider, scanOnce, updateSolPrice, applySnapshot, applyAlt, fetchChunk, reconcile, analyzeAll, startScanner, stopScanner, timers, managePositions, closePosition, processQueue, enqueue, checkSecurity, ensureToken, maybeAutoTrade, setBotState, learnRun, learnOnClose, learnFollowUps, finishFollowUp, createChallenger, shadowEval, liveEval, addRecord, nearMissTick, maybeTune, updateSettings }
   };
 }
 
@@ -5900,6 +6035,92 @@ const SELF_TESTS = [
     assert(Math.abs(sum(vol.map(([, x]) => x.net)) - sum(r.trades.map(t => t.pnl))) < 1e-6, 'Regime-Summe ≠ Gesamt');
     return `MC-DD Median ${a.p50.toFixed(1)} % / 95 % ${a.p95.toFixed(1)} % · ${vol.length} Volatilitäts- und ${tr.length} Trend-Regime`;
   }],
+  ['Adaptive KI', 'Fehlerklassen: normaler Verlust ≠ Fehler · „erwartbar?“ gegen den geplanten Stop', async () => {
+    const S = defaultSettings(), lab = (i, o, fx) => { const r = mkLearnRec(i, o); r.plan = { stopPct: 15 }; if (fx) fx(r); r.labels = labelTrade(r, { S }); return r; };
+    const n = lab(1, { pnlPct: -3 });
+    assert(n.labels.lossFamily === 'NOISE_OR_RANDOM' && n.labels.errorClass === 'STATISTICAL' && n.labels.lossVerdict === 'EXPECTED', 'normaler Verlust nicht als erwartbar eingestuft: ' + [n.labels.errorClass, n.labels.lossVerdict]);
+    const gap = lab(2, { pnlPct: -40 });
+    assert(gap.labels.errorClass === 'EXECUTION' && gap.labels.lossVerdict === 'OVER_PLAN' && /Kurslücke/.test(gap.labels.errorWhy), 'Verlust über Plan nicht als Execution-Fehler erkannt: ' + [gap.labels.errorClass, gap.labels.lossVerdict]);
+    const cases = [
+      ['EXECUTION', lab(3, { pnlPct: -12 }, r => { r.exit.reason = 'LIQUIDITY_COLLAPSE'; r.path.minLiqPct = -60; })],
+      ['DATA', lab(4, { pnlPct: -10 }, r => { r.entry.conflicts = 2; r.entry.fallback = true; })],
+      ['SECURITY', lab(5, { pnlPct: -10 }, r => { r.entry.secStatus = 'CRITICAL'; })],
+      ['MODEL', lab(6, { pnlPct: -10 }, r => { r.entry.sigMax = 85; r.path.mae2m = -8; r.path.mfe2m = 0; })],
+      ['PROCESS', lab(7, { pnlPct: -5 }, r => { r.entry.blockerCount = 2; })]
+    ];
+    for (const [want, r] of cases) assert(r.labels.errorClass === want, `${want} erwartet, war ${r.labels.errorClass} (${r.labels.lossFamily})`);
+    assert(cases.every(([, r]) => r.labels.lossVerdict !== 'EXPECTED'), 'Verlust mit belegter Ursache als erwartbar eingestuft');
+    const noPlan = mkLearnRec(8, { pnlPct: -3 }); noPlan.labels = labelTrade(noPlan, { S });
+    assert(noPlan.labels.expectedLoss.source === 'SETTINGS' && noPlan.labels.expectedLoss.plannedPct === S.stopLossPct, 'ohne geplanten Stop keine gekennzeichnete Näherung');
+    const empty = { entry: null, execution: {}, path: {}, exit: {}, outcome: { pnlUsd: -1, pnlPct: -2, win: false } };
+    assert(labelTrade(empty, { S }).errorClass === 'UNKNOWN' && labelTrade(mkLearnRec(9, { pnlPct: 8 }), { S }).errorClass === null, 'UNKNOWN/Gewinn falsch klassifiziert');
+    const st = errorClassStats([n, gap, ...cases.map(c => c[1])]);
+    assert(st.n === 7 && st.classes.STATISTICAL === 1 && st.classes.EXECUTION === 2 && st.verdicts.EXPECTED === 1 && st.verdicts.OVER_PLAN === 1, 'Statistik falsch: ' + JSON.stringify(st));
+    // Migration: ältere Verluste ohne Fehlerklasse bekommen sie beim Laden – die Ursache bleibt unverändert
+    const H = makeTestHarness(); const core = await testCore(H), old = lab(10, { pnlPct: -3 });
+    for (const k of ['errorClass', 'errorWhy', 'lossVerdict', 'expectedLoss']) delete old.labels[k];
+    core._t.addRecord(old); core.persistNow();
+    const core2 = createCore({ env: H.env, backend: H.backend }); core2.init({ autoStart: false });
+    const re = core2.state.learn.records.find(r => r.tradeId === old.tradeId);
+    assert(re && re.labels.errorClass === 'STATISTICAL' && re.labels.lossFamily === 'NOISE_OR_RANDOM', 'Migration der Fehlerklasse fehlt');
+    return 'Zufall → erwartbar · Kurslücke → Execution · Daten/Security/Modell/Prozess getrennt · Migration ok';
+  }],
+  ['Adaptive KI', 'Near-Misses: 15 min Nachlauf → verpasster Gewinn vs. vermiedener Verlust, reine Messung', async () => {
+    const H = makeTestHarness(); const core = await testCore(H, { minScore: 65, tp1Pct: 30, stopLossPct: 15 }), S0 = core.S();
+    const A0 = { core: { price: 1, mc: 1 }, finalScore: 60, confidence: { total: 80 }, risk: { total: 30, level: 'LOW' } };
+    const mkD = (codes, dec = 'WATCH', exec = [], o = {}) => ({ decision: dec, fastPass: true, secOk: true, analysisBlockers: codes.map(c => ({ code: c, msg: c })), execBlockers: exec.map(c => ({ code: c, msg: c })), ...o });
+    const one = nearMissOf(A0, mkD(['SCORE_TOO_LOW']), S0);
+    assert(one && one.gap === 5 && one.kind === 'ANALYSIS', 'Score knapp unter Minimum nicht erfasst');
+    assert(!nearMissOf({ ...A0, finalScore: 40 }, mkD(['SCORE_TOO_LOW']), S0), 'weit unter Minimum als Near-Miss erfasst');
+    assert(!nearMissOf(A0, mkD(['SECURITY_CRITICAL'], 'REJECTED'), S0) && !nearMissOf(A0, mkD(['SCORE_TOO_LOW'], 'WATCH', [], { secOk: false }), S0), 'Security-Problem als Near-Miss erfasst');
+    assert(!nearMissOf(A0, mkD(['SCORE_TOO_LOW', 'NO_CONSENSUS']), S0) && !nearMissOf(A0, mkD([], 'APPROVED'), S0), 'mehrere Blocker/APPROVED als Near-Miss erfasst');
+    assert(nearMissOf(A0, mkD([], 'BUY_CANDIDATE', ['LOSS_COOLDOWN']), S0).kind === 'RISK' && !nearMissOf(A0, mkD([], 'BUY_CANDIDATE', ['AUTO_TRADING_OFF', 'LOSS_COOLDOWN']), S0), 'Risiko-/Systemblocker falsch behandelt');
+    const up = await prepToken(core, H, 1), dn = await prepToken(core, H, 2), gone = await prepToken(core, H, 3);
+    for (const t of [up, dn, gone]) { t.A = { ...A0, core: { price: t.snap.priceUsd, mc: 1.5e6 }, finalScore: 62 }; t.D = mkD(['SCORE_TOO_LOW']); }
+    const N = core.state.learn.nearMiss;
+    core._t.nearMissTick(H.env.now()); core._t.nearMissTick(H.env.now());
+    assert(N.open.length === 3, 'Near-Misses nicht (einmalig) erfasst: ' + N.open.length);
+    delete H.market[gone.mint];
+    const step = async (pUp, pDn) => { H.env.advance(MIN); H.market[up.mint] = H.pair(up.mint, { price: pUp }); H.market[dn.mint] = H.pair(dn.mint, { price: pDn }); await core._t.fetchChunk([up.mint, dn.mint, gone.mint], true); core._t.nearMissTick(H.env.now()); };
+    await step(0.0011, 0.00095); await step(0.00135, 0.0008);
+    for (let i = 0; i < 14; i++) await step(0.0013, 0.0007);
+    const by = t => N.done.find(m => m.tokenId === t.id), u = by(up), d = by(dn), g = by(gone);
+    assert(!N.open.length && u && d && g, 'Beobachtung nicht nach 15 min abgeschlossen');
+    assert(u.outcome === 'MISSED_GAIN' && u.maxPct >= 30 && u.simPct > 0, 'verpasster Gewinn nicht erkannt: ' + JSON.stringify([u.outcome, u.maxPct, u.simPct]));
+    assert(d.outcome === 'AVOIDED_LOSS' && d.minPct <= -15 && d.simPct < 0, 'vermiedener Verlust nicht erkannt: ' + JSON.stringify([d.outcome, d.minPct, d.simPct]));
+    assert(g.outcome === 'NO_DATA' && g.simPct == null, 'fehlende Kursdaten nicht als NO_DATA markiert (keine erfundenen Werte)');
+    assert(!('samples' in u) && !('samples' in d), 'Preispfad dauerhaft gespeichert');
+    const st = nearMissStats(N.done);
+    assert(st.n === 2 && st.missed === 1 && st.avoided === 1 && st.noData === 1 && st.rows[0].verdict === 'NOT_ENOUGH_DATA', 'Statistik falsch: ' + JSON.stringify(st));
+    assert(core.S().minScore === 65 && !core.state.configLog.some(c => !['TEST', 'MIGRATION'].includes(c.who)), 'Near-Miss-Messung hat Einstellungen verändert');
+    core.persistNow(); const core2 = createCore({ env: H.env, backend: H.backend }); core2.init({ autoStart: false });
+    assert(core2.state.learn.nearMiss.done.length === 3, 'Near-Misses nach Neustart verloren');
+    return `verpasst ${fmtPct(u.simPct)} · vermieden ${fmtPct(d.simPct)} · 1× NO_DATA · Filter unverändert · übersteht Neustart`;
+  }],
+  ['Adaptive KI', 'Aktive Parameter: Wert, Herkunft & Grund nachvollziehbar (Standard, manuell, gelernt, unprotokolliert)', async () => {
+    const H = makeTestHarness(); const core = await testCore(H), row = k => core.activeParams().find(p => p.key === k);
+    assert(row('maxOpenPositions').source === 'DEFAULT' && /harte Grenze/.test(row('lossCooldownMin').bounds) && /lernbar/.test(row('minScore').bounds), 'Standard/Grenzen falsch');
+    core.updateSettings({ minConfidence: 70 }, 'USER');
+    const r1 = row('minConfidence'); assert(r1.source === 'USER' && r1.value === 70 && isNum(r1.since) && r1.reason.includes('→ 70'), 'manuelle Änderung nicht nachvollziehbar: ' + JSON.stringify(r1));
+    const M = core.state.models, from = core.S().minScore;
+    M.versions.push({ id: 'M-2', ts: H.env.now(), status: 'LIVE', params: {}, rules: emptyRules(), basedOn: 'M-1', change: { minScore: 75 }, applied: { minScore: { from, to: 75 } }, experimentId: 'E-TEST', hypothesisId: null, note: 'Testmodell', promotedAt: H.env.now() });
+    core.updateSettings({ minScore: 75 }, 'LEARNING', { noVersion: true }); M.champion = 'M-2';
+    const r2 = row('minScore'); assert(r2.source === 'LEARNED' && r2.reason.includes('E-TEST') && r2.reason.includes(from + ' → 75'), 'gelernte Änderung ohne Herkunft: ' + JSON.stringify(r2));
+    core.updateSettings({ minScore: 80 }, 'USER'); assert(row('minScore').source === 'USER', 'manuelle Änderung nach dem Lernen nicht erkannt');
+    core.state.configLog.length = 0;
+    assert(row('minScore').source === 'UNTRACKED' && row('minConfidence').source === 'UNTRACKED', 'unprotokollierte Werte als bekannt ausgegeben');
+    return 'Standard · manuell · gelernt (Experiment) · manuell überschrieben · unprotokolliert ehrlich markiert';
+  }],
+  ['Adaptive KI', 'Auto-Tuning ohne Lern-KI ändert keine Parameter (keine Suche ohne Out-of-Sample-Nachweis)', async () => {
+    const H = makeTestHarness(); const core = await testCore(H, { ffAutoTuning: true, learnEnabled: false, minScore: 60 }), st = core.state, v = st.activeParam, now = H.env.now();
+    // Scheinbarer Effekt: höhere Scores gewinnen – die alte Suche hätte minScore auf 65 gesetzt (In-Sample)
+    for (let i = 0; i < 30; i++) st.journal.unshift({ id: 'J' + i, symbol: 'T' + i, status: 'CLOSED', mode: 'SIMULATION', paramVersion: v, score: i % 2 ? 66 : 61, signals: [], result: { pnlUsd: i % 2 ? 5 : -5, pnlPct: i % 2 ? 10 : -10, win: !!(i % 2) }, sizeUsd: 50, feesUsd: 0.1, slippageUsd: 0, holdMs: MIN, openedAt: now - (31 - i) * MIN, closedAt: now - (30 - i) * MIN });
+    const before = st.paramVersions.length;
+    core._t.maybeTune();
+    assert(core.S().minScore === 60 && st.paramVersions.length === before && !st.configLog.some(c => c.who === 'AUTO_TUNING'), 'naive Parameter-Suche noch aktiv');
+    assert(st.paramVersions.find(p => p.version === v).perf, 'Version wird nicht mehr bewertet');
+    return 'minScore bleibt 60 trotz scheinbarem In-Sample-Vorteil · Version bewertet';
+  }],
   ['System', 'Backtest ohne Look-Ahead', async () => {
     const c = []; let p = 1;
     for (let i = 0; i < 300; i++) { const o = p; p = p * (1 + Math.sin(i / 7) * 0.02 + (i % 50 === 25 ? 0.12 : 0)); c.push({ t: i * MIN, o, h: Math.max(o, p) * 1.01, l: Math.min(o, p) * 0.99, c: p, v: 1000 + (i % 50 === 25 ? 9000 : 0) }); }
@@ -6621,9 +6842,9 @@ function renderAnalytics(sec) {
     </tbody></table><p class="note">Transparente Gegenüberstellung – kein „Gewinner“-Ranking bei zu kleiner Stichprobe.</p></div>
     <div class="grid2"><div class="panel"><h3 style="margin-top:0">Signal-Qualität (in Trades)</h3>${Object.keys(sigPerf).length ? html`<table class="tbl"><tr><th>Signal</th><th class="r">Trades</th><th class="r">Win Rate</th><th class="r">Σ PnL</th></tr>${Object.entries(sigPerf).sort((a, b) => b[1].n - a[1].n).map(([k, x]) => html`<tr><td>${SIGNAL_NAMES[k] || k}</td><td class="r num">${x.n}</td><td class="r num">${(x.w / x.n * 100).toFixed(0)}%</td><td class="r num ${cls(x.pnl)}">${fmtSigned(x.pnl)}</td></tr>`)}</table>` : html`<div class="empty">Noch keine abgeschlossenen Trades.</div>`}</div>
     <div class="panel"><h3 style="margin-top:0">False Signals (starke Signale, sofortige Gegenbewegung)</h3>${st.falseSignals.length ? html`<table class="tbl">${st.falseSignals.slice(0, 12).map(f => html`<tr><td class="num">${fmtTime(f.ts)}</td><td>${f.symbol}</td><td>${f.signals.join(', ')}</td><td class="r num dn">${fmtPct(f.mae2m)}</td></tr>`)}</table>` : html`<div class="empty">Keine erfasst.</div>`}</div></div>
-    <div class="panel tw"><h3 style="margin-top:0">Parameter-Versionen (Self-Optimization ${core.S().ffAutoTuning ? 'AN' : 'AUS'})</h3><table class="tbl"><tr><th>Version</th><th>Zeit</th><th>Status</th><th>Parameter</th><th class="r">Trades</th><th class="r">Expectancy</th><th>Notiz</th><th></th></tr>
+    <div class="panel tw"><h3 style="margin-top:0">Parameter-Versionen (Überwachung ${core.S().ffAutoTuning ? 'AN' : 'AUS'})</h3><table class="tbl"><tr><th>Version</th><th>Zeit</th><th>Status</th><th>Parameter</th><th class="r">Trades</th><th class="r">Expectancy</th><th>Notiz</th><th></th></tr>
       ${[...st.paramVersions].reverse().map(p => html`<tr><td>v${p.version}${p.version === st.activeParam ? ' (aktiv)' : ''}</td><td class="num">${fmtDateTime(p.ts)}</td><td><span class="chip ${p.status === 'STABLE' ? 'ok' : p.status === 'ROLLED_BACK' ? 'bad' : 'info'}">${p.status}</span></td><td class="mut">${Object.entries(p.params).map(([k, v]) => k + '=' + v).join(', ')}</td><td class="r num">${p.tradeCount || 0}</td><td class="r num">${p.perf ? fmtUsd(p.perf.expectancy) : '—'}</td><td class="mut">${p.note || ''}</td><td>${p.version !== st.activeParam ? html`<button class="btn sm" data-act="rollback" data-v="${p.version}">Aktivieren</button>` : ''}</td></tr>`)}</table>
-      <p class="note">Optimierung erst ab ${Math.max(core.S().minTradesForTuning, HARD_LIMITS.MIN_TRADES_FOR_TUNING)} abgeschlossenen Trades, nur in SIMULATION, nur innerhalb fester Grenzen (${Object.entries(TUNING_BOUNDS).map(([k, v]) => k + ' ' + v[0] + '–' + v[1]).join(', ')}). Buy-Limit, Exposure, Kill Switch, Security- und Stale-Data-Blocks sind unveränderbar. Schlechtere Versionen werden automatisch zurückgerollt.</p></div>
+      <p class="note">Neue Parameter entstehen nur über die Lern-KI (Train → Validation → Test, Walk-Forward, Shadow-Phase, nur verschärfend) – nie aus einer Suche über dieselben Trades, an denen sie gemessen werden. Bewertung einer Version erst ab ${Math.max(core.S().minTradesForTuning, HARD_LIMITS.MIN_TRADES_FOR_TUNING)} abgeschlossenen Trades, nur in SIMULATION, nur innerhalb fester Grenzen (${Object.entries(TUNING_BOUNDS).map(([k, v]) => k + ' ' + v[0] + '–' + v[1]).join(', ')}). Buy-Limit, Exposure, Kill Switch, Security- und Stale-Data-Blocks sind unveränderbar. Schlechtere Versionen werden automatisch zurückgerollt.</p></div>
     <div class="panel"><h3 style="margin-top:0">Trading Session</h3><div class="grid4">${kv('Session', st.session ? st.session.id : '—')}${kv('Start', st.session ? fmtDateTime(st.session.startedAt) : '—')}${kv('Trades', st.session ? st.session.trades : 0)}${kv('Wins / Losses', st.session ? st.session.wins + ' / ' + st.session.losses : '—')}${kv('Session PnL', st.session ? fmtSigned(st.session.pnl) : '—', 'SIMULATED')}${kv('Heute PnL', fmtSigned(st.risk.dailyPnl))}${kv('Käufe heute', st.risk.dailyTrades)}${kv('Tag', st.risk.dayKey)}</div>
       <div class="row" style="margin-top:10px"><button class="btn" data-act="newSession">↻ Neue Session</button><button class="btn sm" data-act="export" data-kind="analytics-json">⬇ Analytics JSON</button><button class="btn sm" data-act="export" data-kind="journal-csv">⬇ Journal CSV</button></div>
       ${st.sessions.length ? html`<table class="tbl" style="margin-top:10px"><tr><th>Session</th><th>Start</th><th>Ende</th><th class="r">Trades</th><th class="r">PnL</th></tr>${st.sessions.slice(0, 8).map(s => html`<tr><td>${s.id}</td><td class="num">${fmtDateTime(s.startedAt)}</td><td class="num">${fmtDateTime(s.endedAt)}</td><td class="r num">${s.trades}</td><td class="r num">${fmtSigned(s.pnl)}</td></tr>`)}</table>` : ''}</div>`);
@@ -6664,6 +6885,8 @@ function renderLearning(sec) {
   const cell = (s, r) => stats.find(x => x.key === `strategy=${s}&regime=${r}`);
   const lessons = L.lessons.filter(l => l.status !== 'EXPIRED');
   const recent = [...recs].reverse().slice(0, 15);
+  const ec = lv.errors, nm = lv.nearMiss, ap = core.activeParams();
+  const NMV = { FILTER_COSTLY: ['warn', 'kostet eher Chancen'], FILTER_HELPS: ['ok', 'schützt eher'], NOT_ENOUGH_DATA: ['', 'zu wenig Daten'] };
   const openD = new Set([...sec.querySelectorAll('details[data-k][open]')].map(d => d.dataset.k));
   const changed = patch(sec, html`<h2>🧠 Learning KI <span class="lbl SIMULATED">SIMULATED</span></h2>
     <p class="note">Lernt aus jedem abgeschlossenen (simulierten) Trade – vor allem aus Verlusten: Was war beim Einstieg messbar, wie verlief der Coin-Preis danach, welche Ursache ist belegt? Regeln entstehen nur aus zeitlich getrennt validierten Experimenten (Train → Validation → Test, Walk-Forward), laufen danach im Shadow-Modus (keine Orders) und werden nur in SIMULATION übernommen – ausschließlich verschärfend und mit automatischem Rollback. HARD_LIMITS, Security-Blocker, Emergency Stop und LIVE-Gating werden nie verändert. Keine Gewinn-Garantie.</p>
@@ -6687,8 +6910,11 @@ function renderLearning(sec) {
     <div class="panel"><h3 style="margin-top:0">Verlust-Observatorium – warum wurde verloren?</h3>
       ${famRows.length ? html`<div class="grid2 lgrid"><div>${famRows.map(([k, n]) => html`<div class="meter"><span title="${k}">${famDe(k)}</span>${bar(n / fam.losses * 100, k === 'NOISE_OR_RANDOM' || k === 'UNKNOWN' ? 'var(--dim)' : 'var(--red)')}<span class="num r">${n}</span></div>`)}</div>
         <div class="grid2">${kv('Wahrscheinlich vermeidbar', avoid.LIKELY)}${kv('Möglicherweise vermeidbar', avoid.POSSIBLE)}${kv('Normale Streuung', avoid.NO)}${kv('Unklar (zu wenig Daten)', avoid.UNKNOWN)}</div></div>` : html`<div class="empty">Noch keine ausgewerteten Verluste.</div>`}
-      ${recent.length ? html`<div class="tw" style="margin-top:10px"><table class="tbl"><thead><tr><th>Geschlossen</th><th>Token</th><th>Strategie</th><th class="r">PnL</th><th>Ursache</th><th class="r an">Evidenz</th><th>Vermeidbar</th><th class="an">Daten</th><th class="an">Signal</th><th class="an">Exit</th><th class="r an">MAE 2m</th><th class="r an">Nachlauf max</th></tr></thead><tbody>
-        ${recent.map(r => { const l = r.labels || {}; return html`<tr><td class="num">${fmtDateTime(r.closedAt)}</td><td>${r.symbol}${r.legacy ? html` <span class="chip">legacy</span>` : ''}</td><td>${r.strategy || 'manuell'}</td><td class="r num ${cls(r.outcome.pnlPct)}">${fmtPct(r.outcome.pnlPct)}</td><td>${r.outcome.win ? html`<span class="mut">Gewinn</span>` : famDe(l.lossFamily)}</td><td class="r num an">${l.lossFamily ? (l.evidence || {})[l.lossFamily] : '—'}</td><td>${r.outcome.win ? '—' : lchip(l.avoidable || 'UNKNOWN')}</td><td class="an">${l.dataQuality || '—'}</td><td class="an">${l.signalQuality || '—'}</td><td class="an">${l.exitQuality || '—'}</td><td class="r num an">${fmtPct(r.path.mae2m)}</td><td class="r num an">${r.followUp ? fmtPct(r.followUp.maxAfterPct) : L.followUps.some(f => f.tradeId === r.tradeId) ? 'läuft' : '—'}</td></tr>`; })}
+      ${ec.n ? html`<h3>Fehlerklassen – nicht jeder Verlust ist ein Fehler</h3><div class="grid2 lgrid"><div>${ERROR_CLASSES.filter(c => ec.classes[c]).map(c => html`<div class="meter"><span>${ERROR_CLASS_DE[c]}</span>${bar(ec.classes[c] / ec.n * 100, c === 'STATISTICAL' || c === 'UNKNOWN' ? 'var(--dim)' : 'var(--red)')}<span class="num r">${ec.classes[c]}</span></div>`)}</div>
+        <div class="grid2">${kv('Erwartbar (im Plan, Zufall)', ec.verdicts.EXPECTED)}${kv('Im Plan, mit Ursache', ec.verdicts.WITHIN_PLAN_WITH_CAUSE + ec.verdicts.WITHIN_PLAN)}${kv('Größer als geplant', ec.verdicts.OVER_PLAN)}${kv('Ohne geplanten Stop', ec.verdicts.UNKNOWN)}</div></div>
+        <p class="note">„Erwartbar“ = Verlust innerhalb des beim Einstieg geplanten Risikos (Stop + Slippage-Toleranz + Kosten) ohne belegte Ursache: normaler Teil der Strategie, daraus wird nichts „gelernt“. Aus Verlusten mit belegter Ursache entstehen höchstens Hypothesen, die erst getestet werden.</p>` : ''}
+      ${recent.length ? html`<div class="tw" style="margin-top:10px"><table class="tbl"><thead><tr><th>Geschlossen</th><th>Token</th><th>Strategie</th><th class="r">PnL</th><th>Ursache</th><th class="r an">Evidenz</th><th>Vermeidbar</th><th>Fehlerklasse</th><th>Erwartbar?</th><th class="an">Daten</th><th class="an">Signal</th><th class="an">Exit</th><th class="r an">MAE 2m</th><th class="r an">Nachlauf max</th></tr></thead><tbody>
+        ${recent.map(r => { const l = r.labels || {}; return html`<tr><td class="num">${fmtDateTime(r.closedAt)}</td><td>${r.symbol}${r.legacy ? html` <span class="chip">legacy</span>` : ''}</td><td>${r.strategy || 'manuell'}</td><td class="r num ${cls(r.outcome.pnlPct)}">${fmtPct(r.outcome.pnlPct)}</td><td>${r.outcome.win ? html`<span class="mut">Gewinn</span>` : famDe(l.lossFamily)}</td><td class="r num an">${l.lossFamily ? (l.evidence || {})[l.lossFamily] : '—'}</td><td>${r.outcome.win ? '—' : lchip(l.avoidable || 'UNKNOWN')}</td><td title="${l.errorWhy || ''}">${r.outcome.win || !l.errorClass ? '—' : ERROR_CLASS_DE[l.errorClass] || l.errorClass}</td><td title="${l.expectedLoss && isNum(l.expectedLoss.plannedPct) ? `geplant −${l.expectedLoss.plannedPct} % + Toleranz ${l.expectedLoss.tolPct} %${l.expectedLoss.source === 'SETTINGS' ? ' (Stop aus aktuellen Einstellungen, Näherung)' : ''}` : ''}">${r.outcome.win || !l.lossVerdict ? '—' : html`<span class="chip ${l.lossVerdict === 'EXPECTED' ? 'ok' : l.lossVerdict === 'OVER_PLAN' ? 'bad' : l.lossVerdict === 'UNKNOWN' ? '' : 'warn'}">${l.lossVerdict === 'EXPECTED' ? 'ja' : l.lossVerdict === 'OVER_PLAN' ? 'nein – über Plan' : l.lossVerdict === 'UNKNOWN' ? 'unklar' : 'im Plan, Ursache'}</span>`}</td><td class="an">${l.dataQuality || '—'}</td><td class="an">${l.signalQuality || '—'}</td><td class="an">${l.exitQuality || '—'}</td><td class="r num an">${fmtPct(r.path.mae2m)}</td><td class="r num an">${r.followUp ? fmtPct(r.followUp.maxAfterPct) : L.followUps.some(f => f.tradeId === r.tradeId) ? 'läuft' : '—'}</td></tr>`; })}
       </tbody></table></div>
       <div class="an">${recent.filter(r => !r.outcome.win).slice(0, 6).map(r => { const l = r.labels || {}; return html`<details class="panel" style="margin:6px 0" data-k="cf-${r.tradeId}"><summary><b>${r.symbol}</b> ${fmtPct(r.outcome.pnlPct)} · ${famDe(l.lossFamily)}${arr(l.secondary).length ? ' · auch: ' + l.secondary.map(famDe).join(', ') : ''} <span class="mut">(Datenvollständigkeit ${l.dataCompleteness != null ? l.dataCompleteness + ' %' : '—'})</span></summary>
         <ul class="mut">${Object.entries(l.why || {}).map(([k, t]) => html`<li><b>${famDe(k)}</b> (${(l.evidence || {})[k]}): ${t}</li>`)}</ul>
@@ -6697,6 +6923,14 @@ function renderLearning(sec) {
     <div class="panel"><h3 style="margin-top:0">Was die KI gelernt hat (Lektionen)</h3>
       ${lessons.length ? lessons.slice(0, 12).map(l => html`<div class="check"><span class="ic ${l.kind === 'AVOID' ? 'fail' : 'pass'}">${l.kind === 'AVOID' ? 'MEIDEN' : 'GUT'}</span><div><b>${l.text}</b><small>${lchip(l.status)} ${l.stable ? 'stabil, Out-of-Sample bestätigt' : 'Beobachtung – noch keine Regel'} · Evidenz ${l.evidence} · ${l.confirmed}× bestätigt · gültig bis ${fmtDateTime(l.expiresAt)}</small></div></div>`) : html`<div class="empty">Noch keine belastbaren Lektionen – es braucht mindestens 8 Trades in einem Muster mit deutlich abweichendem Ergebnis.</div>`}
       <p class="note">Lektionen sind Wissen, keine Handelsregeln. Sie laufen nach 7 Tagen ohne Bestätigung ab; bei Drift werden sie zur Überprüfung markiert.</p></div>
+    <div class="panel"><h3 style="margin-top:0">Knapp verpasst (Near-Misses) – was kosten oder sparen die Filter?</h3>
+      <div class="grid4">${kv('In Beobachtung', lv.nearMissOpen + (lv.nearMissSkipped ? ` (${lv.nearMissSkipped} übersprungen)` : ''))}${kv('Ausgewertet', nm.n + (nm.noData ? ` (+${nm.noData} ohne Daten)` : ''))}${kv('Verpasste Gewinne (TP1 vor Stop)', nm.missed)}${kv('Vermiedene Verluste (Stop vor TP1)', nm.avoided)}${kv('Σ verpasste Gewinne (sim.)', nm.n ? fmtPct(nm.gainPct) : '—', 'SIMULATED')}${kv('Σ vermiedene Verluste (sim.)', nm.n ? fmtPct(-nm.lossPct) : '—', 'SIMULATED')}${kv('Neutral nach 15 min', nm.neutral)}${kv('Fenster', '15 min')}</div>
+      ${nm.rows.length ? html`<div class="tw" style="margin-top:8px"><table class="tbl"><thead><tr><th>Filter / Blocker</th><th class="r">n</th><th class="r">verpasst</th><th class="r">vermieden</th><th class="r">neutral</th><th class="r">Ø Ergebnis (sim.)</th><th>Einordnung</th></tr></thead><tbody>${nm.rows.map(r => html`<tr><td>${r.code}${r.kind === 'RISK' ? html` <span class="chip">Risiko/Portfolio</span>` : ''}</td><td class="r num">${r.n}</td><td class="r num">${r.missed}</td><td class="r num">${r.avoided}</td><td class="r num">${r.neutral}</td><td class="r num ${cls(r.avgSimPct)}">${fmtPct(r.avgSimPct)}</td><td><span class="chip ${NMV[r.verdict][0]}">${NMV[r.verdict][1]}</span></td></tr>`)}</tbody></table></div>` : html`<div class="empty">Noch keine ausgewerteten Near-Misses. Erfasst werden Kandidaten, denen genau ein Filter fehlte (z. B. Score bis 10 Punkte unter Minimum) oder die nur an Risiko-/Portfolio-Limits scheiterten.</div>`}
+      ${L.nearMiss.done.length ? html`<details class="an" data-k="nm-recent" style="margin-top:8px"><summary>Letzte Near-Misses</summary><div class="tw"><table class="tbl"><tr><th>Zeit</th><th>Token</th><th>Filter</th><th class="r">Score</th><th class="r">max / min</th><th class="r">nach 15 min</th><th>Ergebnis</th></tr>${L.nearMiss.done.slice(0, 12).map(m => html`<tr><td class="num">${fmtDateTime(m.ts)}</td><td>${m.symbol}</td><td title="${m.msg || ''}">${m.code}${isNum(m.gap) ? ' (' + m.gap + ')' : ''}</td><td class="r num">${nv(m.score)}</td><td class="r num">${fmtPct(m.maxPct)} / ${fmtPct(m.minPct)}</td><td class="r num ${cls(m.endPct)}">${fmtPct(m.endPct)}</td><td>${NM_OUTCOME_DE[m.outcome] || m.outcome}${isNum(m.simPct) ? ' · sim. ' + fmtPct(m.simPct) : ''}</td></tr>`)}</table></div></details>` : ''}
+      <p class="note">Reine Messung mit simuliertem Exit (Stop/Trailing/TP3, ohne Gebühren) – Näherung, keine Aussage, was sicher passiert wäre. Filter werden daraus nie automatisch gelockert: die Lern-KI darf nur verschärfen. „Kostet eher Chancen“ ist ein Hinweis zur manuellen Prüfung, erst ab ${NEAR_MISS_MIN_N} Fällen je Filter.</p></div>
+    <div class="panel"><h3 style="margin-top:0">Aktive Parameter – Wert, Herkunft, Grund</h3><div class="tw"><table class="tbl"><thead><tr><th>Parameter</th><th class="r">Wert</th><th>Herkunft</th><th>seit</th><th class="an">Grund / Änderung</th><th class="an">Grenzen</th></tr></thead><tbody>
+      ${ap.map(p => html`<tr><td title="${p.key}">${p.label}</td><td class="r num">${typeof p.value === 'boolean' ? (p.value ? 'an' : 'aus') : p.value + (p.unit && p.unit !== '$' ? ' ' + p.unit : '')}${p.value !== p.def && p.def !== undefined ? html` <small class="mut">(Std. ${typeof p.def === 'boolean' ? (p.def ? 'an' : 'aus') : p.def})</small>` : ''}</td><td><span class="chip ${p.source === 'LEARNED' ? 'vio' : p.source === 'DEFAULT' ? '' : p.source === 'UNTRACKED' || p.source === 'AUTO_TUNING' ? 'warn' : 'info'}" title="${PARAM_SOURCE_DE[p.source] || p.source}">${PARAM_SOURCE_DE[p.source] || p.source}</span></td><td class="num">${p.since ? fmtDateTime(p.since) : '—'}</td><td class="mut an">${p.reason}</td><td class="mut an">${p.bounds}</td></tr>`)}
+      </tbody></table></div><p class="note">Herkunft aus dem Änderungsprotokoll (letzte 200 Änderungen) und dem aktiven Lern-Modell. Parameter ändern sich nur manuell, durch die Lern-KI nach bestandener Validierung + Shadow-Phase (nur SIMULATION) oder durch Rollback – nie unprotokolliert.</p></div>
     <div class="an">
       ${strats.length && regs.length ? html`<div class="panel tw"><h3 style="margin-top:0">Muster-Karte: Strategie × Marktregime (Ø PnL je Trade, n)</h3><table class="tbl"><tr><th>Strategie</th>${regs.map(r => html`<th class="r">${r}</th>`)}</tr>${strats.map(s => html`<tr><td>${s}</td>${regs.map(r => { const c = cell(s, r); return html`<td class="r num ${c ? cls(c.expPct) : ''}">${c ? fmtPct(c.expPct) + ' (' + c.n + ')' : '—'}</td>`; })}</tr>`)}</table></div>` : ''}
       <div class="panel tw"><h3 style="margin-top:0">Pattern Miner – auffälligste Einstiegs-Muster</h3>${topPat.length ? html`<table class="tbl"><thead><tr><th>Muster</th><th class="r">n</th><th class="r">Trefferquote</th><th class="r">Ø PnL</th><th class="r">Median</th><th class="r">Profit Factor</th><th class="r">Ø MAE 5m</th><th class="r">Anteil Verluste</th><th>Status</th><th>Hinweis</th></tr></thead><tbody>${topPat.map(p => html`<tr><td>${p.key.replace(/&/g, ' · ')}</td><td class="r num">${p.n}</td><td class="r num">${pctOf(p.winRate)}</td><td class="r num ${cls(p.expPct)}">${fmtPct(p.expPct)}</td><td class="r num">${fmtPct(p.medianPct)}</td><td class="r num">${p.profitFactor == null ? '—' : p.profitFactor === Infinity ? '∞' : p.profitFactor}</td><td class="r num">${fmtPct(p.avgMae)}</td><td class="r num">${p.ddContribution != null ? p.ddContribution + ' %' : '—'}</td><td>${lchip(p.status)}</td><td class="mut">${p.warning || (p.ci ? 'Band ' + fmtPct(p.ci.lo) + ' … ' + fmtPct(p.ci.hi) : '')}</td></tr>`)}</tbody></table><p class="note">Gesamt Ø ${fmtPct(base.expPct)} je Trade. Nur Merkmale zum Einstiegszeitpunkt – Exit-Gründe werden angezeigt, erzeugen aber keine Einstiegsregeln.</p>` : html`<div class="empty">Noch zu wenige Trades (mind. 5 je Muster).</div>`}</div>
@@ -7595,11 +7829,14 @@ async function attemptLogin(user, pass) {
   if (g.until > now) return fail(`Zu viele Fehlversuche – bitte noch ${Math.ceil((g.until - now) / 1000)} s warten.`);
   if (!user || !pass) return fail('Anmeldename oder Passwort ist falsch.');
   if (!(window.crypto && window.crypto.subtle)) return fail('Login in dieser Umgebung nicht möglich (kein sicherer Kontext für Web Crypto). Bitte über https oder lokal per file:// öffnen.');
+  // Während der Prüfung (PBKDF2, ~0,3 s) Eingaben sperren – sonst würde eine neue Eingabe beim Fehlschlag gelöscht
+  const userEl = document.getElementById('loginUser'), lockInputs = on => { for (const el of [userEl, passEl]) if (el) el.readOnly = on; };
   if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Prüfe …'; }
+  lockInputs(true);
   let hash = null;
   try { hash = await pbkdf2Hex(AUTH_KDF.ctx + user + ':' + pass, AUTH_KDF.salt, AUTH_KDF.iterations); }
   catch (e) { hash = null; }
-  finally { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Anmelden'; } }
+  finally { lockInputs(false); if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Anmelden'; } }
   if (!sameHex(hash, AUTH_KDF.hash)) {
     const fails = g.fails + 1, lock = authLockMs(fails);
     authGuardSet({ fails, until: lock ? Date.now() + lock : 0 });
