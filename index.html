@@ -342,6 +342,7 @@ pre.raw{white-space:pre-wrap;word-break:break-all;font:11px/1.4 var(--mono);back
 .chain small{font-weight:500;font-size:9.5px;margin-left:3px}
 .chain .fin{white-space:normal}
 .cards2>*,.grid2>*,.grid3>*,.grid4>*{min-width:0}
+.stg{margin:6px 0 8px}.stg small{display:block;line-height:1.5;color:var(--dim)}.stg small .chip{margin-right:4px}
 @media (max-width:900px){.grid2.lgrid{grid-template-columns:minmax(0,1fr)}}
 .note,.check b,.check small{overflow-wrap:anywhere}
 .check .ic.info{background:#38bdf81a;color:var(--cyan)}
@@ -1774,6 +1775,127 @@ function decideToken(tok, A, ctx) {
     signals: A.signals.map(x => ({ type: x.type, strength: x.strength })), strategy: strat.lead, consensus: strat.weightSum,
     positionSize: ex.sizing ? ex.sizing.size : 0, executionRisk: A.liq.slipRisk, dataQuality: A.labels
   };
+}
+
+/* ============================== STUFEN-SCORES & SECURITY-PRÜFBERICHT (erklärbar) ==============================
+   Scanner-Stufen: Discovery → Datenqualität → Security → Markt → Handelsbereitschaft. Jede Stufe liefert einen
+   Score 0–100 oder null (= keine Daten), einen Status PASS / WARN / FAIL / NO_DATA und Teilbegründungen.
+   Grundregel: „Daten nicht verfügbar“ ist nie „kein Risiko“ – NO_DATA wird wie ein offenes Risiko behandelt. */
+const STAGE_NAMES = { discovery: 'Discovery', quality: 'Datenqualität', security: 'Security', market: 'Markt', readiness: 'Handelsbereitschaft' };
+const STAGE_ORDER = ['discovery', 'quality', 'security', 'market', 'readiness'];
+function stageScores(tok, A, D, S) {
+  const st = {}, R = (ok, text) => ({ ok, text });
+  if (!A || !D) return null;
+  { // Discovery: Wie belastbar ist die Identität des Kandidaten?
+    const via = (tok.meta && tok.meta.via) || [], r = [];
+    r.push(R(via.length > 0, via.length ? 'Gefunden über ' + via.join(', ') : 'Fundquelle unbekannt'));
+    r.push(R(isNum(A.core.price), isNum(A.core.price) ? 'Coin-Preis vorhanden' : 'kein gültiger Coin-Preis'));
+    r.push(R(!!A.core.pairAddress, A.core.pairAddress ? 'Pool-Adresse bekannt' : 'Pool-Adresse unbekannt'));
+    r.push(R(A.crossChecked ? true : null, A.crossChecked ? 'Von zweiter Quelle bestätigt (GeckoTerminal)' : 'Nicht von zweiter Quelle bestätigt'));
+    r.push(R(isNum(A.core.pairAge) ? true : null, isNum(A.core.pairAge) ? 'Pair-Alter ' + fmtAge(A.core.pairAge) : 'Pair-Alter unbekannt'));
+    const score = Math.round(25 * isNum(A.core.price) + 20 * !!A.core.pairAddress + 25 * !!A.crossChecked + 15 * isNum(A.core.pairAge) + 15 * (via.length > 0));
+    st.discovery = { score, status: !isNum(A.core.price) ? 'FAIL' : score >= 70 ? 'PASS' : 'WARN', reasons: r };
+  }
+  { // Datenqualität: Frische, Quelle, Konflikte, Confidence
+    const c = A.confidence.total, r = [];
+    r.push(R(!A.stale, `Marktdaten ${A.label}${A.dataAge != null ? ' · ' + fmtAge(A.dataAge) + ' alt' : ''}`));
+    r.push(R(!A.fallback, A.fallback ? 'Nur Fallback-Quelle aktuell' : 'Primärquelle aktuell'));
+    r.push(R(!A.conflicts.length, A.conflicts.length ? A.conflicts.map(x => `Konflikt ${x.field} ${x.diffPct.toFixed(1)} %`).join(', ') : 'Keine Datenkonflikte'));
+    r.push(R(c >= S.minConfidence, `Data Confidence ${c} (min. ${S.minConfidence})`));
+    if (A.unknowns.length) r.push(R(null, 'Unbekannt: ' + A.unknowns.slice(0, 4).join(', ')));
+    st.quality = { score: c, status: A.stale || !isNum(A.core.price) ? 'FAIL' : c >= S.minConfidence && !A.conflicts.length && !A.fallback ? 'PASS' : 'WARN', reasons: r };
+  }
+  { // Security: eigenes Gate, kann durch keinen anderen Score ausgeglichen werden
+    const s = A.sec, sec = tok.sec, r = [];
+    if (!sec || s.status === 'UNKNOWN') {
+      r.push(R(null, s.pending ? 'Sicherheitsprüfung läuft …' : 'Keine Security-Daten – das ist kein Freispruch, Käufe bleiben blockiert'));
+      st.security = { score: null, status: 'NO_DATA', reasons: r };
+    } else {
+      const au = v => (v === 'REVOKED' ? true : v === 'ACTIVE' ? false : null);
+      r.push(R(au(sec.mintAuthority), 'Mint Authority ' + sec.mintAuthority));
+      r.push(R(au(sec.freezeAuthority), 'Freeze Authority ' + sec.freezeAuthority));
+      for (const f of sec.flags.filter(x => x.code !== 'MINT_AUTHORITY' && x.code !== 'FREEZE_AUTHORITY').slice(0, 5)) r.push(R(f.level === 'WARN' ? null : false, f.msg));
+      if (s.stale) r.push(R(false, `Security-Daten ${fmtAge(s.age)} alt`));
+      const high = sec.flags.filter(x => x.level === 'HIGH').length, warn = sec.flags.filter(x => x.level === 'WARN').length;
+      const score = s.status === 'CRITICAL' ? 0 : Math.round(clamp((s.status === 'VERIFIED' ? 100 : 70) - high * 20 - warn * 5 - (s.stale ? 30 : 0), 0, 100));
+      st.security = { score, status: s.status === 'CRITICAL' || s.stale ? 'FAIL' : s.status === 'VERIFIED' && !high ? 'PASS' : 'WARN', reasons: r };
+    }
+  }
+  { // Markt: Liquidität, Volumen, Käuferanteil, Stabilität, MC-Bereich, Manipulation
+    const liq = A.liq.usd, v1 = A.vol.h1, ratio = A.tx.ratio1, r = [], parts = [];
+    const logScore = (v, min) => clamp(Math.log10(Math.max(1e-9, v / Math.max(1, min))) * 50 + 50, 0, 100);
+    if (isNum(liq)) { parts.push(logScore(liq, S.minLiq)); r.push(R(liq >= S.minLiq, `Liquidität ${fmtUsd(liq)} (min. ${fmtUsd(S.minLiq)})`)); } else r.push(R(null, 'Liquidität unbekannt'));
+    if (A.liq.ratioMc != null) r.push(R(A.liq.ratioMc >= 0.03, `Liquidität/MC ${(A.liq.ratioMc * 100).toFixed(1)} %`));
+    if (isNum(v1)) { parts.push(logScore(v1, S.minVol1h)); r.push(R(v1 >= S.minVol1h, `Volumen 1h ${fmtUsd(v1)} (min. ${fmtUsd(S.minVol1h)})`)); } else r.push(R(null, 'Volumen unbekannt'));
+    if (ratio != null) { parts.push(clamp((ratio - 0.4) / 0.3 * 100, 0, 100)); r.push(R(ratio >= S.minBuyRatio, `Käuferanteil 1h ${Math.round(ratio * 100)} % (min. ${Math.round(S.minBuyRatio * 100)} %)`)); } else r.push(R(null, 'Käuferanteil unbekannt'));
+    if (A.price.stability != null) parts.push(A.price.stability);
+    r.push(isNum(A.core.mc) ? R(A.core.mc >= S.minMcap && A.core.mc <= S.maxMcap, `${fmtMc(A.core.mc)} (erlaubt ${fmtMc(S.minMcap)} – ${fmtMc(S.maxMcap)})`) : R(null, 'MC unbekannt'));
+    if (A.liq.shock) r.push(R(false, `Liquiditätsabfluss ${fmtPct(A.liq.chg5)} in 5 min`));
+    if (A.pump.detected) r.push(R(false, 'Pump/Manipulation: ' + A.pump.flags.join(', ')));
+    for (const an of A.vol.anomalies) r.push(R(false, an));
+    let score = parts.length ? Math.round(avg(parts)) : null;
+    if (score != null && (A.pump.detected || A.liq.shock)) score = Math.min(score, 30);
+    st.market = { score, status: score == null ? 'NO_DATA' : A.pump.detected || A.liq.shock ? 'FAIL' : r.some(x => x.ok === false) ? 'WARN' : 'PASS', reasons: r };
+  }
+  { // Handelsbereitschaft: Ergebnis der Entscheidung inkl. aller Blocker (nach Priorität)
+    const d = D.decision, r = [R(A.finalScore >= S.minScore, `Final Score ${A.finalScore} (min. ${S.minScore})`)];
+    if (D.blockers.length) for (const b of D.blockers.slice(0, 4)) r.push(R(false, `${b.code}: ${b.msg}`)); else r.push(R(true, 'Alle Prüfungen bestanden'));
+    const score = d === 'APPROVED' ? A.finalScore : d === 'BUY_CANDIDATE' ? Math.round(A.finalScore * 0.8) : d === 'WATCH' ? Math.min(A.finalScore, 45) : Math.min(A.finalScore, 20);
+    st.readiness = { score, status: d === 'APPROVED' ? 'PASS' : d === 'REJECTED' ? 'FAIL' : 'WARN', reasons: r, decision: d };
+  }
+  return st;
+}
+/* Security-Prüfbericht: je Check Ergebnis, Schweregrad, Quelle, Zeitpunkt und Policy-Aktion.
+   Die Aktion stammt aus den tatsächlich gesetzten Blockern – Bericht und Entscheidung können nicht auseinanderlaufen. */
+const SEC_GATE_DE = { PASSED: 'bestanden', CAUTION: 'mit Hinweisen', UNVERIFIED: 'nicht verifiziert', BLOCKED: 'blockiert' };
+function securityReport(tok, A, D, S) {
+  if (!A) return null;
+  const sec = tok.sec, codes = new Set((D ? D.analysisBlockers : []).map(b => b.code)), out = [];
+  const snapTs = isNum(A.ts) && isNum(A.dataAge) ? A.ts - A.dataAge : null;
+  const add = (check, result, severity, source, ts, detail, blockCode) => out.push({ check, result, severity, source, ts, detail, action: blockCode && codes.has(blockCode) ? 'BLOCK' : result === 'FAIL' ? 'RISIKO' : result === 'WARN' ? 'HINWEIS' : result === 'NO_DATA' ? 'OFFEN' : 'KEINE' });
+  const secSrc = !sec ? '—' : [sec.sources.rpc && 'Solana RPC', sec.sources.rug && 'RugCheck'].filter(Boolean).join(' + ') || '—', secTs = sec ? sec.checkedAt : null;
+  const authCheck = (name, v, code) => {
+    if (!sec || v === 'UNKNOWN') add(name, 'NO_DATA', 'HIGH', secSrc, secTs, 'Status unbekannt – nicht als „kein Risiko“ gewertet', 'SECURITY_UNKNOWN');
+    else if (v === 'ACTIVE') add(name, 'FAIL', 'CRITICAL', secSrc, secTs, code === 'MINT' ? 'Supply kann jederzeit erhöht werden' : 'Konten können eingefroren werden (Verkauf unmöglich)', 'SECURITY_CRITICAL');
+    else add(name, 'PASS', 'INFO', secSrc, secTs, 'widerrufen (REVOKED)');
+  };
+  authCheck('Mint Authority', sec ? sec.mintAuthority : 'UNKNOWN', 'MINT');
+  authCheck('Freeze Authority', sec ? sec.freezeAuthority : 'UNKNOWN', 'FREEZE');
+  { const ext = sec ? sec.flags.filter(f => ['PERMANENT_DELEGATE', 'NON_TRANSFERABLE', 'TRANSFER_HOOK', 'TRANSFER_FEE', 'DEFAULT_FROZEN', 'MINT_NOT_FOUND'].includes(f.code)) : [];
+    if (!sec || !sec.program) add('Token-Programm & Extensions', 'NO_DATA', 'HIGH', secSrc, secTs, 'Programm unbekannt', null);
+    else if (ext.length) add('Token-Programm & Extensions', 'FAIL', ext.some(f => f.level === 'CRITICAL') ? 'CRITICAL' : 'HIGH', secSrc, secTs, ext.map(f => f.msg).join(' · '), ext.some(f => f.level === 'CRITICAL') ? 'SECURITY_CRITICAL' : null);
+    else add('Token-Programm & Extensions', 'PASS', 'INFO', secSrc, secTs, sec.program + ' ohne riskante Extensions'); }
+  { if (!sec || !sec.sources.rug) add('RugCheck-Risiken', 'NO_DATA', 'WARN', 'RugCheck', secTs, 'RugCheck nicht verfügbar oder deaktiviert', null);
+    else { const danger = sec.flags.filter(f => f.code.startsWith('RUG_') && f.code !== 'RUG_WARN' || f.code === 'RUGGED'), warn = sec.flags.filter(f => f.code === 'RUG_WARN');
+      if (danger.length) add('RugCheck-Risiken', 'FAIL', danger.some(f => f.level === 'CRITICAL') ? 'CRITICAL' : 'HIGH', 'RugCheck', secTs, danger.map(f => f.msg).join(' · '), danger.some(f => f.level === 'CRITICAL') ? 'SECURITY_CRITICAL' : null);
+      else if (warn.length) add('RugCheck-Risiken', 'WARN', 'WARN', 'RugCheck', secTs, warn.map(f => f.msg).join(' · '), null);
+      else add('RugCheck-Risiken', 'PASS', 'INFO', 'RugCheck', secTs, 'keine Warnungen'); } }
+  { const t10 = sec ? sec.top10Pct : null;
+    if (!isNum(t10)) add('Holder-Konzentration', 'NO_DATA', 'WARN', sec && sec.holderSrc || '—', secTs, 'Top-Holder unbekannt', null);
+    else add('Holder-Konzentration', t10 > 60 ? 'FAIL' : t10 > 40 ? 'WARN' : 'PASS', t10 > 60 ? 'HIGH' : t10 > 40 ? 'WARN' : 'INFO', sec.holderSrc, secTs, `Top-10 halten ${t10.toFixed(1)} %${sec.holderSrc && sec.holderSrc.startsWith('RPC') ? ' (inkl. Pool-/LP-Konten)' : ''}`, null); }
+  { const lp = sec ? sec.lpLockedPct : null;
+    if (!isNum(lp)) add('LP gesperrt/verbrannt', 'NO_DATA', 'WARN', 'RugCheck', secTs, 'LP-Status unbekannt', null);
+    else add('LP gesperrt/verbrannt', lp < 50 ? 'WARN' : 'PASS', lp < 50 ? 'WARN' : 'INFO', 'RugCheck', secTs, `${lp.toFixed(0)} % gesperrt/verbrannt`, null); }
+  add('Creator-/Deployer-Historie', 'NO_DATA', 'INFO', '—', null, sec && sec.creator ? `Creator ${shortAddr(sec.creator)} bekannt, Wallet-Historie ohne Datenquelle` : 'Keine Datenquelle für Wallet-Historie angebunden', null);
+  if (A.liq.chg5 == null) add('Liquiditätsabfluss (5 min)', 'NO_DATA', 'HIGH', A.core.source || '—', snapTs, 'Noch kein 5-min-Verlauf', null);
+  else add('Liquiditätsabfluss (5 min)', A.liq.shock ? 'FAIL' : 'PASS', A.liq.shock ? 'HIGH' : 'INFO', A.core.source || '—', snapTs, `Liquidität ${fmtPct(A.liq.chg5)} in 5 min`, 'LIQUIDITY_SHOCK');
+  add('Pump / Manipulation', A.pump.detected ? 'FAIL' : A.pump.flags.length ? 'WARN' : 'PASS', A.pump.detected ? 'HIGH' : A.pump.flags.length ? 'WARN' : 'INFO', A.core.source || '—', snapTs, A.pump.flags.length ? A.pump.flags.join(', ') : 'keine Muster erkannt', 'PUMP_DETECTED');
+  { const pc = A.conflicts.find(c => c.field === 'Preis'), lc = A.conflicts.find(c => c.field === 'Liquidität');
+    if (pc) add('Provider-Abgleich', 'FAIL', 'HIGH', 'DexScreener ↔ GeckoTerminal', snapTs, `Preis weicht ${pc.diffPct.toFixed(1)} % ab`, 'DATA_CONFLICT');
+    else if (lc) add('Provider-Abgleich', 'WARN', 'WARN', 'DexScreener ↔ GeckoTerminal', snapTs, `Liquidität weicht ${lc.diffPct.toFixed(1)} % ab`, null);
+    else if (A.crossChecked) add('Provider-Abgleich', 'PASS', 'INFO', 'DexScreener ↔ GeckoTerminal', snapTs, 'Preis & Liquidität stimmen überein');
+    else add('Provider-Abgleich', 'NO_DATA', 'WARN', 'nur DexScreener', snapTs, 'Keine zweite Quelle zum Abgleich', null); }
+  if (!sec) add('Aktualität der Security-Daten', 'NO_DATA', 'HIGH', '—', null, 'Noch nicht geprüft', 'SECURITY_UNKNOWN');
+  else add('Aktualität der Security-Daten', A.sec.stale ? 'FAIL' : 'PASS', A.sec.stale ? 'HIGH' : 'INFO', secSrc, secTs, `geprüft vor ${fmtAge(A.sec.age)}`, 'SECURITY_STALE');
+  { const imp = A.liq.impactPlanned;
+    if (imp == null) add('Ausführbarkeit (Price Impact)', 'NO_DATA', 'WARN', 'Schätzung', snapTs, 'Impact nicht schätzbar', null);
+    else add('Ausführbarkeit (Price Impact)', imp > S.maxSlippagePct ? 'FAIL' : imp > S.maxSlippagePct / 2 ? 'WARN' : 'PASS', imp > S.maxSlippagePct ? 'HIGH' : imp > S.maxSlippagePct / 2 ? 'WARN' : 'INFO', 'Schätzung (AMM)', snapTs, `${imp.toFixed(2)} % bei geplanter Größe (max. ${S.maxSlippagePct} %)`, 'SLIPPAGE_TOO_HIGH'); }
+  { const w = A.tx.whaleRel;
+    if (w == null && !A.tx.micro) add('Wallet-Cluster / große Trades', 'NO_DATA', 'WARN', A.core.source || '—', snapTs, 'Transaktionsdaten fehlen', null);
+    else if (A.tx.micro) add('Wallet-Cluster / große Trades', 'WARN', 'WARN', A.core.source || '—', snapTs, 'Viele Mikro-Trades – Wash-Trading möglich', null);
+    else add('Wallet-Cluster / große Trades', w > 1 ? 'WARN' : 'PASS', w > 1 ? 'WARN' : 'INFO', A.core.source || '—', snapTs, `Ø Trade = ${w.toFixed(2)} % der Liquidität`, null); }
+  const gate = out.some(c => c.action === 'BLOCK') ? 'BLOCKED' : out.slice(0, 2).some(c => c.result === 'NO_DATA') ? 'UNVERIFIED' : out.some(c => c.result === 'FAIL' || c.result === 'WARN') ? 'CAUTION' : 'PASSED';
+  return { gate, checks: out, noData: out.filter(c => c.result === 'NO_DATA').length, checkedAt: secTs };
 }
 
 /* ============================== MARKET REGIME ============================== */
@@ -4971,6 +5093,47 @@ const SELF_TESTS = [
     assert(ok.status === 'VERIFIED', 'saubere Daten nicht VERIFIED');
     return 'CRITICAL / VERIFIED korrekt';
   }],
+  ['Security', 'Security-Gate: Freeze Authority blockiert trotz Top-Marktdaten (auch manuell)', async () => {
+    const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1, { liq: 900000, v1: 600000, b1: 900, s1: 200 });
+    t.sec = buildSecurity({ exists: true, program: 'spl-token', mintAuthority: null, freezeAuthority: tMint(4), extensions: [] }, null, normRug({ score: 1, risks: [] }), H.env.now());
+    core._t.analyzeAll();
+    const st = stageScores(t, t.A, t.D, core.S()), rep = securityReport(t, t.A, t.D, core.S());
+    assert(t.D.decision === 'REJECTED' && t.D.blockers.some(b => b.code === 'SECURITY_CRITICAL'), 'Security-Fail nicht hart blockiert: ' + t.D.decision);
+    assert(st.security.status === 'FAIL' && st.security.score === 0 && st.readiness.status === 'FAIL', 'Stufen spiegeln den Security-Fail nicht');
+    assert(st.market.status !== 'FAIL', 'Marktdaten sollten gut sein (Test ungültig)');
+    const fz = rep.checks.find(c => c.check === 'Freeze Authority');
+    assert(rep.gate === 'BLOCKED' && fz.result === 'FAIL' && fz.action === 'BLOCK' && fz.severity === 'CRITICAL' && fz.source && fz.ts, 'Prüfbericht unvollständig: ' + JSON.stringify(fz));
+    const r = await core.executeBuy(t.id, { sizeUsd: 20 });
+    assert(!r.ok && codes(r).includes('SECURITY_CRITICAL'), 'manueller Kauf trotz Security-Fail möglich');
+    return `Markt ${st.market.score} (${st.market.status}), Security FAIL → Gate BLOCKED, Kauf auch manuell verhindert`;
+  }],
+  ['Security', 'Keine Daten ≠ kein Risiko: fehlende Security-Daten sind NO_DATA und blockieren', async () => {
+    const H = makeTestHarness(); H.rpcFail = true; H.rugFail = true;
+    const core = await testCore(H); const t = await prepToken(core, H, 1);
+    core._t.analyzeAll();
+    const st = stageScores(t, t.A, t.D, core.S()), rep = securityReport(t, t.A, t.D, core.S());
+    assert(st.security.status === 'NO_DATA' && st.security.score === null, 'Security-Stufe nicht NO_DATA: ' + JSON.stringify(st.security));
+    const mint = rep.checks.find(c => c.check === 'Mint Authority');
+    assert(mint.result === 'NO_DATA' && mint.action === 'BLOCK' && rep.gate === 'BLOCKED', 'fehlende Daten als unbedenklich gewertet: ' + JSON.stringify(mint));
+    assert(!rep.checks.some(c => c.result === 'PASS' && /Authority|RugCheck|Holder/.test(c.check)), 'PASS ohne Datenbasis');
+    assert(t.D.decision !== 'APPROVED' && t.D.blockers.some(b => b.code === 'SECURITY_UNKNOWN'), 'Kauf trotz fehlender Security-Daten freigegeben');
+    return `${rep.noData} Prüfungen ohne Daten → offen/blockiert, nichts als „sicher“ gewertet`;
+  }],
+  ['Security', 'Scanner-Stufen erklärbar und konsistent zur Entscheidung', async () => {
+    const H = makeTestHarness(); const core = await testCore(H);
+    const toks = [await prepToken(core, H, 1), await prepToken(core, H, 2, { liq: 3000 }), await prepToken(core, H, 3, { price: null })];
+    core._t.analyzeAll();
+    for (const t of toks) {
+      const st = stageScores(t, t.A, t.D, core.S());
+      for (const k of STAGE_ORDER) { const x = st[k]; assert(x && x.reasons.length && ['PASS', 'WARN', 'FAIL', 'NO_DATA'].includes(x.status) && (x.score === null || (isNum(x.score) && x.score >= 0 && x.score <= 100)), `${t.symbol} Stufe ${k} ungültig`); }
+      assert(st.readiness.status === (t.D.decision === 'APPROVED' ? 'PASS' : t.D.decision === 'REJECTED' ? 'FAIL' : 'WARN'), `${t.symbol}: Bereitschaft passt nicht zur Entscheidung ${t.D.decision}`);
+      assert(t.D.blockers.every(b => st.readiness.reasons.some(r => r.text.startsWith(b.code)) || t.D.blockers.indexOf(b) >= 4), `${t.symbol}: Blocker fehlen in der Begründung`);
+    }
+    const low = stageScores(toks[1], toks[1].A, toks[1].D, core.S()), nop = stageScores(toks[2], toks[2].A, toks[2].D, core.S());
+    assert(low.market.reasons.some(r => r.ok === false && /Liquidität/.test(r.text)), 'zu niedrige Liquidität nicht begründet');
+    assert(nop.discovery.status === 'FAIL' && nop.quality.status === 'FAIL', 'fehlender Preis nicht als FAIL erkannt');
+    return '3 Kandidaten · 5 Stufen je Kandidat mit Begründung · Bereitschaft = Entscheidung';
+  }],
   ['Daten', 'Pump wird nie als Buy interpretiert', async () => {
     const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1, { c5: 75, v5: 60000, v1: 90000, b5: 290, s5: 10 });
     core._t.analyzeAll();
@@ -6307,6 +6470,24 @@ function detailHead(t) {
     <div class="row" style="margin-top:8px"><button class="btn sm ${w ? 'on' : ''}" data-act="star" data-id="${t.id}">${w ? '★ Watchlist' : '☆ Watchlist'}</button><button class="btn sm pri" data-act="buy" data-id="${t.id}">💱 Simulate Buy</button><button class="btn sm" data-act="analyze" data-id="${t.id}">🔍 Neu analysieren</button><button class="btn sm" data-act="ctx" data-id="${t.id}" aria-label="Weitere Aktionen">⋯</button></div>`;
 }
 function meterRow(name, v, color, label) { return html`<div class="meter"><span>${name}</span>${bar(v, color)}<span class="num r">${v == null ? '—' : v}${label ? '' : ''}</span></div>`; }
+/* Scanner-Stufen & Security-Prüfbericht (Anzeige) */
+const RES_CHIP = { PASS: ['ok', 'OK'], WARN: ['warn', 'HINWEIS'], FAIL: ['bad', 'FEHLER'], NO_DATA: ['vio', 'KEINE DATEN'] };
+const resChip = r => { const [c, t] = RES_CHIP[r] || ['', r]; return html`<span class="chip ${c}">${t}</span>`; };
+const ACT_CHIP = { BLOCK: 'bad', RISIKO: 'warn', HINWEIS: 'info', OFFEN: 'vio', KEINE: '' };
+const okMark = ok => html`<span class="${ok === true ? 'ok' : ok === false ? 'bad' : 'mut'}">${ok === true ? '✓' : ok === false ? '✗' : '?'}</span>`;
+function secReportHtml(t) {
+  const rep = securityReport(t, t.A, t.D, core.S()); if (!rep) return '';
+  return html`<h3 style="margin-top:0">Security-Prüfbericht <span class="chip ${rep.gate === 'PASSED' ? 'ok' : rep.gate === 'CAUTION' ? 'warn' : 'bad'}">${SEC_GATE_DE[rep.gate]}</span></h3>
+    <div class="tw"><table class="tbl"><thead><tr><th>Prüfung</th><th>Ergebnis</th><th>Aktion</th><th class="an">Schwere</th><th class="an">Quelle</th><th class="an">Stand</th></tr></thead><tbody>
+    ${rep.checks.map(c => html`<tr><td><b>${c.check}</b><br><small class="mut">${c.detail}</small></td><td>${resChip(c.result)}</td><td><span class="chip ${ACT_CHIP[c.action]}">${c.action}</span></td><td class="an">${c.severity}</td><td class="an mut">${c.source}</td><td class="an num">${c.ts ? fmtTime(c.ts) : '—'}</td></tr>`)}
+    </tbody></table></div>
+    <p class="note">KEINE DATEN heißt nicht „kein Risiko“ – fehlende Security-Daten blockieren Käufe. BLOCK = diese Prüfung verhindert gerade einen Kauf; kein Score, Signal oder gelernte Regel kann das ausgleichen.</p>`;
+}
+function stagesHtml(t) {
+  const st = stageScores(t, t.A, t.D, core.S()); if (!st) return '';
+  return html`<h3>Stufen-Bewertung (Scanner)</h3>${STAGE_ORDER.map(k => { const x = st[k]; return html`<div class="stg"><div class="meter"><span>${STAGE_NAMES[k]}</span>${bar(x.score == null ? 0 : x.score, x.status === 'PASS' ? 'var(--green)' : x.status === 'WARN' ? 'var(--yellow)' : x.status === 'FAIL' ? 'var(--red)' : 'var(--dim)')}<span class="num r">${x.score == null ? '—' : x.score}</span></div><small>${resChip(x.status)} ${x.reasons.map((r, i) => html`${i ? ' · ' : ''}${okMark(r.ok)} ${r.text}`)}</small></div>`; })}
+    <p class="note">Jede Stufe mit Teilbegründungen (✓ erfüllt · ✗ nicht erfüllt · ? keine Daten). „—“ = keine Daten, nicht 0 und nicht „kein Risiko“.</p>`;
+}
 function tabOverview(t) {
   const A = t.A; if (!A) return '';
   const tx = A.tx, v = A.vol;
@@ -6317,7 +6498,7 @@ function tabOverview(t) {
     ${kvA('Käufer 5m', tx.ratio5 != null ? (tx.ratio5 * 100).toFixed(0) + '%' : '—')}${kvA('Käufer 1h', tx.ratio1 != null ? (tx.ratio1 * 100).toFixed(0) + '%' : '—')}${kvA('Ø Trade 5m', fmtUsd(tx.avgTrade5))}
     ${kvA('Run-Rate 5m', v.runRate5 != null ? v.runRate5.toFixed(2) + '×' : '—')}${kvA('Volatilität/min', A.price.volPct != null ? A.price.volPct.toFixed(2) + '%' : '—', A.price.volLabel)}${kvA('Drawdown 30m', fmtPct(A.price.drawdown))}
     ${kv('Pair-Alter', fmtAge(A.core.pairAge))}${kv('DEX', A.core.dexId || '—')}${kvA('Top-10 Holder', A.sec.top10Pct != null ? A.sec.top10Pct.toFixed(1) + '%' : '—', A.labels.holders)}</div>
-    <div class="an"><h3>Opportunity vs. Risk vs. Confidence</h3>
+    <div class="an">${stagesHtml(t)}<h3>Opportunity vs. Risk vs. Confidence</h3>
     ${meterRow('Opportunity', A.opportunity, 'var(--green)')}${meterRow('Risk', A.risk.total, riskColor(A.risk.total))}${meterRow('Confidence', A.confidence.total, 'var(--cyan)')}${meterRow('Execution', A.executionScore, 'var(--violet)')}
     <h3>Technische Analyse ${A.ta ? lbl(A.ta.label) : ''}</h3>${A.ta ? html`<div class="grid3">${kv('EMA 9 (Preis)', fmtPrice(A.ta.ema9))}${kv('EMA 21 (Preis)', fmtPrice(A.ta.ema21))}${kv('SMA 20 (Preis)', fmtPrice(A.ta.sma20))}${kv('RSI 14', A.ta.rsi != null ? A.ta.rsi.toFixed(0) : '—')}${kv('ATR %', A.ta.atrPct != null ? A.ta.atrPct.toFixed(2) + '%' : '—')}${kv('ROC 10', fmtPct(A.ta.roc))}${kv('VWAP (Preis)', fmtPrice(A.ta.vwap))}${kv('Momentum', A.price.momentum)}${kv('Trend', A.price.trend)}</div><p class="note">Quelle: ${A.ta.source}. Indikatoren unterstützen Entscheidungen, ersetzen aber keine Risikoanalyse.</p>` : html`<p class="mut">Nicht genug Datenpunkte (mind. 15 Live-Samples oder frische 1m-OHLCV via Chart-Tab).</p>`}
     <h3>Signale</h3>${A.signals.length ? A.signals.map(s => html`<div class="check"><span class="ic ${CONTEXT_SIGNALS.has(s.type) ? 'na' : 'pass'}">${s.strength}</span><div><b>${SIGNAL_NAMES[s.type]}</b><small>${s.reason} · Confidence ${s.confidence}</small></div></div>`) : html`<p class="mut">Keine Signale aktiv.</p>`}
@@ -6330,6 +6511,7 @@ function tabRisk(t) {
   const sec = t.sec, now = Date.now();
   const q = [['Coin-Preis', A.labels.price, A.dataAge, A.core.source], ['Liquidität', A.labels.liquidity, A.dataAge, A.core.source], ['Volumen', A.labels.volume, A.dataAge, A.core.source], ['Security', A.labels.security, sec ? now - sec.checkedAt : null, sec ? Object.entries(sec.sources).filter(x => x[1]).map(x => x[0]).join('+') || 'keine' : '—'], ['Holders', A.labels.holders, sec ? now - sec.checkedAt : null, sec ? sec.holderSrc || '—' : '—'], ['Social', 'UNKNOWN', null, 'keine Datenquelle']];
   return html`<div class="kv" style="margin-bottom:8px"><small>Risiko gesamt</small><b>${lvlChip(A.risk.level, A.risk.total)}</b></div>
+    ${secReportHtml(t)}
     <div class="an"><h3 style="margin-top:0">Scorecard</h3>${Object.entries(A.components).map(([k, v]) => meterRow(COMP_NAMES[k], v, v >= 65 ? 'var(--green)' : v >= 40 ? 'var(--yellow)' : 'var(--red)'))}${meterRow('RISK (gesamt)', A.risk.total, riskColor(A.risk.total))}
     <h3>Risk Factors</h3>${Object.entries(A.risk.factors).map(([k, v]) => html`<div class="meter"><span>${RISK_NAMES[k].replace(' Risk', '')}</span>${bar(v, riskColor(v || 0))}<span class="num r">${v == null ? '?' : v}</span></div>`)}
     <p class="note">Gesamt ${A.risk.total} → ${A.risk.level}. „?“ = keine Daten (fließt neutral ein, keine Annahme).</p></div>
