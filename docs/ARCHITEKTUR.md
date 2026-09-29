@@ -1,6 +1,6 @@
 # Smart Lab – Architektur & technischer Audit
 
-Stand: Phase 4 des Master-Prompts „Ganzheitliche Optimierung“ (App-Version 2.5.0).
+Stand: Phase 5 des Master-Prompts „Ganzheitliche Optimierung“ (App-Version 2.6.0).
 Dieses Dokument wird in jeder Phase fortgeschrieben (siehe „Änderungsprotokoll“ am Ende).
 
 ## 1. Überblick
@@ -63,7 +63,7 @@ UI-Schicht (DOM): Views, Detail-Panel, Modals, Charts (Canvas), Toasts, Alarm-Fe
 | Analytics / Backtest | 1771–1864 | perfStats, Backtest ohne Look-Ahead, Walk-Forward |
 | Lern-KI (reine Funktionen) | 1865–2468 | Features, Records, Attribution, Muster, Experimente, Drift, Modell |
 | Core (createCore) | 2469–4605 | Scanner, Execution, Positionen, Risk, Lern-Orchestrierung, Persistenz |
-| Testsystem | 4606–5204 | Mock-Harness, 47 Selbsttests |
+| Testsystem | 4606–5204 | Mock-Harness, 65 Selbsttests |
 | UI-Schicht | 5205–Ende | Views, Detail, Aktionen, Rendering |
 
 ## 4. State & Persistenz
@@ -102,7 +102,7 @@ UI-Schicht (DOM): Views, Detail-Panel, Modals, Charts (Canvas), Toasts, Alarm-Fe
 | Portfolio | Journal, realisiert/unrealisiert, Fees/Slippage, Reconciliation nach Neustart, Positions-Lebenszyklus PLANNED → PENDING → OPEN → CLOSING ↔ PARTIAL → CLOSED → RECONCILED (UNKNOWN = Abgleich), Integritätsprüfung (Mengen, Doppelbuchungen, Journal, hängende Orders, verwaiste Positionen) | Cash-Abgleich über mehrere „Frische Starts“ hinweg nicht rekonstruierbar |
 | Execution | Order-State-Machine, Idempotenz-Keys, Locks, Pre-Trade-Check mit frischen Daten, Provider-Abstraktion Quote → Build → Preflight → Sign → Send → Confirm (SIMULATION vollständig, LIVE liefert NO_ROUTER / SIGNATURE_DISABLED), Fehlercodes je Order | echter Swap-/Routing-Provider fehlt (bewusst) |
 | Wallet | nur lesend, Phantom (`window.phantom.solana`), Balance per RPC, Signieren deaktiviert, stille Wiederverbindung nur mit `onlyIfTrusted` (kein Popup) | – |
-| Backtest | kein Look-Ahead, Stops vor TPs, Walk-Forward, Fees/Slippage | kein Run-Protokoll/Versionen, keine Stress-/Regime-Auswertung, kein Trade-Export (5) |
+| Backtest | kein Look-Ahead, Stops vor TPs, Fees/Slippage, Walk-Forward Pflicht (Validierung/Test getrennt, OOS-Anteil ausgewiesen), Run-Protokoll mit Run-ID, Datensatz-Hash, Parametern, Kosten, Code-Version und Limitierungen, Stress-Tests (Gebühren/Slippage ×2, Einstieg 1 Kerze später, engerer Stop, niedrigerer TP), Monte-Carlo-Drawdown (deterministisch), Regime-Auswertung, Trade-CSV, Lauf-Historie (20) | Daten nur aus GeckoTerminal-OHLCV eines Pools (kein Survivorship-freier Universums-Test), keine Orderbuch-Simulation |
 | Lernen | vollständig seit 2.2.0 | Near-Misses/Opportunity Cost, Fehlerklassen nach PDF, Herkunft aktiver Parameter; altes naives Auto-Tuning ohne OOS-Nachweis (6) |
 | Monitoring | System/Bot Health, API Health Center, Metriken, Diagnose | keine Anomalie-Erkennung mit Aktionen (warn/degrade/pause/stop), keine Block-/Erfolgsraten (7) |
 | UI | einfache/Analyse-Ansicht, „Warum?“-Tab, Entscheidungsketten | Status-Leiste System/Data/Wallet/Risk/Live-Gate nur teilweise (7) |
@@ -135,9 +135,9 @@ Kein Hotspot gefunden, der eine Optimierung rechtfertigt. Render ist bereits ged
 
 ## 9. Tests (Ist)
 
-- **62 Selbsttests** in der App (System → Selbsttest): Grundlagen, Trading-Limits, Daten/Stale, Security, Chaos (API-/RPC-Ausfall, 429, falsches JSON, Scanner-Lock, verspätete Antworten, Reload-Recovery), Status-Logik, LIVE-Gating, Storage, Backtest-Look-Ahead, 11 Lern-KI-Tests.
-- **Browser-E2E** (Playwright, außerhalb des Repos): Login, Cooldown-Migration, UI einfach/Analyse inkl. Mobil, Lern-KI.
-- **Lücken:** Property-/Grenzwert-Tests für harte Limits und Positionsgröße, Positions-Lebenszyklus, Execution-Provider, Monitoring-Aktionen, Backtest-Reproduzierbarkeit, UI-Smoke für LIVE-Gate/Wallet/Diagnose.
+- **65 Selbsttests** in der App (System → Selbsttest): Grundlagen, Trading-Limits, Daten/Stale, Security, Chaos (API-/RPC-Ausfall, 429, falsches JSON, Scanner-Lock, verspätete Antworten, Reload-Recovery), Status-Logik, LIVE-Gating, Storage, Backtest (Look-Ahead, Reproduzierbarkeit, Stress/Einstiegsverzögerung, Monte-Carlo/Regime), Portfolio & Execution, Signal & Risk, 11 Lern-KI-Tests.
+- **Browser-E2E** (Playwright, außerhalb des Repos): Login, Cooldown-Migration, UI einfach/Analyse inkl. Mobil, Lern-KI, Backup/Restore, Backtest-Bericht, XSS-Smoke.
+- **Lücken:** Monitoring-Aktionen (Phase 7), UI-Smoke für LIVE-Gate/Wallet.
 
 ## 10. Technische Schulden
 
@@ -153,6 +153,7 @@ Kein Hotspot gefunden, der eine Optimierung rechtfertigt. Render ist bereits ged
 ## Änderungsprotokoll
 
 - Phase 0: Audit erstellt.
+- Phase 5 (2.6.0): Backtest reproduzierbar und versioniert (Run-ID aus Datensatz-Hash + Parametern + Code-Version), Walk-Forward immer aktiv, Stress-Tests inkl. Einstiegsverzögerung ohne Look-Ahead, Monte-Carlo-Drawdown, Auswertung je Regime, Trade-CSV-Export, Lauf-Historie (gespeichert, max. 20). 3 neue Selbsttests, neuer E2E-Test für den Backtest-Bericht.
 - Phase 4 (2.5.0): Positions-Lebenszyklus mit Verlauf (Migration für bestehende Positionen, unterbrochene Verkäufe → Abgleich), Execution-Provider-Abstraktion mit Fehlercodes, Portfolio-Integrität (Positionen-Ansicht, Bot Health), stille Wallet-Wiederverbindung. 5 neue Selbsttests.
 - Phase 3 (2.4.0): Score-Attribution & Kipp-Punkte, Signal-Konflikte, Zeitfenster-Abgleich, Signal-Decay, Regime VOL_SHOCK / LOW_QUALITY_MARKET, Drawdown-Modus/-Grenze, Risiko-Abschläge mit Reason Codes; einfache Ansicht mit Kurzbegründung „Warum …?“. **Verhaltensänderungen:** Auto-Käufe werden zusätzlich bei widersprüchlichen Signalen, hohem Drawdown und marktweit schlechter Datenlage verhindert; automatische Positionsgrößen können durch die Abschläge kleiner ausfallen; Ereignis-Signale verlieren nach 5 min an Stärke.
 - Phase 2: Stufen-Scores und Security-Prüfbericht (Detail → Übersicht im Analyse-Modus bzw. Risiko & Security in beiden Modi); 3 Security-Selbsttests (Gate nicht kompensierbar, NO_DATA ≠ PASS, Stufen konsistent zur Entscheidung).
