@@ -1,6 +1,6 @@
 # Smart Lab – Architektur & technischer Audit
 
-Stand: Phase 2 des Master-Prompts „Ganzheitliche Optimierung“ (App-Version 2.3.0).
+Stand: Phase 3 des Master-Prompts „Ganzheitliche Optimierung“ (App-Version 2.4.0).
 Dieses Dokument wird in jeder Phase fortgeschrieben (siehe „Änderungsprotokoll“ am Ende).
 
 ## 1. Überblick
@@ -97,8 +97,8 @@ UI-Schicht (DOM): Views, Detail-Panel, Modals, Charts (Canvas), Toasts, Alarm-Fe
 | Datenebene | Rate-Limit, Backoff, Timeout, Dedupe, Cache mit TTL, Health je Quelle, Schema-Validierung, Stale-Erkennung, NaN/Infinity/negativ/unplausibel → null, Zählung ungültiger Felder & verworfener Datensätze je Quelle (System-Ansicht) | – |
 | Scanner | Schnellfilter, Security-Queue, Priorisierung, Entscheidungskette je Token, Stufen-Scores Discovery → Datenqualität → Security → Markt → Handelsbereitschaft mit Teilbegründungen (`stageScores`) | – |
 | Security | eigene Engine, CRITICAL blockiert immer (auch manuell), Stale-Security blockiert, Prüfbericht mit 14 Checks (Ergebnis, Schweregrad, Quelle, Zeitpunkt, Aktion aus den echten Blockern, `securityReport`), NO_DATA getrennt von PASS | Creator-/Wallet-Historie ohne Datenquelle (bleibt NO_DATA) |
-| Signale | 12 Signaltypen, 7 Strategien, Konsens, Confidence getrennt vom Score | keine Attribution pro/contra, kein Signal-Konflikt-Detektor, kein Multi-Timeframe-Abgleich, kein Signal-Alter (3) |
-| Risk | harte Limits, Cooldowns, Exposure, Korrelation, Tageslimit, Overtrading, Impact-Grenze | kein Drawdown-Modus, keine Staleness-/Execution-Penalty mit Reason Codes (3) |
+| Signale | 12 Signaltypen, 7 Strategien, Konsens, Confidence getrennt vom Score, Score-Attribution (pro/contra/Abzüge = Final Score) mit Kipp-Punkten, Signal-Konflikt-Detektor (8 Muster, Gewicht ≥ 3 blockiert Auto-Käufe, abschaltbar), Multi-Timeframe-Abgleich 5m/1h/6h/24h, Signal-Decay für Ereignis-Signale | Kontextgewichtung nach Regime nur über gelernte Regeln |
+| Risk | harte Limits, Cooldowns, Exposure, Korrelation, Tageslimit, Overtrading, Impact-Grenze, Drawdown-Modus (×0,5 ab 10 %) & Drawdown-Grenze (keine Auto-Käufe ab 20 %), Abschläge mit Reason Codes (Datenalter, Execution-Unsicherheit, unbestätigte Daten, Cluster-Exposure), marktweite No-Trade-Zone bei schlechter Datenlage | – |
 | Portfolio | Journal, realisiert/unrealisiert, Fees/Slippage, Reconciliation nach Neustart | Positionen nur OPEN/CLOSED statt Lebenszyklus (4) |
 | Execution | Order-State-Machine, Idempotenz-Keys, Locks, Pre-Trade-Check mit frischen Daten | keine Provider-Abstraktion (Quote/Build/Simulate/Sign/Send/Confirm), keine Failure-Codes (4) |
 | Wallet | nur lesend, Phantom/Solflare/Backpack, Balance per RPC, Signieren deaktiviert | Wiederverbindung nur manuell (4) |
@@ -135,7 +135,7 @@ Kein Hotspot gefunden, der eine Optimierung rechtfertigt. Render ist bereits ged
 
 ## 9. Tests (Ist)
 
-- **53 Selbsttests** in der App (System → Selbsttest): Grundlagen, Trading-Limits, Daten/Stale, Security, Chaos (API-/RPC-Ausfall, 429, falsches JSON, Scanner-Lock, verspätete Antworten, Reload-Recovery), Status-Logik, LIVE-Gating, Storage, Backtest-Look-Ahead, 11 Lern-KI-Tests.
+- **57 Selbsttests** in der App (System → Selbsttest): Grundlagen, Trading-Limits, Daten/Stale, Security, Chaos (API-/RPC-Ausfall, 429, falsches JSON, Scanner-Lock, verspätete Antworten, Reload-Recovery), Status-Logik, LIVE-Gating, Storage, Backtest-Look-Ahead, 11 Lern-KI-Tests.
 - **Browser-E2E** (Playwright, außerhalb des Repos): Login, Cooldown-Migration, UI einfach/Analyse inkl. Mobil, Lern-KI.
 - **Lücken:** Property-/Grenzwert-Tests für harte Limits und Positionsgröße, Positions-Lebenszyklus, Execution-Provider, Monitoring-Aktionen, Backtest-Reproduzierbarkeit, UI-Smoke für LIVE-Gate/Wallet/Diagnose.
 
@@ -153,5 +153,6 @@ Kein Hotspot gefunden, der eine Optimierung rechtfertigt. Render ist bereits ged
 ## Änderungsprotokoll
 
 - Phase 0: Audit erstellt.
+- Phase 3 (2.4.0): Score-Attribution & Kipp-Punkte, Signal-Konflikte, Zeitfenster-Abgleich, Signal-Decay, Regime VOL_SHOCK / LOW_QUALITY_MARKET, Drawdown-Modus/-Grenze, Risiko-Abschläge mit Reason Codes; einfache Ansicht mit Kurzbegründung „Warum …?“. **Verhaltensänderungen:** Auto-Käufe werden zusätzlich bei widersprüchlichen Signalen, hohem Drawdown und marktweit schlechter Datenlage verhindert; automatische Positionsgrößen können durch die Abschläge kleiner ausfallen; Ereignis-Signale verlieren nach 5 min an Stärke.
 - Phase 2: Stufen-Scores und Security-Prüfbericht (Detail → Übersicht im Analyse-Modus bzw. Risiko & Security in beiden Modi); 3 Security-Selbsttests (Gate nicht kompensierbar, NO_DATA ≠ PASS, Stufen konsistent zur Entscheidung).
 - Phase 1 (2.3.0): harte Untergrenzen Loss-Cooldown 10 min / globale Pause 5 min wiederhergestellt; `app.js` entfernt; Datenvalidierung mit Zählung je Quelle; Voll-Backup & geprüftes Wiederherstellen; Login mit PBKDF2, Fehlversuch-Sperre und gesperrten App-Aktionen; Randfall „Positionsgröße > Exposure“ behoben (durch Fuzz-Test gefunden); 3 neue Selbsttests, neue E2E-Tests für Backup und Login-Sperre.

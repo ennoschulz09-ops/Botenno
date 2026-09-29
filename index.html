@@ -342,6 +342,7 @@ pre.raw{white-space:pre-wrap;word-break:break-all;font:11px/1.4 var(--mono);back
 .chain small{font-weight:500;font-size:9.5px;margin-left:3px}
 .chain .fin{white-space:normal}
 .cards2>*,.grid2>*,.grid3>*,.grid4>*{min-width:0}
+.whyshort{margin-bottom:8px}.whyshort small{display:block;margin-top:4px;line-height:1.5}
 .stg{margin:6px 0 8px}.stg small{display:block;line-height:1.5;color:var(--dim)}.stg small .chip{margin-right:4px}
 @media (max-width:900px){.grid2.lgrid{grid-template-columns:minmax(0,1fr)}}
 .note,.check b,.check small{overflow-wrap:anywhere}
@@ -466,7 +467,7 @@ pre.raw{white-space:pre-wrap;word-break:break-all;font:11px/1.4 var(--mono);back
    ===================================================================== */
 
 /* ============================== KONSTANTEN ============================== */
-const APP_VERSION = '2.3.0';
+const APP_VERSION = '2.4.0';
 /* true, wenn Version a älter als b ist (fehlende Version = sehr alt). */
 const verLt = (a, b) => { if (typeof a !== 'string') return true; const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const STRATEGY_VERSION = '1.0.0';
@@ -763,6 +764,9 @@ const SETTINGS_SCHEMA = [
   { k: 'globalPauseMin', s: 'Risiko', l: 'Globale Pause nach Verlustserie', t: 'int', def: 5, min: HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN, max: 1440, u: 'min', hard: true },
   { k: 'maxTradesPerHour', s: 'Risiko', l: 'Overtrading-Limit (Käufe/Stunde)', t: 'int', def: 6, min: 1, max: 30 },
   { k: 'correlationLimit', s: 'Risiko', l: 'Korrelations-Grenze (Konzentration)', t: 'num', def: 0.85, min: 0.5, max: 1, step: 0.01 },
+  { k: 'ddReducePct', s: 'Risiko', l: 'Drawdown-Modus: Positionsgröße halbieren ab', t: 'num', def: 10, min: 2, max: 50, u: '%' },
+  { k: 'ddStopPct', s: 'Risiko', l: 'Drawdown-Grenze: keine Auto-Käufe ab', t: 'num', def: 20, min: 5, max: 80, u: '%' },
+  { k: 'signalConflictBlock', s: 'Risiko', l: 'Auto-Kauf bei widersprüchlichen Signalen verhindern', t: 'bool', def: true },
   { k: 'consensusMinWeight', s: 'Risiko', l: 'Min. Strategie-Konsens (Summe Gewichte)', t: 'num', def: 1.5, min: 0.5, max: 5, step: 0.1 },
   // Ausführung
   { k: 'maxSlippagePct', s: 'Ausführung', l: 'Max. Slippage / Price Impact', t: 'num', def: 3, min: 0.1, max: 25, u: '%' },
@@ -862,6 +866,7 @@ function validateSettings(input, base) {
   if (out.tp1Frac + out.tp2Frac > 1) revert(['tp1Frac', 'tp2Frac'], 'TP1- + TP2-Anteil darf 100 % nicht überschreiten');
   if (out.maxPositionPct > out.maxExposurePct) revert(['maxPositionPct'], 'Max. Positionsgröße darf Max. Exposure nicht überschreiten');
   if (out.maxPositionPct > out.maxExposurePct) out.maxPositionPct = out.maxExposurePct; // auch der Rückfallwert darf die Exposure nicht überschreiten
+  if (!(out.ddReducePct < out.ddStopPct)) revert(['ddReducePct', 'ddStopPct'], 'Drawdown-Modus muss unter der Drawdown-Grenze liegen');
   // harte Grenzen (redundant zur Schema-Grenze, bewusst doppelt abgesichert)
   out.maxBuysPerCoin = Math.min(out.maxBuysPerCoin, HARD_LIMITS.MAX_BUYS_PER_COIN);
   out.sellCooldownMin = Math.max(out.sellCooldownMin, HARD_LIMITS.MIN_SELL_COOLDOWN_MIN);
@@ -1392,6 +1397,9 @@ const BLOCKER_DEFS = {
   SCORE_TOO_LOW: [8, 'STRATEGY', 'Score zu niedrig'],
   NO_CONSENSUS: [8, 'STRATEGY', 'Kein Strategie-Konsens'],
   LEARNED_RULE: [8, 'STRATEGY', 'Gelernte Regel (validiert, nur verschärfend)'],
+  SIGNAL_CONFLICT: [8, 'STRATEGY', 'Widersprüchliche Signale'],
+  LOW_QUALITY_MARKET: [2, 'DATA', 'Marktweit schlechte Datenqualität (No-Trade-Zone)'],
+  DRAWDOWN_LIMIT: [4, 'PORTFOLIO', 'Drawdown-Grenze erreicht'],
   NO_SIGNAL: [9, 'SIGNAL', 'Kein Kaufsignal']
 };
 function mkBlocker(code, msg, extra) {
@@ -1612,6 +1620,7 @@ function analyzeToken(tok, ctx) {
   if (emaF != null && emaS != null && emaF > emaS && A.price.drawdown != null && A.price.drawdown <= -4 && A.price.drawdown >= -15) {
     const rs = rsi(prices, 14); if (rs != null && rs >= 38 && rs <= 55) addSig('PULLBACK', 40 + Math.abs(A.price.drawdown) * 2, Math.min(C.price, C.market), `Rücksetzer ${fmtPct(A.price.drawdown)} im Aufwärtstrend, RSI ${rs.toFixed(0)}`);
   }
+  applySignalDecay(tok, sig, now);
   A.signals = sig;
 
   /* --- Komponenten-Scores (Scorecard) --- */
@@ -1655,7 +1664,78 @@ function analyzeToken(tok, ctx) {
     security: !sec ? 'UNKNOWN' : secStale ? 'STALE' : 'LIVE', holders: sec && isNum(sec.top10Pct) ? (secStale ? 'STALE' : 'LIVE') : 'UNKNOWN', social: 'UNKNOWN'
   };
   A.unknowns = [...new Set(A.unknowns)];
+  A.mtf = mtfAlignment(A);
+  A.sigConflicts = signalConflicts(A);
   return A;
+}
+/* Signal-Decay (seit 2.4.0): ereignisartige Signale (Breakout, Volumen-/Liquiditätsschub, Whale, Recovery,
+   New-Pair-Momentum) verlieren nach 5 min ununterbrochener Dauer Gewicht (bis min. 40 % nach 35 min).
+   Verschwindet ein Signal, beginnt es beim nächsten Auftreten wieder frisch. */
+const DECAY_SIGNALS = new Set(['BREAKOUT', 'VOLUME_EXPANSION', 'LIQUIDITY_GROWTH', 'WHALE_ACTIVITY', 'RECOVERY', 'NEW_PAIR_MOMENTUM']);
+const DECAY_START_MS = 5 * MIN, DECAY_SPAN_MS = 30 * MIN, DECAY_FLOOR = 0.4;
+function applySignalDecay(tok, sig, now) {
+  const seen = tok.sigSeen || (tok.sigSeen = {}), active = new Set();
+  for (const s of sig) {
+    active.add(s.type);
+    if (!isNum(seen[s.type])) seen[s.type] = now;
+    s.since = seen[s.type];
+    const age = now - s.since;
+    if (DECAY_SIGNALS.has(s.type) && age > DECAY_START_MS) {
+      const f = Math.max(DECAY_FLOOR, 1 - (age - DECAY_START_MS) / DECAY_SPAN_MS);
+      s.rawStrength = s.strength; s.strength = Math.round(s.strength * f); s.decay = Math.round(f * 100) / 100;
+      s.reason += ` · abgeschwächt ×${s.decay.toFixed(2)} (seit ${fmtAge(age)} aktiv)`;
+    }
+  }
+  for (const k of Object.keys(seen)) if (!active.has(k)) delete seen[k];
+}
+/* Multi-Timeframe-Abgleich: Richtung je Zeitfenster (5m / 1h / 6h / 24h) relativ zur 5m-Richtung. */
+function mtfAlignment(A) {
+  const ch = A.price.chg, dir = v => (!isNum(v) ? null : v > 1 ? 1 : v < -1 ? -1 : 0);
+  const d = { m5: dir(ch.m5), h1: dir(ch.h1), h6: dir(ch.h6), h24: dir(ch.h24) };
+  const known = Object.values(d).filter(x => x != null);
+  if (d.m5 == null || known.length < 2) return { dirs: d, score: null, label: 'UNKNOWN' };
+  const agree = known.filter(x => x === d.m5).length / known.length;
+  return { dirs: d, score: Math.round(agree * 100), label: agree === 1 ? (d.m5 > 0 ? 'ALIGNED_UP' : d.m5 < 0 ? 'ALIGNED_DOWN' : 'FLAT') : agree >= 0.5 ? 'PARTIAL' : 'MIXED' };
+}
+/* Signal-Konflikt-Detektor: Kaufsignale, die anderen Messwerten widersprechen. HIGH zählt doppelt. */
+const CONFLICT_DE = { MTF_DIVERGENCE: 'Zeitfenster widersprechen sich', MTF_DOWNTREND: 'gegen den Tagestrend', OVERBOUGHT: 'überkauft', VOLUME_NO_PRICE: 'Volumen ohne Preis', CONTRADICTORY: 'widersprüchliche Strategien', LIQ_DIVERGENCE: 'Liquidität fällt bei steigendem Preis', TREND_CONFLICT: 'Trend unbestätigt', SELL_PRESSURE: 'Verkäuferüberhang' };
+function signalConflicts(A) {
+  const out = [], has = t => A.signals.some(x => x.type === t), buy = A.signals.filter(x => !CONTEXT_SIGNALS.has(x.type)), ch = A.price.chg, ta = A.ta;
+  const add = (code, severity, text) => out.push({ code, severity, text });
+  if (!buy.length) return out;
+  if (isNum(ch.m5) && ch.m5 > 0 && isNum(ch.h1) && ch.h1 <= -15) add('MTF_DIVERGENCE', 'HIGH', `Kaufsignal auf 5m (${fmtPct(ch.m5)}), aber 1h deutlich fallend (${fmtPct(ch.h1)})`);
+  if (isNum(ch.h24) && ch.h24 <= -40 && isNum(ch.h1) && ch.h1 > 0) add('MTF_DOWNTREND', 'WARN', `24h ${fmtPct(ch.h24)} – kurzfristige Stärke gegen den Tagestrend`);
+  if ((has('MOMENTUM') || has('BREAKOUT')) && ta && isNum(ta.rsi) && ta.rsi >= 80) add('OVERBOUGHT', 'HIGH', `RSI ${ta.rsi.toFixed(0)} – überkauft bei Momentum/Breakout`);
+  if (has('VOLUME_EXPANSION') && isNum(ch.m5) && Math.abs(ch.m5) < 1) add('VOLUME_NO_PRICE', 'WARN', `Volumen-Anstieg ohne Preisbestätigung (5m ${fmtPct(ch.m5)})`);
+  if (has('MEAN_REVERSION') && (has('MOMENTUM') || has('TREND_CONTINUATION'))) add('CONTRADICTORY', 'WARN', 'Mean Reversion und Momentum/Trend gleichzeitig – widersprüchliche Lesart');
+  if (isNum(A.liq.chg5) && A.liq.chg5 <= -10 && isNum(ch.m5) && ch.m5 > 3) add('LIQ_DIVERGENCE', 'HIGH', `Preis steigt (${fmtPct(ch.m5)}), Liquidität fällt (${fmtPct(A.liq.chg5)})`);
+  if (has('TREND_CONTINUATION') && ta && isNum(ta.ema9) && isNum(ta.ema21) && ta.ema9 < ta.ema21) add('TREND_CONFLICT', 'WARN', 'Trendsignal, aber EMA9 unter EMA21');
+  if (A.tx.ratio5 != null && A.tx.n5 >= 10 && A.tx.ratio5 < 0.45) add('SELL_PRESSURE', 'WARN', `Kaufsignal bei Verkäuferüberhang (5m ${Math.round(A.tx.ratio5 * 100)} % Käufer)`);
+  return out;
+}
+const conflictWeight = list => sum(arr(list).map(c => (c.severity === 'HIGH' ? 2 : 1)));
+/* Score-Attribution: Final Score = 50 + Σ Gewicht × (Komponente − 50) − Risiko-/Pump-Abzug (vor Rundung/Begrenzung).
+   Dazu: was die aktuelle Entscheidung kippen würde. */
+function scoreAttribution(A, D, S) {
+  if (!A || !D) return null;
+  const items = Object.entries(W_SCORE).map(([k, w]) => ({ key: k, name: COMP_NAMES[k], value: A.components[k], weight: w, delta: Math.round(w * (A.components[k] - 50) * 10) / 10 }));
+  const penRisk = Math.max(0, A.risk.total - 40) * 0.6, penPump = A.pump.detected ? 15 : 0, penalties = [];
+  if (penRisk) penalties.push({ name: `Risiko ${A.risk.total} über 40`, delta: -Math.round(penRisk * 10) / 10 });
+  if (penPump) penalties.push({ name: 'Pump erkannt', delta: -15 });
+  const raw = 50 + sum(Object.entries(W_SCORE).map(([k, w]) => w * (A.components[k] - 50))) - penRisk - penPump;
+  const flips = [], ok = D.decision === 'APPROVED' || D.decision === 'BUY_CANDIDATE';
+  if (ok) {
+    flips.push(`Score ${A.finalScore}, Grenze ${S.minScore} → Puffer ${A.finalScore - S.minScore} Punkte`);
+    flips.push(`Data Confidence ${A.confidence.total}, Grenze ${S.minConfidence} → Puffer ${A.confidence.total - S.minConfidence}`);
+    flips.push(`Risk ${A.risk.total}, Grenze ${S.maxRiskScore} → Puffer ${S.maxRiskScore - A.risk.total}`);
+    if (isNum(A.liq.usd)) flips.push(`Liquidität ${fmtUsd(A.liq.usd)} – unter ${fmtUsd(S.minLiq)} wäre es NO TRADE`);
+    if (isNum(A.sec.age)) flips.push(`Security-Daten gelten noch ${fmtAge(Math.max(0, S.securityTtlMin * MIN - A.sec.age))}, danach Neuprüfung`);
+    flips.push('Jeder kritische Security-Befund (z. B. aktive Freeze Authority), Pump oder Datenkonflikt blockiert sofort – unabhängig vom Score');
+  } else {
+    for (const b of D.blockers.slice(0, 4)) flips.push(`Muss erfüllt sein: ${b.code} – ${b.msg}`);
+    if (A.finalScore < S.minScore) flips.push(`Es fehlen ${S.minScore - A.finalScore} Score-Punkte bis zur Grenze ${S.minScore}`);
+  }
+  return { base: 50, items, pro: items.filter(x => x.delta > 0).sort((a, b) => b.delta - a.delta), contra: items.filter(x => x.delta < 0).sort((a, b) => a.delta - b.delta), penalties, raw: Math.round(raw * 10) / 10, finalScore: A.finalScore, flips };
 }
 
 /* ============================== STRATEGIEN & KONSENS ============================== */
@@ -1731,7 +1811,11 @@ function decideToken(tok, A, ctx) {
     if (A.fallback) add('DATA_FALLBACK', 'Primärquelle nicht aktuell – nur GeckoTerminal-Fallback');
     return A.tags.length ? A.tags.join(', ') : 'unauffällig';
   });
-  stageRun('SIGNAL_ENGINE', add => { if (!A.signals.some(x => !CONTEXT_SIGNALS.has(x.type))) add('NO_SIGNAL', 'Keine Kaufsignale (nur Kontext-Signale)'); return A.signals.map(x => SIGNAL_NAMES[x.type] + ' ' + x.strength).join(', '); });
+  stageRun('SIGNAL_ENGINE', add => {
+    if (!A.signals.some(x => !CONTEXT_SIGNALS.has(x.type))) add('NO_SIGNAL', 'Keine Kaufsignale (nur Kontext-Signale)');
+    if (S.signalConflictBlock && conflictWeight(A.sigConflicts) >= 3) add('SIGNAL_CONFLICT', A.sigConflicts.map(c => c.text).join(' · '));
+    return A.signals.map(x => SIGNAL_NAMES[x.type] + ' ' + x.strength).join(', ');
+  });
   stageRun('RISK_ENGINE', add => {
     if (A.risk.level === 'CRITICAL' || A.risk.total > S.maxRiskScore) add('RISK_TOO_HIGH', `Risk ${A.risk.total} (${A.risk.level}) > ${S.maxRiskScore}`);
     if (A.confidence.total < S.minConfidence) add('CONFIDENCE_LOW', `Confidence ${A.confidence.total} < ${S.minConfidence}`);
@@ -1901,7 +1985,10 @@ function securityReport(tok, A, D, S) {
 /* ============================== MARKET REGIME ============================== */
 function computeRegime(analyses, sol) {
   const h1 = analyses.map(a => a.price.chg.h1).filter(isNum), m5 = analyses.map(a => a.price.chg.m5).filter(isNum);
-  if (h1.length < 5) return { tags: ['UNKNOWN'], breadth: null, medH1: null, medM5: null, medVol: null, n: h1.length, sol };
+  // Low-Quality-Markt: Großteil der analysierten Tokens veraltet, nur Fallback oder mit sehr niedriger Confidence → No-Trade-Zone
+  const lowQ = analyses.length ? analyses.filter(a => a.stale || a.fallback || (a.confidence && a.confidence.total < 40)).length / analyses.length : 0;
+  const lowQuality = analyses.length >= 10 && lowQ >= 0.7;
+  if (h1.length < 5) return { tags: lowQuality ? ['LOW_QUALITY_MARKET'] : ['UNKNOWN'], breadth: null, medH1: null, medM5: null, medVol: null, n: h1.length, lowQ, sol };
   const breadth = h1.filter(x => x > 0).length / h1.length;
   const medH1 = median(h1), medM5 = median(m5.map(Math.abs)), vols = analyses.map(a => a.price.volPct).filter(isNum), medVol = median(vols);
   const tags = [];
@@ -1911,7 +1998,9 @@ function computeRegime(analyses, sol) {
   tags.push(breadth >= 0.55 && medH1 > 2 ? 'BULLISH' : breadth <= 0.4 && medH1 < -2 ? 'BEARISH' : 'NEUTRAL');
   const lq = analyses.map(a => a.liq && a.liq.chg5).filter(isNum), medLiq = lq.length >= 5 ? median(lq) : null;
   if (medLiq != null && medLiq > 3) tags.push('LIQUIDITY_EXPANSION'); else if (medLiq != null && medLiq < -3) tags.push('LIQUIDITY_CONTRACTION');
-  return { tags, breadth, medH1, medM5, medVol, medLiq, n: h1.length, sol };
+  if (medM5 != null && medM5 > 15) tags.push('VOL_SHOCK');
+  if (lowQuality) tags.push('LOW_QUALITY_MARKET');
+  return { tags, breadth, medH1, medM5, medVol, medLiq, lowQ, n: h1.length, sol };
 }
 
 /* ============================== ANALYTICS (reine Funktionen) ============================== */
@@ -2641,7 +2730,7 @@ const BOT_TRANSITIONS = {
 const MANUAL_HARD = new Set(['PRICE_MISSING', 'DATA_STALE', 'DATA_FALLBACK', 'DATA_CONFLICT', 'SECURITY_CRITICAL', 'SECURITY_UNKNOWN', 'SECURITY_UNVERIFIED', 'SECURITY_STALE', 'LOW_LIQUIDITY', 'LIQUIDITY_SHOCK']);
 const ALERT_TAGS = { BUY_CANDIDATE: '🔔 BUY CANDIDATE', SCORE: '⭐ SCORE', X2: '🚀 x2 seit Fund', NEW_TOKEN: '🆕 NEUER TOKEN', LIQ_SPIKE: '💧 LIQUIDITY SPIKE', LIQ_COLLAPSE: '⚠️ LIQUIDITY COLLAPSE', VOL_SPIKE: '📈 VOLUME SPIKE', WHALE: '🐋 WHALE ACTIVITY', SECURITY: '🛡 SECURITY RISK', SELL_CANDIDATE: '↘ SELL CANDIDATE', STOP_HIT: '⛔ STOP HIT', TP_HIT: '🎯 TAKE PROFIT', API_FAIL: '📡 API FAILURE', RPC_FAIL: '🛰 RPC FAILURE', WATCH: '👁 WATCHLIST', RISK: '⚠️ RISK', SYSTEM: '⚙ SYSTEM', TRADE: '💱 TRADE', POSITION_DATA: '⚠️ POSITIONSDATEN', LEGACY: '🔔 Alarm' };
 /* Nur diese globalen Blocker bedeuten „BLOCKED“. Kein Kandidat / niedriger Score / kein Konsens → WAITING, nie BLOCKED. */
-const HARD_GLOBAL = new Set(['EMERGENCY_STOP', 'SAFE_MODE', 'OFFLINE', 'SYSTEM_UNHEALTHY', 'FEE_UNKNOWN', 'DAILY_LOSS_LIMIT', 'GLOBAL_PAUSE', 'LOSS_COOLDOWN', 'RECONCILIATION_REQUIRED', 'SECURITY_SOURCES_DOWN', 'LIVE_UNAVAILABLE']);
+const HARD_GLOBAL = new Set(['EMERGENCY_STOP', 'SAFE_MODE', 'OFFLINE', 'SYSTEM_UNHEALTHY', 'FEE_UNKNOWN', 'DAILY_LOSS_LIMIT', 'GLOBAL_PAUSE', 'LOSS_COOLDOWN', 'RECONCILIATION_REQUIRED', 'SECURITY_SOURCES_DOWN', 'LIVE_UNAVAILABLE', 'LOW_QUALITY_MARKET', 'DRAWDOWN_LIMIT']);
 const GENESIS = { '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d': 'mainnet-beta', 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG': 'devnet', '4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY': 'testnet' };
 const CHAIN_STEPS = [
   ['DATA', ['PRICE_MISSING', 'DATA_STALE', 'DATA_CONFLICT', 'DATA_FALLBACK']],
@@ -2649,7 +2738,7 @@ const CHAIN_STEPS = [
   ['LIQUIDITY', ['LOW_LIQUIDITY', 'THIN_LIQUIDITY', 'LIQUIDITY_SHOCK']],
   ['MARKET', ['MCAP_RANGE', 'PAIR_TOO_NEW']],
   ['VOLUME', ['LOW_VOLUME', 'BUYER_RATIO']],
-  ['MOMENTUM', ['NO_SIGNAL', 'PUMP_DETECTED']],
+  ['MOMENTUM', ['NO_SIGNAL', 'PUMP_DETECTED', 'SIGNAL_CONFLICT']],
   ['RISK', ['RISK_TOO_HIGH']],
   ['SCORE', ['SCORE_TOO_LOW']],
   ['CONFIDENCE', ['CONFIDENCE_LOW']],
@@ -3126,6 +3215,16 @@ function createCore(opts) {
   }
 
   /* ---------- Position Sizing ---------- */
+  function drawdownPct() {
+    const eq = equityInfo().equity, pf = state.portfolio, peak = Math.max(pf.peakEquity || 0, eq || 0);
+    return peak > 0 && isNum(eq) ? Math.max(0, (peak - eq) / peak * 100) : 0;
+  }
+  /* Anteil des erlaubten Exposures, der bereits in Positionen derselben Strategie steckt (Cluster-Konzentration). */
+  function clusterShare(leadId, eq) {
+    if (!leadId || !(eq > 0)) return 0;
+    const same = sum(state.positions.filter(p => p.strategy === leadId).map(p => p.costUsd || 0));
+    return same / Math.max(1e-9, eq * S().maxExposurePct / 100);
+  }
   function sizePosition(t, A, leadId, manualSize) {
     const s = S(), eqi = equityInfo(), eq = eqi.equity;
     if (!isNum(eq) || eq <= 0) return { size: 0, reason: 'Kein Kapital verfügbar' };
@@ -3143,8 +3242,16 @@ function createCore(opts) {
     const fRisk = clamp(1.2 - A.risk.total / 100, 0.2, 1), fConf = clamp((A.confidence.total - 40) / 60, 0, 1);
     const fVol = A.price.volPct != null ? clamp(1 - Math.max(0, A.price.volPct - 5) / 30, 0.3, 1) : 0.6;
     const liq = A.liq.usd, mi = s.maxSlippagePct / 2 / 100;
+    // Risiko-Abschläge mit Reason Codes (können die Größe nur verkleinern)
+    const adj = [], dd = drawdownPct();
+    if (dd >= s.ddReducePct) adj.push({ code: 'DRAWDOWN_MODE', f: 0.5, text: `Drawdown ${dd.toFixed(1)} % ≥ ${s.ddReducePct} % → Größe ×0,5` });
+    if (isNum(A.dataAge) && A.dataAge > s.staleAfterSec * SEC * 0.5) adj.push({ code: 'DATA_AGE', f: 0.7, text: `Daten ${fmtAge(A.dataAge)} alt → Größe ×0,7` });
+    if (A.liq.impactPlanned != null && A.liq.impactPlanned > s.maxSlippagePct / 2) adj.push({ code: 'EXECUTION_UNCERTAINTY', f: 0.6, text: `erwarteter Price Impact ${A.liq.impactPlanned.toFixed(2)} % → Größe ×0,6` });
+    if (!A.crossChecked) adj.push({ code: 'UNCONFIRMED_DATA', f: 0.85, text: 'nicht von zweiter Quelle bestätigt → Größe ×0,85' });
+    const cl = clusterShare(leadId, eq); if (cl >= 0.5) adj.push({ code: 'CLUSTER_EXPOSURE', f: 0.7, text: `${Math.round(cl * 100)} % des erlaubten Exposures bereits in Strategie ${leadId} → Größe ×0,7` });
+    const fAdj = adj.reduce((m, a) => m * a.f, 1);
     const caps = {
-      Strategie: eq * basePct / 100 * fRisk * fConf * fVol,
+      Strategie: eq * basePct / 100 * fRisk * fConf * fVol * fAdj,
       Liquidität: isNum(liq) && liq > 0 ? mi * (liq / 2) / (1 - mi) : 0,
       Exposure: Math.max(0, eq * s.maxExposurePct / 100 - eqi.exposure),
       'Max. Position': maxPos,
@@ -3152,7 +3259,7 @@ function createCore(opts) {
     };
     const capBy = Object.entries(caps).sort((a, b) => a[1] - b[1])[0];
     const size = Math.max(0, capBy[1]);
-    const factors = { basePct, fRisk: m2(fRisk), fConf: m2(fConf), fVol: m2(fVol), caps: Object.fromEntries(Object.entries(caps).map(([k, v]) => [k, m2(v)])) };
+    const factors = { basePct, fRisk: m2(fRisk), fConf: m2(fConf), fVol: m2(fVol), fAdj: m2(fAdj), adj, caps: Object.fromEntries(Object.entries(caps).map(([k, v]) => [k, m2(v)])) };
     if (size < MIN_ORDER_USD) return { size: 0, reason: `Größe ${fmtUsd(size)} < Minimum ${fmtUsd(MIN_ORDER_USD)} (begrenzt durch ${capBy[0]})`, factors, capBy: capBy[0] };
     return { size: m2(size), capBy: capBy[0], factors };
   }
@@ -3179,6 +3286,8 @@ function createCore(opts) {
     const rpcSt = rpcEndpoints().map(e => http.status(e.name));
     if (rpcSt.length && rpcSt.every(x => x === 'OFFLINE') && (!s.ffRugcheck || http.status('rugcheck') === 'OFFLINE')) add('SECURITY_SOURCES_DOWN', 'Alle Security-Quellen (RPC' + (s.ffRugcheck ? ', RugCheck' : '') + ') OFFLINE');
     if (r.dailyLimitHit) add('DAILY_LOSS_LIMIT', `Tagesverlust-Limit erreicht (${fmtSigned(r.dailyPnl)})`);
+    if (auto) { const dd = drawdownPct(); if (dd >= s.ddStopPct) add('DRAWDOWN_LIMIT', `Drawdown ${dd.toFixed(1)} % ≥ ${s.ddStopPct} % – keine neuen Auto-Käufe`); }
+    if (auto && arr(state.regime.tags).includes('LOW_QUALITY_MARKET')) add('LOW_QUALITY_MARKET', `${Math.round((state.regime.lowQ || 0) * 100)} % der Tokens mit veralteten/unsicheren Daten – No-Trade-Zone`);
     if (r.globalPauseUntil > now) add('GLOBAL_PAUSE', `Globale Pause nach Verlustserie – noch ${fmtAge(r.globalPauseUntil - now)}`);
     if (r.lossCooldownUntil > now) add('LOSS_COOLDOWN', `Loss-Cooldown – noch ${fmtAge(r.lossCooldownUntil - now)}`);
     const hourBuys = r.buyTimes.filter(x => now - x < HOUR).length;
@@ -4780,7 +4889,7 @@ function createCore(opts) {
     state, log, http, env, on, init, S, HARD_LIMITS,
     start, pause, stop, emergencyStop, releaseEmergency, setMode, setAutoTrading, setSafeMode,
     executeBuy, executeSell, execCheck: (t, o) => execCheck(t, t.A, o), globalBlockers, buildCtx, estFees, estImpact, equityInfo, portfolioRisk, positionCorrelations,
-    systemHealth, diagnostics, botHealth, readiness, candidateChain, liveReadiness, preLiveChecks, ackReconciliation, requestSignature, rpcEndpoints, fetchOhlcv, fetchCandlesForBacktest, walletConnect, walletDisconnect, walletBalance, walletNetwork,
+    systemHealth, diagnostics, botHealth, readiness, drawdownPct, candidateChain, liveReadiness, preLiveChecks, ackReconciliation, requestSignature, rpcEndpoints, fetchOhlcv, fetchCandlesForBacktest, walletConnect, walletDisconnect, walletBalance, walletNetwork,
     updateSettings, updateStrategies, rollbackTo, addWatch, removeWatch, updateWatch, select, exportData, importSettings, resetSettings, resetPortfolio, freshStart,
     learnView, learnDecision, learnPromote, learnReject, learnRollback, exportBackup, validateBackup, restoreBackup, learnRunNow: () => { const r = learnRun(true); persistNow(); return r; },
     newSession, factoryReset, persistNow, enqueueSecurity, clearFeed: () => { state.feed = []; persist(); },
@@ -5133,6 +5242,60 @@ const SELF_TESTS = [
     assert(low.market.reasons.some(r => r.ok === false && /Liquidität/.test(r.text)), 'zu niedrige Liquidität nicht begründet');
     assert(nop.discovery.status === 'FAIL' && nop.quality.status === 'FAIL', 'fehlender Preis nicht als FAIL erkannt');
     return '3 Kandidaten · 5 Stufen je Kandidat mit Begründung · Bereitschaft = Entscheidung';
+  }],
+  ['Signal & Risk', 'Score-Attribution: Beiträge ergeben den Final Score, Kipp-Punkte benannt', async () => {
+    const H = makeTestHarness(); const core = await testCore(H);
+    const toks = [await prepToken(core, H, 1), await prepToken(core, H, 2, { liq: 3000 }), await prepToken(core, H, 3, { c5: -4, c1: -12, b5: 20, s5: 60 })];
+    core._t.analyzeAll();
+    for (const t of toks) {
+      const at = scoreAttribution(t.A, t.D, core.S());
+      assert(Math.abs(clamp(Math.round(at.raw), 0, 100) - t.A.finalScore) <= 1, `${t.symbol}: Summe ${at.raw} ≠ Final Score ${t.A.finalScore}`);
+      assert(at.items.length === Object.keys(W_SCORE).length && at.flips.length > 0, `${t.symbol}: Aufschlüsselung unvollständig`);
+      if (t.D.decision === 'REJECTED') assert(t.D.blockers.slice(0, 1).every(b => at.flips.some(f => f.includes(b.code))), `${t.symbol}: Blocker nicht als Kipp-Punkt genannt`);
+    }
+    return `3 Kandidaten: Beiträge + Abzüge = Final Score (±1 Rundung), Kipp-Punkte vorhanden`;
+  }],
+  ['Signal & Risk', 'Signal-Konflikte & Zeitfenster-Abgleich (blockiert nur Auto-Käufe, abschaltbar)', async () => {
+    const A0 = { signals: [{ type: 'MOMENTUM', strength: 70 }, { type: 'MEAN_REVERSION', strength: 50 }], price: { chg: { m5: 5, h1: -20, h6: 3, h24: -50 } }, ta: { rsi: 85, ema9: 1, ema21: 2 }, liq: { chg5: -15 }, tx: { ratio5: 0.4, n5: 30 } };
+    const cs = signalConflicts(A0), codesC = cs.map(c => c.code).sort().join(',');
+    assert(codesC === 'CONTRADICTORY,LIQ_DIVERGENCE,MTF_DIVERGENCE,OVERBOUGHT,SELL_PRESSURE', 'Konflikte falsch: ' + codesC);
+    assert(conflictWeight(cs) === 8 && mtfAlignment(A0).label === 'PARTIAL' && mtfAlignment({ price: { chg: { m5: 3, h1: 5, h6: 8, h24: 20 } } }).label === 'ALIGNED_UP', 'Gewicht/MTF falsch');
+    assert(!signalConflicts({ ...A0, signals: [] }).length, 'Konflikte ohne Kaufsignal');
+    const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1); core._t.analyzeAll();
+    const A2 = { ...t.A, sigConflicts: cs };
+    assert(decideToken(t, A2, core.buildCtx()).analysisBlockers.some(b => b.code === 'SIGNAL_CONFLICT'), 'Konflikt blockiert nicht');
+    assert(!MANUAL_HARD.has('SIGNAL_CONFLICT'), 'Konflikt würde manuelle Käufe blockieren');
+    core.updateSettings({ signalConflictBlock: false }, 'TEST');
+    assert(!decideToken(t, A2, core.buildCtx()).analysisBlockers.some(b => b.code === 'SIGNAL_CONFLICT'), 'Schalter wirkt nicht');
+    return `5 Konflikte erkannt (Gewicht 8), MTF PARTIAL · blockiert Auto-Käufe, abschaltbar, manuell frei`;
+  }],
+  ['Signal & Risk', 'Signal-Decay: alte Ereignis-Signale verlieren Gewicht, neue starten frisch', async () => {
+    const tok = {}, t0 = 1e12, S1 = () => [{ type: 'BREAKOUT', strength: 80, reason: 'x' }, { type: 'MOMENTUM', strength: 60, reason: 'y' }];
+    let s0 = S1(); applySignalDecay(tok, s0, t0); assert(s0[0].strength === 80, 'frisches Signal abgeschwächt');
+    let s1 = S1(); applySignalDecay(tok, s1, t0 + 20 * MIN); assert(s1[0].strength === 40 && s1[0].decay === 0.5 && /abgeschwächt/.test(s1[0].reason), 'Decay nach 20 min falsch: ' + s1[0].strength);
+    let s2 = S1(); applySignalDecay(tok, s2, t0 + 60 * MIN); assert(s2[0].strength === 32 && s2[1].strength === 60, 'Untergrenze/Nicht-Ereignis-Signal falsch');
+    applySignalDecay(tok, [], t0 + 61 * MIN); let s3 = S1(); applySignalDecay(tok, s3, t0 + 62 * MIN);
+    assert(s3[0].strength === 80, 'Signal nach Pause nicht frisch');
+    return 'Breakout 80 → 40 (20 min) → 32 (Untergrenze) · Momentum unverändert · nach Pause wieder 80';
+  }],
+  ['Signal & Risk', 'Risk-Guardrails: Drawdown, Datenalter, Execution → nur kleiner, mit Reason Codes', async () => {
+    const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1, { liq: 900000 }); core._t.analyzeAll();
+    const base = core.execCheck(t, { auto: false }).sizing, eq = core.equityInfo().equity;
+    assert(base.factors.adj.every(a => a.f > 0 && a.f < 1), 'Abschlag ≥ 1');
+    core.state.portfolio.peakEquity = eq / 0.88;
+    const dd = core.execCheck(t, { auto: false }).sizing;
+    assert(dd.factors.adj.some(a => a.code === 'DRAWDOWN_MODE') && dd.size <= base.size + 1e-9 && dd.factors.caps.Strategie < base.factors.caps.Strategie, 'Drawdown-Modus verkleinert nicht');
+    core.state.portfolio.peakEquity = eq / 0.75;
+    assert(core.globalBlockers({ auto: true }).some(b => b.code === 'DRAWDOWN_LIMIT') && !core.globalBlockers({ auto: false }).some(b => b.code === 'DRAWDOWN_LIMIT'), 'Drawdown-Grenze wirkt nicht (nur Auto)');
+    core.state.portfolio.peakEquity = eq;
+    t.A = { ...t.A, dataAge: core.S().staleAfterSec * SEC * 0.8, liq: { ...t.A.liq, impactPlanned: core.S().maxSlippagePct } };
+    const pen = core.execCheck(t, { auto: false }).sizing;
+    assert(['DATA_AGE', 'EXECUTION_UNCERTAINTY'].every(c => pen.factors.adj.some(a => a.code === c)) && pen.factors.fAdj < base.factors.fAdj, 'Datenalter/Execution-Abschlag fehlt');
+    const syn = (n, stale) => Array.from({ length: n }, (_, i) => ({ price: { chg: { h1: 2, m5: 1 }, volPct: 1 }, liq: { chg5: 0 }, stale, fallback: false, confidence: { total: stale ? 20 : 80 } }));
+    assert(computeRegime(syn(12, true), null).tags.includes('LOW_QUALITY_MARKET') && !computeRegime(syn(12, false), null).tags.includes('LOW_QUALITY_MARKET'), 'Low-Quality-Markt falsch erkannt');
+    core.state.regime = { tags: ['LOW_QUALITY_MARKET'], lowQ: 0.8 };
+    assert(core.globalBlockers({ auto: true }).some(b => b.code === 'LOW_QUALITY_MARKET') && !core.globalBlockers({ auto: false }).some(b => b.code === 'LOW_QUALITY_MARKET'), 'No-Trade-Zone wirkt nicht (nur Auto)');
+    return `Abschläge ${[...new Set([...dd.factors.adj, ...pen.factors.adj].map(a => a.code))].join(', ')} · Drawdown-Grenze & No-Trade-Zone nur für Auto`;
   }],
   ['Daten', 'Pump wird nie als Buy interpretiert', async () => {
     const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1, { c5: 75, v5: 60000, v1: 90000, b5: 290, s5: 10 });
@@ -6492,7 +6655,7 @@ function tabOverview(t) {
   const A = t.A; if (!A) return '';
   const tx = A.tx, v = A.vol;
   const seen = core.state.seen[t.id];
-  return html`<div class="grid3">${kv('Coin-Preis', fmtPrice(A.core.price), A.labels.price)}${kv('MC', html`<span class="mcv">${fmtMc(A.core.mc)}</span>`, A.labels.price)}${kvA('FDV', fmtMc(A.core.fdv).replace(' MC', ' FDV'))}${kv('Liquidität', fmtUsd(A.liq.usd), A.labels.liquidity)}
+  return html`${t.D ? whyShortHtml(t) : ''}<div class="grid3">${kv('Coin-Preis', fmtPrice(A.core.price), A.labels.price)}${kv('MC', html`<span class="mcv">${fmtMc(A.core.mc)}</span>`, A.labels.price)}${kvA('FDV', fmtMc(A.core.fdv).replace(' MC', ' FDV'))}${kv('Liquidität', fmtUsd(A.liq.usd), A.labels.liquidity)}
     ${kvA('Liq/MC', A.liq.ratioMc != null ? (A.liq.ratioMc * 100).toFixed(1) + '%' : '—')}${kvA('Vol 5m', fmtUsd(v.m5))}${kv('Vol 1h', fmtUsd(v.h1), A.labels.volume)}
     ${kv('Vol 24h', fmtUsd(v.h24))}${kvA('Txns 5m K/V', (tx.b5 != null ? tx.b5 : '—') + '/' + (tx.s5 != null ? tx.s5 : '—'))}${kvA('Txns 1h K/V', (tx.b1 != null ? tx.b1 : '—') + '/' + (tx.s1 != null ? tx.s1 : '—'))}
     ${kvA('Käufer 5m', tx.ratio5 != null ? (tx.ratio5 * 100).toFixed(0) + '%' : '—')}${kvA('Käufer 1h', tx.ratio1 != null ? (tx.ratio1 * 100).toFixed(0) + '%' : '—')}${kvA('Ø Trade 5m', fmtUsd(tx.avgTrade5))}
@@ -6536,7 +6699,8 @@ function tabPlan(t) {
   return html`<h3 style="margin-top:0">Execution Preview <span class="lbl SIMULATED">${core.state.mode}</span></h3>
     <div class="grid2">${kv('Token', t.symbol)}${kvA('Seite', 'BUY')}${kv('Vorgeschlagene Größe', sz && sz.size > 0 ? fmtUsd(sz.size) : '0', 'ESTIMATED')}${kvA('begrenzt durch', (sz && sz.capBy) || '—')}${kv('Geschätzt', pxMc(p, r), A.label)}${kvA('Erw. Price Impact', sz && isNum(sz.impactPct) ? sz.impactPct.toFixed(3) + '%' : '—', 'ESTIMATED')}${kv('Gebühren gesamt', sz && sz.fees ? fmtUsd(sz.fees.total, 4) : '—', 'ESTIMATED')}${kvA('Max. Price Impact', S.maxSlippagePct + '%')}</div>
     ${sz && sz.fees ? html`<p class="note an">Fees: Netzwerk ${fmtUsd(sz.fees.network, 5)} + Priority ${fmtUsd(sz.fees.priority, 5)} (${sz.fees.lamports} Lamports @ SOL-Preis ${fmtUsd(sz.fees.solUsd)}) + DEX ${fmtUsd(sz.fees.dex, 4)}</p>` : ''}
-    ${sz && sz.factors && sz.factors.caps ? html`<p class="note an">Sizing: Basis ${sz.factors.basePct}% · Risk-Faktor ${sz.factors.fRisk} · Confidence-Faktor ${sz.factors.fConf} · Volatilitäts-Faktor ${sz.factors.fVol} · Limits: ${Object.entries(sz.factors.caps).map(([k, v]) => k + ' ' + fmtUsd(v)).join(', ')}</p>` : sz && sz.reason ? html`<p class="note warn">${sz.reason}</p>` : ''}
+    ${sz && sz.factors && sz.factors.caps ? html`<p class="note an">Sizing: Basis ${sz.factors.basePct}% · Risk-Faktor ${sz.factors.fRisk} · Confidence-Faktor ${sz.factors.fConf} · Volatilitäts-Faktor ${sz.factors.fVol} · Risiko-Abschläge ×${sz.factors.fAdj} · Limits: ${Object.entries(sz.factors.caps).map(([k, v]) => k + ' ' + fmtUsd(v)).join(', ')}</p>` : sz && sz.reason ? html`<p class="note warn">${sz.reason}</p>` : ''}
+    ${sz && sz.factors && arr(sz.factors.adj).length ? html`<div class="note">Größe reduziert (Risk Engine): ${sz.factors.adj.map(a => html`<span class="chip warn" title="${a.code}">${a.text}</span> `)}</div>` : ''}
     <h3>Trade Plan</h3><div class="grid2">${kv('Stop Loss (−' + S.stopLossPct + '%)', at(1 - S.stopLossPct / 100))}${kvA('ATR-Stop (' + S.atrMult + '× ATR)', a14 && p ? pxMc(p - S.atrMult * a14, r) : 'ATR n/v', a14 ? 'LIVE' : 'UNKNOWN')}${kv('TP1 +' + S.tp1Pct + '% (' + Math.round(S.tp1Frac * 100) + '%)', at(1 + S.tp1Pct / 100))}${kv('TP2 +' + S.tp2Pct + '% (' + Math.round(S.tp2Frac * 100) + '%)', at(1 + S.tp2Pct / 100))}${kv('TP3 +' + S.tp3Pct + '% (Rest)', at(1 + S.tp3Pct / 100))}${kv('Trailing', 'ab +' + S.trailActivatePct + '%, Abstand ' + S.trailPct + '%')}${kv('Time Exit', S.timeExitMin + ' min < ' + S.timeExitMinPnlPct + '%')}${kv('Break-even nach TP1', S.breakEvenAfterTp1 ? 'ja' : 'nein')}</div>
     <div class="an"><h3>Liquidity Exit Test</h3><div class="grid2">${kv('Verfügbare Liquidität', fmtUsd(A.liq.usd))}${kv('Exit-Liquidität (Quote-Seite)', fmtUsd(A.liq.exitLiqUsd), 'ESTIMATED')}${kv('Erw. Exit-Slippage', exitImp != null ? (exitImp * 100).toFixed(3) + '%' : '—', 'ESTIMATED')}${kv('Exit Risk', A.liq.slipRisk)}</div></div>
     ${pos ? html`<p class="note info">Offene Position: ${fmtUsd(pos.costUsd)} · Einstieg Coin-Preis ${fmtPrice(pos.entryPrice)} (${mcAt(pos.entryPrice, mcRatio(pos, t))}) · PnL ${isNum(pos.pnlUsd) ? fmtSigned(pos.pnlUsd) : 'n/v'}</p>` : ''}
@@ -6545,6 +6709,29 @@ function tabPlan(t) {
     <div class="row" style="margin-top:10px"><button class="btn pri" data-act="buy" data-id="${t.id}">💱 Sim-Kauf vorbereiten</button></div>
     <div class="an"><h3>Live-Order-Precheck (Vorbereitung, derzeit nicht ausführbar)</h3>${core.preLiveChecks(t, sz && sz.size > 0 ? sz.size : 20).map(c => html`<div class="check"><span class="ic ${c.ok ? 'pass' : 'fail'}">${c.ok ? 'OK' : 'NEIN'}</span><div><b>${c.name}</b><small>${c.detail}</small></div></div>`)}
     <p class="note">Vor einer echten Order müssten alle Punkte bestehen. Route/Provider fehlt → NO TRADE im Live-Modus. Simulation bleibt davon unberührt.</p></div>`;
+}
+/* Score-Aufschlüsselung, Kipp-Punkte, Signal-Konflikte und Zeitfenster-Abgleich */
+const MTF_DE = { ALIGNED_UP: 'alle Zeitfenster steigend', ALIGNED_DOWN: 'alle Zeitfenster fallend', FLAT: 'seitwärts', PARTIAL: 'teilweise übereinstimmend', MIXED: 'widersprüchlich', UNKNOWN: 'zu wenig Daten' };
+const dirArrow = d => (d == null ? '—' : d > 0 ? '▲' : d < 0 ? '▼' : '▬');
+function attributionHtml(t) {
+  const at = scoreAttribution(t.A, t.D, core.S()); if (!at) return '';
+  const A = t.A, row = (name, d) => html`<div class="meter"><span>${name}</span>${bar(Math.min(100, Math.abs(d) * 8), d >= 0 ? 'var(--green)' : 'var(--red)')}<span class="num r ${d >= 0 ? 'up' : 'dn'}">${d > 0 ? '+' : ''}${d}</span></div>`;
+  return html`<h3>Score-Aufschlüsselung</h3><p class="note">Final Score = 50 (neutral) + Beiträge der Komponenten − Abzüge = ${at.raw} → ${at.finalScore} (gerundet, 0–100)</p>
+    <div class="grid2 lgrid"><div><b class="ok">Treibt den Score</b>${at.pro.length ? at.pro.map(x => row(x.name, x.delta)) : html`<p class="mut">—</p>`}</div>
+    <div><b class="bad">Spricht dagegen</b>${[...at.contra.map(x => row(x.name, x.delta)), ...at.penalties.map(x => row(x.name, x.delta))]}${!at.contra.length && !at.penalties.length ? html`<p class="mut">—</p>` : ''}</div></div>
+    <h3>${t.D.decision === 'APPROVED' || t.D.decision === 'BUY_CANDIDATE' ? 'Was die Entscheidung kippen würde' : 'Was sich ändern müsste'}</h3><ul class="list-plain">${at.flips.map(f => html`<li>${f}</li>`)}</ul>
+    <h3>Zeitfenster-Abgleich <span class="chip ${A.mtf.label === 'MIXED' ? 'warn' : A.mtf.label === 'UNKNOWN' ? '' : 'info'}">${MTF_DE[A.mtf.label]}</span></h3>
+    <div class="grid4">${['m5', 'h1', 'h6', 'h24'].map(k => kv(k.replace('m', '').replace('h', '') + (k[0] === 'm' ? ' min' : ' h'), dirArrow(A.mtf.dirs[k]) + ' ' + fmtPct(A.price.chg[k])))}</div>
+    <h3>Signal-Konflikte</h3>${A.sigConflicts.length ? A.sigConflicts.map(c => html`<div class="check"><span class="ic ${c.severity === 'HIGH' ? 'fail' : 'warn'}">${c.severity}</span><div><b>${CONFLICT_DE[c.code] || c.code}</b><small>${c.text}</small></div></div>`) : html`<p class="mut">Keine Widersprüche zwischen Signalen und Messwerten.</p>`}
+    ${conflictWeight(A.sigConflicts) >= 3 ? html`<p class="note">Konflikt-Gewicht ${conflictWeight(A.sigConflicts)} ≥ 3 → Auto-Kauf wird verhindert${core.S().signalConflictBlock ? '' : ' (in den Einstellungen deaktiviert)'}.</p>` : ''}`;
+}
+/* Kompakte Begründung für die einfache Ansicht */
+function whyShortHtml(t) {
+  const at = scoreAttribution(t.A, t.D, core.S()); if (!at) return '';
+  const D = t.D, ok = D.decision === 'APPROVED' || D.decision === 'BUY_CANDIDATE';
+  return html`<div class="panel tight whyshort"><b>Warum ${ok ? 'Kandidat' : 'kein Trade'}?</b>
+    <small>${at.pro.slice(0, 2).map(x => html`<span class="ok">▲ ${x.name}</span> `)}${at.contra.slice(0, 2).map(x => html`<span class="bad">▼ ${x.name}</span> `)}${t.A.sigConflicts.length ? html`<span class="warn">⚠ ${t.A.sigConflicts.length} Signal-Konflikt(e)</span>` : ''}</small>
+    <small class="mut">${ok ? at.flips[0] : at.flips[0] || D.reason}</small></div>`;
 }
 /* Lern-KI als Research-Signal (ersetzt nie Regeln, Security oder Limits; ohne Evidenz → Enthaltung). */
 function learnSignalHtml(t) {
@@ -6561,6 +6748,7 @@ function tabWhy(t) {
     <h3>Signale</h3>${A.signals.length ? A.signals.map(s => html`<span class="sig" title="${s.reason}">${SIGNAL_NAMES[s.type]} <i>${s.strength}</i></span>`) : html`<p class="mut">keine</p>`}
     <h3>Risiken</h3>${risks.length ? html`<ul class="list-plain">${risks.map(r => html`<li>${r}</li>`)}</ul>` : html`<p class="mut">Keine auffälligen Risiken gemessen (keine Garantie).</p>`}
     <h3>Unbekannt / nicht genug Daten</h3><ul class="list-plain">${A.unknowns.map(u => html`<li class="mut">${u}</li>`)}</ul>
+    ${attributionHtml(t)}
     ${learnSignalHtml(t)}
     <h3>Blocker (nach Priorität)</h3>${D.blockers.length ? D.blockers.map(b => html`<div class="check"><span class="ic fail">P${b.prio}</span><div><b>${b.code}</b> <span class="chip">${b.cat}</span><small>${b.msg}</small></div></div>`) : html`<p class="ok">Keine Blocker.</p>`}
     <h3>Decision Trace</h3><ul class="trace">${D.trace.map(x => html`<li><span class="ic">${x.ok === true ? '✅' : x.ok === false ? '❌' : '·'}</span><b>${x.stage}</b><span>${x.detail}</span></li>`)}</ul>
