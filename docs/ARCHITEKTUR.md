@@ -136,7 +136,8 @@ Kein Hotspot gefunden, der eine Optimierung rechtfertigt. Render ist bereits ged
 ## 9. Tests (Ist)
 
 - **70 Selbsttests** in der App (System → Selbsttest): Grundlagen, Trading-Limits, Daten/Stale, Security, Chaos (API-/RPC-Ausfall, 429, falsches JSON, Scanner-Lock, verspätete Antworten, Reload-Recovery), Status-Logik, LIVE-Gating, Storage, Backtest (Look-Ahead, Reproduzierbarkeit, Stress/Einstiegsverzögerung, Monte-Carlo/Regime), Portfolio & Execution, Signal & Risk, 11 Lern-KI-Tests, 4 Adaptive-KI-Tests (Fehlerklassen, Near-Misses, aktive Parameter, kein naives Tuning).
-- **Browser-E2E** (Playwright, außerhalb des Repos): Login, Cooldown-Migration, UI einfach/Analyse inkl. Mobil, Lern-KI, Backup/Restore, Backtest-Bericht, XSS-Smoke.
+- **Browser-E2E** (Playwright, `tests/e2e/`, seit Roadmap-Schritt A1 im Repo): Selbsttests, Login, UI einfach/Analyse inkl. Mobil, Lern-KI, Backup/Restore, Migration, Backtest-Bericht, Lernmodus-Profil, XSS-Schutz; `npm test` bzw. `node tests/e2e/run-all.js`.
+- **CI** (GitHub Actions, `.github/workflows/tests.yml`): Syntax-Prüfung + alle Suiten bei jedem Push auf `main` und jedem PR. Ohne `E2E_USER`/`E2E_PASS` nutzen die Tests eine Testkopie der App mit zufälligem Wegwerf-Passwort – das echte Passwort steht nirgends im Repo und wird nicht als Secret gebraucht.
 - **Lücken:** Monitoring-Aktionen (Phase 7), UI-Smoke für LIVE-Gate/Wallet.
 
 ## 10. Technische Schulden
@@ -153,6 +154,7 @@ Kein Hotspot gefunden, der eine Optimierung rechtfertigt. Render ist bereits ged
 ## Änderungsprotokoll
 
 - Phase 0: Audit erstellt.
+- Roadmap A1: Tests ins Repo (`tests/e2e/`, gemeinsames `env.js`, Runner `run-all.js`, Syntax-Prüfung), CI über GitHub Actions; XSS-Test mit echten Prüfungen statt reiner Ausgabe; Login-Test wartet auf das Ende der PBKDF2-Prüfung statt fester Zeiten.
 - 2.9.0 (Nutzerwunsch): feste Grenzen (`HARD_LIMITS`) entfernt – Max. Käufe pro Coin, Coin-Cooldown, Verlustserie, Exposure, Positionsgröße, Min. Trades für Optimierung frei einstellbar; 0 = aus für Tageslimit, Drawdown-Modus/-Grenze, Overtrading (inkl. Bremse), max. Positionen, Korrelation, System-Health; neue Schalter: Nachkauf nur im Gewinn, Strategie-Cooldowns, marktweite Handelspause, automatischer Safe Mode; Profil „Lernmodus (ohne Limits)“ (nur Limits, Kauf-Filter unverändert); Risiko-Ansicht zeigt Limits als einstellbar. Standardwerte unverändert. Selbsttests angepasst + 1 neuer (Lernmodus), neuer E2E-Test für das Profil.
 - 2.8.0 (Nutzerwunsch): Loss-Cooldown und globale Pause wieder 0 min (Standard und Untergrenze), einmalige Umstellung gespeicherter Werte inkl. Beenden laufender Pausen, protokolliert. **Verhaltensänderung:** nach Verlusten keine automatische Handelspause mehr. Selbsttest und Migrations-E2E angepasst.
 - Phase 6 (2.7.0): Fehlerklassen & „erwartbarer Verlust?“ (geplanter Stop wird ab jetzt je Position gespeichert; ältere Verluste werden beim Laden ergänzt, Stop aus den aktuellen Einstellungen als gekennzeichnete Näherung), Near-Miss-Tracking mit Opportunity-Cost-Auswertung je Filter (ohne automatische Lockerung), Tabelle „Aktive Parameter“ mit Herkunft und Grund, naive Parameter-Suche des alten Auto-Tunings entfernt (Einstellung überwacht nur noch Versionen und rollt schlechtere zurück), Lern-Report-CSV um Fehlerklasse ergänzt. Login: Eingaben während der PBKDF2-Prüfung gesperrt (verhinderte, dass eine neue Eingabe beim Fehlschlag des vorherigen Versuchs gelöscht wurde). 4 neue Selbsttests.
