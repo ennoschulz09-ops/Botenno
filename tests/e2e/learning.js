@@ -62,6 +62,7 @@ function seedJournal(mints) {
   ok(/Datenbasis/i.test(txt) && /30 \/ 24/.test(txt), 'Datenbasis-Fortschritt sichtbar (Experiment 30/24)');
   ok(/Fehlerklassen/i.test(txt) && /(Normaler statistischer Verlust|Execution-Fehler|Modell-|Datenfehler|Unklar)/.test(txt) && /Erwartbar\?/i.test(txt), 'Fehlerklassen + Spalte „Erwartbar?“ sichtbar (einfache Ansicht)');
   ok(/Knapp verpasst \(Near-Misses\)/i.test(txt) && /In Beobachtung/i.test(txt) && /nie automatisch gelockert/.test(txt), 'Near-Miss-Panel mit Transparenzhinweis sichtbar');
+  ok(/Coin-Quellen – woher kommen/i.test(txt) && /unbekannt/i.test(txt) && /Quelle meiden/.test(txt), 'Coin-Quellen-Panel sichtbar (ältere Trades als „unbekannt“)');
   ok(/Aktive Parameter – Wert, Herkunft, Grund/i.test(txt) && (await page.evaluate(() => { const t = [...document.querySelectorAll('#v-learning table')].find(x => /Herkunft/.test(x.querySelector('thead') ? x.querySelector('thead').textContent : '')); return t ? t.querySelectorAll('tbody tr').length : 0; })) >= 15, 'Tabelle „Aktive Parameter“ mit ≥ 15 Zeilen');
   ok(/Standardwert/.test(txt), 'Herkunft „Standardwert“ angezeigt');
   await page.screenshot({ path: OUT + '/l-learning-simple.png', fullPage: true });
@@ -113,6 +114,9 @@ function seedJournal(mints) {
   await page.click('#logCats [data-k="LEARNING"]'); await page.waitForTimeout(500);
   const logs = await page.locator('#logList').innerText();
   ok(/Migration: 30/.test(logs) && /MOCK12/.test(logs), 'Log-Kategorie „Learning“ zeigt Migration und neuen Trade');
+  await page.click('#logCats [data-k="TRADE"]'); await page.waitForTimeout(400);
+  const tlogs = await page.locator('#logList').innerText();
+  ok(/BUY #1 MOCK12.*Jupiter/.test(tlogs) && /SELL MOCK12/.test(tlogs), 'Kauf und Verkauf zum (nachgebildeten) Jupiter-Angebot, nach Wartezeit');
 
   // Persistenz über Reload
   await page.reload(); await login(page, 3000); await goLearn(page);

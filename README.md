@@ -2,7 +2,7 @@
 
 Solana-Memecoin-Scanner mit Analyse, Security-Prüfung, simuliertem Handel und Lern-KI. Die App ist die Einzeldatei `index.html` (läuft im Browser, veröffentlicht über GitHub Pages): https://ennoschulz09-ops.github.io/Botenno/
 
-Echter Handel ist gesperrt: Es gibt keinen Swap-Anbieter, Signieren ist deaktiviert. Architektur und Änderungsprotokoll: [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md).
+Echter Handel ist gesperrt: Es gibt keinen Swap-Anbieter, Signieren ist deaktiviert. Die Simulation rechnet seit 2.11.0 mit echten Kursangeboten von Jupiter (nur Abfrage, nie ausgeführt), einer Wartezeit bis zur Füllung, gescheiterten Transaktionen und Priority Fees aus dem Netzwerk. Architektur und Änderungsprotokoll: [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md).
 
 ## Tests
 

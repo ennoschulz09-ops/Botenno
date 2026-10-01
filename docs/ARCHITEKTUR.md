@@ -1,13 +1,13 @@
 # Smart Lab – Architektur & technischer Audit
 
-Stand: Phase 8 des Master-Prompts „Ganzheitliche Optimierung“ abgeschlossen (App-Version 2.10.1). Abschlussbericht: `docs/ABSCHLUSSBERICHT.md`.
+Stand: Roadmap-Stufe B „Ehrliche Simulation“ abgeschlossen (App-Version 2.11.0). Abschlussbericht: `docs/ABSCHLUSSBERICHT.md`.
 Dieses Dokument wird in jeder Phase fortgeschrieben (siehe „Änderungsprotokoll“ am Ende).
 
 ## 1. Überblick
 
 - **Auslieferung:** eine einzige statische Datei `index.html` (HTML + CSS + JavaScript in einer IIFE), veröffentlicht über GitHub Pages aus `main`. Keine Build-Pipeline, kein Server, keine Abhängigkeiten von Drittbibliotheken.
 - **Laufzeit:** komplett im Browser. Alle Daten (Einstellungen, Positionen, Journal, Lerndaten) liegen im `localStorage` des jeweiligen Geräts.
-- **Handel:** ausschließlich simuliert (SIMULATION / PAPER). LIVE ist bewusst nicht verfügbar (kein Swap-/Routing-Provider, Signieren deaktiviert).
+- **Handel:** ausschließlich simuliert (SIMULATION / PAPER). LIVE ist bewusst nicht verfügbar (kein Swap-/Routing-Provider, Signieren deaktiviert). Seit 2.11.0 rechnet die Simulation mit echten Kursangeboten der Jupiter Quote API (nur Abfrage `GET /quote`, nie `/swap`), einer Wartezeit bis zur Füllung, gescheiterten Transaktionen und Priority Fees aus dem Netzwerk.
 - `IMG_8763.png` ist ein Bild ohne Verwendung im Code.
 
 ## 2. Architektur (Textdiagramm)
@@ -31,6 +31,8 @@ createCore(env)  ── DOM-frei, alle Seiteneffekte über env (Uhr, fetch, Time
    │     + gelernte Regeln (nur verschärfend)
    ├─ Execution Check (globalBlockers, execCheck, sizePosition) – Risiko-Limits (alle einstellbar), Cooldowns, Exposure, Impact
    ├─ Orders (State Machine DETECTED → … → COMPLETED/FAILED/CANCELLED/REJECTED, Idempotenz-Keys, Locks)
+   ├─ Ausführung SIMULATION (Stufe B): Jupiter-Angebot Kauf + Rundreise (Honeypot, Kosten) → Wartezeit →
+   │     neues Angebot → Slippage-Grenze / gescheiterte Tx (Gebühr bezahlt) → Füllung; Rückfall AMM-Schätzung (markiert)
    ├─ Positionen & Portfolio (applyBuyFill, managePositions, executeSell, closePosition, Journal)
    ├─ Risk State (Buy-Zähler, Cooldowns, Verlustserie, Tageslimit, Overtrading)
    ├─ Lern-KI (Adaptive Loss Intelligence): Records → Ursachen → Muster → Hypothesen → Experimente
@@ -47,24 +49,25 @@ UI-Schicht (DOM): Views, Detail-Panel, Modals, Charts (Canvas), Toasts, Alarm-Fe
 
 | Bereich | Zeilen | Verantwortung |
 |---|---|---|
-| Login-Gate, CSS, HTML-Grundgerüst | 1–457 | Zugangssperre, Layout, Views als `<section>` |
-| Konstanten, TUNING_BOUNDS | Skriptanfang | Grenzen für Lern-/Tuning-Parameter (feste harte Grenzen seit 2.9.0 entfernt) |
-| Utils, Formatierung | 506–692 | `num/nonNeg/int` (NaN/Infinity/negativ → null), Formatter, TA-Funktionen |
-| Logger | 693–726 | Ringpuffer 1500 Einträge, Kategorien |
-| Settings | 727–909 | Schema mit Min/Max, `hard`-Grenzen, Profile, Validierung |
-| Storage & Migration | 910–1004 | v3-Schlüssel, v2/v1-Migration, Korruptionserkennung, Speicher-knapp-Rotation |
-| HTTP / Data Layer | 1005–1155 | siehe Diagramm |
-| Normalisierung + Security Engine | 1156–1315 | einheitliches Snapshot-Modell |
-| Blocker-System | 1316–1381 | Codes, Prioritäten, Kategorien |
-| Analyse-Engines | 1382–1635 | Kennzahlen, Confidence, Risk, Signale, Scores |
-| Strategien & Konsens | 1636–1668 | 7 Strategien, Gewichte, Shadow |
-| Decision Engine | 1669–1754 | Pipeline, Entscheidung, Trace |
-| Markt-Regime | 1755–1770 | Breadth, Volatilität, Trend, Richtung, Liquidität |
-| Analytics / Backtest | 1771–1864 | perfStats, Backtest ohne Look-Ahead, Walk-Forward |
-| Lern-KI (reine Funktionen) | 1865–2468 | Features, Records, Attribution, Muster, Experimente, Drift, Modell |
-| Core (createCore) | 2469–4605 | Scanner, Execution, Positionen, Risk, Lern-Orchestrierung, Persistenz |
-| Testsystem | (Ende des Skripts) | Mock-Harness, 73 Selbsttests |
-| UI-Schicht | 5205–Ende | Views, Detail, Aktionen, Rendering |
+| Login-Gate, CSS, HTML-Grundgerüst | 1–460 | Zugangssperre, Layout, Views als `<section>` |
+| Konstanten, TUNING_BOUNDS | 469–509 | API-Adressen (inkl. Jupiter), Grenzen für Lern-/Tuning-Parameter (feste harte Grenzen seit 2.9.0 entfernt) |
+| Utils, Formatierung | 510–696 | `num/nonNeg/int` (NaN/Infinity/negativ → null), Formatter, TA-Funktionen |
+| Logger | 697–730 | Ringpuffer 1500 Einträge, Kategorien |
+| Settings | 731–927 | Schema mit Min/Max, Profile, Validierung |
+| Storage & Migration | 928–1022 | v3-Schlüssel, v2/v1-Migration, Korruptionserkennung, Speicher-knapp-Rotation |
+| HTTP / Data Layer | 1023–1174 | siehe Diagramm; `okStatuses` für fachliche Fehlerantworten (z. B. „keine Route“) |
+| Normalisierung + Security Engine | 1175–1355 | einheitliches Snapshot-Modell |
+| Blocker-System | 1356–1428 | Codes, Prioritäten, Kategorien |
+| Analyse-Engines | 1429–1754 | Kennzahlen, Confidence, Risk, Signale, Scores |
+| Strategien & Konsens | 1755–1787 | 7 Strategien, Gewichte, Shadow |
+| Decision Engine | 1788–1879 | Pipeline, Entscheidung, Trace, gelernte Regeln |
+| Stufen-Scores & Security-Prüfbericht | 1880–2000 | erklärbare Stufen, Prüfbericht |
+| Markt-Regime | 2001–2021 | Breadth, Volatilität, Trend, Richtung, Liquidität |
+| Analytics / Backtest | 2022–2168 | perfStats, Backtest ohne Look-Ahead, Walk-Forward |
+| Lern-KI (reine Funktionen) | 2169–2912 | Features (inkl. Coin-Quelle), Records, Attribution, Muster, Experimente, Drift, Modell |
+| Core (createCore) | 2913–5552 | Scanner, Execution (Jupiter-Angebote, Wartezeit, Fehlschläge), Positionen, Risk, Lern-Orchestrierung, Persistenz |
+| Testsystem | 5553–6694 | Mock-Harness (inkl. Jupiter-Attrappe), 78 Selbsttests |
+| UI-Schicht | 6695–Ende | Views, Detail, Aktionen, Rendering |
 
 ## 4. State & Persistenz
 
@@ -100,11 +103,11 @@ UI-Schicht (DOM): Views, Detail-Panel, Modals, Charts (Canvas), Toasts, Alarm-Fe
 | Signale | 12 Signaltypen, 7 Strategien, Konsens, Confidence getrennt vom Score, Score-Attribution (pro/contra/Abzüge = Final Score) mit Kipp-Punkten, Signal-Konflikt-Detektor (8 Muster, Gewicht ≥ 3 blockiert Auto-Käufe, abschaltbar), Multi-Timeframe-Abgleich 5m/1h/6h/24h, Signal-Decay für Ereignis-Signale | Kontextgewichtung nach Regime nur über gelernte Regeln |
 | Risk | Limits (alle per Einstellung bis 0 = aus, Profil „Lernmodus (ohne Limits)“), Cooldowns, Exposure, Korrelation, Tageslimit, Overtrading, Impact-Grenze, Drawdown-Modus (×0,5 ab 10 %) & Drawdown-Grenze (keine Auto-Käufe ab 20 %), Abschläge mit Reason Codes (Datenalter, Execution-Unsicherheit, unbestätigte Daten, Cluster-Exposure), marktweite No-Trade-Zone bei schlechter Datenlage | – |
 | Portfolio | Journal, realisiert/unrealisiert, Fees/Slippage, Reconciliation nach Neustart, Positions-Lebenszyklus PLANNED → PENDING → OPEN → CLOSING ↔ PARTIAL → CLOSED → RECONCILED (UNKNOWN = Abgleich), Integritätsprüfung (Mengen, Doppelbuchungen, Journal, hängende Orders, verwaiste Positionen) | Cash-Abgleich über mehrere „Frische Starts“ hinweg nicht rekonstruierbar |
-| Execution | Order-State-Machine, Idempotenz-Keys, Locks, Pre-Trade-Check mit frischen Daten, Provider-Abstraktion Quote → Build → Preflight → Sign → Send → Confirm (SIMULATION vollständig, LIVE liefert NO_ROUTER / SIGNATURE_DISABLED), Fehlercodes je Order | echter Swap-/Routing-Provider fehlt (bewusst) |
+| Execution | Order-State-Machine, Idempotenz-Keys, Locks, Pre-Trade-Check mit frischen Daten, Provider-Abstraktion Quote → Build → Preflight → Sign → Send → Confirm (SIMULATION vollständig, LIVE liefert NO_ROUTER / SIGNATURE_DISABLED), Fehlercodes je Order. Seit 2.11.0: echtes Jupiter-Angebot je Kauf und Verkauf (nur Abfrage), Rundreise-Prüfung beim Kauf (kein Verkaufsweg → NO_SELL_ROUTE, zu teuer → ROUND_TRIP_COST, 5 min je Coin gemerkt), Füllung erst nach einstellbarer Wartezeit zum dann gültigen Angebot, Slippage-Grenze (sonst SLIPPAGE_EXCEEDED), einstellbarer Anteil gescheiterter Transaktionen (TX_FAILED), Netzwerk- und Priority-Gebühr auch beim Scheitern, Priority Fee aus `getRecentPrioritizationFees` (75. Perzentil, fester Wert als Minimum), Position ohne Verkaufsweg zählt 0 $ und wird nach 30 min als Totalverlust abgeschrieben; ohne Jupiter Rückfall auf AMM-Schätzung (abschaltbar, als „geschätzt“ markiert) | echter Swap-/Routing-Provider fehlt (bewusst); kein Sandwich-/MEV-Modell; Jupiter-Kontingent des kostenlosen Zugangs begrenzt (lokal 50 Abfragen/min) |
 | Wallet | nur lesend, Phantom (`window.phantom.solana`), Balance per RPC, Signieren deaktiviert, stille Wiederverbindung nur mit `onlyIfTrusted` (kein Popup) | – |
 | Backtest | kein Look-Ahead, Stops vor TPs, Fees/Slippage, Walk-Forward Pflicht (Validierung/Test getrennt, OOS-Anteil ausgewiesen), Run-Protokoll mit Run-ID, Datensatz-Hash, Parametern, Kosten, Code-Version und Limitierungen, Stress-Tests (Gebühren/Slippage ×2, Einstieg 1 Kerze später, engerer Stop, niedrigerer TP), Monte-Carlo-Drawdown (deterministisch), Regime-Auswertung, Trade-CSV, Lauf-Historie (20) | Daten nur aus GeckoTerminal-OHLCV eines Pools (kein Survivorship-freier Universums-Test), keine Orderbuch-Simulation |
-| Lernen | Learning Records, Ursachen mit Evidenz, Counterfactuals, Muster, Hypothesen → Experimente (Train/Validation/Test, Walk-Forward) → Shadow → Übernahme nur in SIMULATION, nur verschärfend, Auto-Rollback; Fehlerklassen (statistisch · Execution · Daten · Security · Modell · Prozess) mit Prüfung „erwartbarer Verlust?“ gegen den beim Einstieg geplanten Stop; Near-Miss-Tracking (15 min Nachlauf, verpasster Gewinn vs. vermiedener Verlust je Filter, reine Messung); Tabelle aktiver Parameter mit Herkunft/Grund; neue Parameter nur noch über die Lern-KI | Near-Miss-Ergebnisse sind simuliert (ohne Kosten); Herkunft nur für die letzten 200 Konfigurationsänderungen |
-| Monitoring | System/Bot Health, API Health Center, Diagnose; Kennzahlen der letzten 60 min (Signale/Stunde, Security- und Risiko-Blockquote, Freigabequote, Orders, Erfolgsquote, Ø Ausführungszeit, Fehlercodes, Datenfrische, Zustand der Lern-KI); Anomalie-Monitor mit 12 Reason Codes (u. a. DATA_STALE_WIDE, PRIMARY_API_DOWN, EXEC_FAILURES, EXEC_SLOW, SLIPPAGE_SPIKE, RECONCILIATION, PORTFOLIO_INTEGRITY, LOSS_BURST, EQUITY_DROP, LEARNING_ERRORS, STORAGE_FAIL), Schweregrad und Aktion WARN / DEGRADE / PAUSE / HARD_STOP; Standard „nur warnen“, mit „handeln“ Größe ×0,5, Pause neuer Auto-Käufe (ANOMALY_PAUSE) bzw. einmaliger Not-Stopp; Alarm + Verlauf je Anomalie | Kennzahlen nur für die laufende Sitzung (nicht gespeichert) |
+| Lernen | Learning Records, Ursachen mit Evidenz, Counterfactuals, Muster, Hypothesen → Experimente (Train/Validation/Test, Walk-Forward) → Shadow → Übernahme nur in SIMULATION, nur verschärfend, Auto-Rollback; Fehlerklassen (statistisch · Execution · Daten · Security · Modell · Prozess) mit Prüfung „erwartbarer Verlust?“ gegen den beim Einstieg geplanten Stop; Near-Miss-Tracking (15 min Nachlauf, verpasster Gewinn vs. vermiedener Verlust je Filter, reine Messung); Tabelle aktiver Parameter mit Herkunft/Grund; neue Parameter nur noch über die Lern-KI; seit 2.11.0 Coin-Quelle (Boost, Top-Boost, Profil, neue Pools, Trending, Watchlist) als Merkmal in Features, Mustern, Near-Misses und Exporten, Auswertung je Quelle, Hypothese „Quelle meiden“ (BLOCK_DISC, nur automatische Quellen, erst nach Test + Shadow wirksam) | Near-Miss-Ergebnisse sind simuliert (ohne Kosten); Herkunft nur für die letzten 200 Konfigurationsänderungen; Trades vor 2.11.0 ohne Quelle („unbekannt“) |
+| Monitoring | System/Bot Health, API Health Center, Diagnose; Kennzahlen der letzten 60 min (Signale/Stunde, Security- und Risiko-Blockquote, Freigabequote, Orders, Erfolgsquote, Ø Ausführungszeit, Fehlercodes, Datenfrische, Zustand der Lern-KI); Anomalie-Monitor mit 14 Reason Codes (u. a. DATA_STALE_WIDE, PRIMARY_API_DOWN, EXEC_FAILURES, EXEC_SLOW, SLIPPAGE_SPIKE, TX_FAIL_RATE, QUOTES_ESTIMATED, RECONCILIATION, PORTFOLIO_INTEGRITY, LOSS_BURST, EQUITY_DROP, LEARNING_ERRORS, STORAGE_FAIL; simulierte Fehlschläge TX_FAILED/SLIPPAGE_EXCEEDED und NO_ROUTE zählen nicht als EXEC_FAILURES), Kennzahlen „Ausführung“ (Anteil echter Angebote, Fehlquote, bezahlte Gebühren gescheiterter Tx, aktuelle Priority Fee), Schweregrad und Aktion WARN / DEGRADE / PAUSE / HARD_STOP; Standard „nur warnen“, mit „handeln“ Größe ×0,5, Pause neuer Auto-Käufe (ANOMALY_PAUSE) bzw. einmaliger Not-Stopp; Alarm + Verlauf je Anomalie | Kennzahlen nur für die laufende Sitzung (nicht gespeichert) |
 | UI | einfache/Analyse-Ansicht, „Warum?“-Tab, Entscheidungsketten, Statusleiste (Analyse-Ansicht) mit System, Daten, Wallet, Risiko, Live-Gate und Monitor; Monitor-Pill auch in der einfachen Ansicht, sobald eine Anomalie aktiv ist; Pills brechen auf dem Desktop um statt abgeschnitten zu werden | – |
 | Login | PBKDF2 (600k), kein Klartext, kein Persistieren, Reload → neu anmelden, Sperre 30 s → 15 min nach je 5 Fehlversuchen, gesperrt keine App-Aktionen, Eingaben während der Prüfung gesperrt | bleibt clientseitig (kein Server) |
 
@@ -112,7 +115,8 @@ UI-Schicht (DOM): Views, Detail-Panel, Modals, Charts (Canvas), Toasts, Alarm-Fe
 
 - Risiko-Limits: seit 2.9.0 keine festen Grenzen mehr – alle über `SETTINGS_SCHEMA` einstellbar (0 = aus), validiert auf gültige Bereiche. Die Lern-KI verändert sie nie. Nicht abschaltbar bleiben: Security-Blocker (CRITICAL, Prüfung ausstehend), Datenprüfungen (kein Preis, veraltete Daten, Gebühren unbekannt), Doppel-Order-Schutz, Abgleich nach Neustart, LIVE-Gating.
 - `globalBlockers` / `execCheck` / `MANUAL_HARD`: letzte Prüfung vor jeder Order.
-- `setMode('LIVE')` / `liveReadiness`: LIVE nie aktivierbar ohne Provider; seit 2.10.1 zusätzlich nur mit aktiven Risiko-Limits (kein Lernmodus).
+- `setMode('LIVE')` / `liveReadiness`: LIVE nie aktivierbar ohne Provider; seit 2.10.1 zusätzlich nur mit aktiven Risiko-Limits (kein Lernmodus); seit 2.11.0 zusätzlich nur mit echten Kursangeboten ohne Schätz-Rückfall, Honeypot-Schutz und aktiver Rundreise-Kostenprüfung (≤ 20 %).
+- Jupiter: ausschließlich `GET /quote` (Selbsttest prüft, dass nie ein anderer Pfad aufgerufen wird); optionaler API-Key nur als Header `x-api-key`, lokal gespeichert (Passwortfeld, Format geprüft), Teil von Voll-Backups wie die RPC-URLs, aber nicht im Einstellungs-Export; im Konfigurations-Protokoll und Log-Export nur maskiert („••• (gesetzt)“).
 - `requestSignature`: deaktiviert.
 - Lern-KI: `mergeParams` (nur verschärfend), `sanitizeRules`, Übernahme nur SIMULATION.
 - Login: Hash im Quelltext öffentlich sichtbar (GitHub Pages) → clientseitige Sperre, **kein** Server-Schutz. PBKDF2 macht Offline-Raten teuer, verhindert es aber nicht bei schwachen Passwörtern.
@@ -135,7 +139,7 @@ Kein Hotspot gefunden, der eine Optimierung rechtfertigt. Render ist bereits ged
 
 ## 9. Tests (Ist)
 
-- **73 Selbsttests** in der App (System → Selbsttest): Grundlagen, Trading-Limits, Daten/Stale, Security, Chaos (API-/RPC-Ausfall, 429, falsches JSON, Scanner-Lock, verspätete Antworten, Reload-Recovery), Status-Logik, LIVE-Gating, Storage, Backtest (Look-Ahead, Reproduzierbarkeit, Stress/Einstiegsverzögerung, Monte-Carlo/Regime), Portfolio & Execution, Signal & Risk, 11 Lern-KI-Tests, 4 Adaptive-KI-Tests (Fehlerklassen, Near-Misses, aktive Parameter, kein naives Tuning), 3 Monitoring-Tests (Anomalien & Modi, Not-Stopp, Kennzahlen).
+- **78 Selbsttests** in der App (System → Selbsttest): Grundlagen, Trading-Limits, Daten/Stale, Security, Chaos (API-/RPC-Ausfall, 429, falsches JSON, Scanner-Lock, verspätete Antworten, Reload-Recovery), Status-Logik, LIVE-Gating, Storage, Backtest (Look-Ahead, Reproduzierbarkeit, Stress/Einstiegsverzögerung, Monte-Carlo/Regime), Portfolio & Execution, Signal & Risk, 11 Lern-KI-Tests, 4 Adaptive-KI-Tests (Fehlerklassen, Near-Misses, aktive Parameter, kein naives Tuning), 3 Monitoring-Tests (Anomalien & Modi, Not-Stopp, Kennzahlen), 5 Tests „Ehrliche Simulation“ (Jupiter-Angebote/Honeypot/Rundreise/Rückfall/API-Key, Wartezeit/Slippage-Grenze/gescheiterte Tx/Priority Fee, kein Verkaufsweg → Abschreibung, Fehlquote im Monitor, Coin-Quelle als Lernmerkmal). Die Test-Umgebung bildet Jupiter als Konstantprodukt-AMM nach; echte Jupiter-Antworten sind in der Cloud-Testumgebung nicht erreichbar.
 - **Browser-E2E** (Playwright, `tests/e2e/`, seit Roadmap-Schritt A1 im Repo): Selbsttests, Login, UI einfach/Analyse inkl. Mobil, Lern-KI, Backup/Restore, Migration, Backtest-Bericht, Lernmodus-Profil, XSS-Schutz; `npm test` bzw. `node tests/e2e/run-all.js`.
 - **CI** (GitHub Actions, `.github/workflows/tests.yml`): Syntax-Prüfung + alle Suiten bei jedem Push auf `main` und jedem PR. Ohne `E2E_USER`/`E2E_PASS` nutzen die Tests eine Testkopie der App mit zufälligem Wegwerf-Passwort – das echte Passwort steht nirgends im Repo und wird nicht als Secret gebraucht.
 - **Lücken:** Monitoring-Aktionen (Phase 7), UI-Smoke für LIVE-Gate/Wallet.
@@ -154,6 +158,7 @@ Kein Hotspot gefunden, der eine Optimierung rechtfertigt. Render ist bereits ged
 ## Änderungsprotokoll
 
 - Phase 0: Audit erstellt.
+- Roadmap Stufe B (2.11.0) – ehrliche Simulation: **B1** echte Jupiter-Kursangebote für Kauf und Verkauf (nur Abfrage), Rundreise-Prüfung beim Kauf mit neuen Blockern NO_SELL_ROUTE (Honeypot-Verdacht) und ROUND_TRIP_COST, echte Preisabweichung gegen die Slippage-Grenze, Rückfall auf AMM-Schätzung (markiert, abschaltbar), optionaler API-Key; **B2** Füllung nach einstellbarer Wartezeit (Standard 1,5 s) zum dann gültigen Angebot, Slippage-Grenze wie on-chain, 5 % gescheiterte Transaktionen (einstellbar), Gebühren auch beim Scheitern, Priority Fee automatisch aus dem Netzwerk, Positionen ohne Verkaufsweg mit 0 $ bewertet und nach 30 min abgeschrieben; **B3** Coin-Quelle als Lernmerkmal mit Auswertung „Coin-Quellen“ und Hypothese „Quelle meiden“. Monitor: TX_FAIL_RATE, QUOTES_ESTIMATED, Kennzahlen „Ausführung“; LIVE-Gate um „Ehrliche Ausführung“ erweitert; Profil „Lernmodus“ schaltet die Rundreise-Kostenprüfung aus (Honeypot-Schutz bleibt). Kleinkorrektur: Positionskarte zeigt „Buys x/∞“ bei unbegrenzten Käufen. **Verhaltensänderung:** Ergebnisse der Simulation werden realistischer und damit meist schlechter als vorher. 5 neue Selbsttests, E2E-Attrappen für Jupiter und Priority Fees, Lern- und UI-E2E erweitert.
 - Roadmap A3 / Phase 8 (2.10.1): Sicherheitsprüfung (CSP, Escaping, Links, kein eval, keine Geheimnisse) ohne Befund bis auf das LIVE-Gate: Limits auf 0 = aus galten als „geprüft“ – jetzt müssen alle Risiko-Limits aktiv sein. Performance mit 400 Tokens unverändert (Scan 17–41 ms, Analyse 11–20 ms, Render 4–22 ms, 25 MB). Abschlussbericht und Release-Checkliste in `docs/ABSCHLUSSBERICHT.md`.
 - Roadmap A2 / Phase 7 (2.10.0): Monitoring-Kennzahlen, Anomalie-Monitor mit Reason Codes und Aktionen (Standard nur warnen, einstellbar unter System → „Anomalie-Monitor: Reaktion“), Statusleiste mit Daten, Live-Gate und Monitor, Pill „Pos“ zeigt ∞ bei unbegrenzten Positionen. 3 neue Selbsttests, UI-E2E erweitert.
 - Roadmap A1: Tests ins Repo (`tests/e2e/`, gemeinsames `env.js`, Runner `run-all.js`, Syntax-Prüfung), CI über GitHub Actions; XSS-Test mit echten Prüfungen statt reiner Ausgabe; Login-Test wartet auf das Ende der PBKDF2-Prüfung statt fester Zeiten.

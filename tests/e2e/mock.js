@@ -35,11 +35,22 @@ function route(url, method, body) {
     if (u.pathname.includes('/pools/multi/')) { const ps = u.pathname.split('/').pop().split(','); return { data: tokens.filter(t => ps.includes(t.pair)).map(t => ({ id: 'solana_' + t.pair, type: 'pool', attributes: { name: t.sym + ' / SOL', address: t.pair, base_token_price_usd: String(t.price * 1.004), reserve_in_usd: String(t.liq * 1.05), fdv_usd: String(t.mc), market_cap_usd: String(t.mc), price_change_percentage: { m5: '1', h1: '2', h6: '3', h24: '4' }, transactions: { m5: { buys: 10, sells: 8 }, h1: { buys: 100, sells: 90 } }, volume_usd: { m5: '1000', h1: '20000', h24: '500000' }, pool_created_at: new Date(t.created).toISOString() }, relationships: { base_token: { data: { id: 'solana_' + t.mint } }, dex: { data: { id: 'raydium' } } } })) }; }
     return { data: tokens.slice(30, 36).map(t => ({ id: 'solana_' + t.pair, type: 'pool', attributes: { name: t.sym + ' / SOL', address: t.pair, base_token_price_usd: String(t.price), reserve_in_usd: String(t.liq), fdv_usd: String(t.mc), market_cap_usd: null, price_change_percentage: { m5: '1', h1: '2' }, transactions: { m5: { buys: 10, sells: 8 }, h1: { buys: 100, sells: 90 } }, volume_usd: { m5: '1000', h1: '20000' }, pool_created_at: new Date(t.created).toISOString() }, relationships: { base_token: { data: { id: 'solana_' + t.mint } } } })) };
   }
+  if (u.host === 'lite-api.jup.ag' || u.host === 'api.jup.ag') {
+    // Jupiter-Attrappe (nur /quote): Konstantprodukt-AMM auf Preis/Liquidität des Mock-Tokens, 6 Decimals, 0,25 % Gebühr
+    const inM = u.searchParams.get('inputMint'), outM = u.searchParams.get('outputMint'), amt = Number(u.searchParams.get('amount')), bps = Number(u.searchParams.get('slippageBps') || 50);
+    const buy = inM === WSOL, t = tokens.find(x => x.mint === (buy ? outM : inM)), sol = 151.23, keep = 0.9975;
+    if (!t || !u.pathname.endsWith('/quote')) return { error: 'Could not find any route', errorCode: 'COULD_NOT_FIND_ANY_ROUTE' };
+    let out;
+    if (buy) { const usd = amt / 1e9 * sol; out = Math.floor(usd * keep / (t.price * (1 + usd / (t.liq / 2))) * 1e6); }
+    else { const usd = amt / 1e6 * t.price; out = Math.floor(usd * keep / (1 + usd / (t.liq / 2)) / sol * 1e9); }
+    return { inputMint: inM, outputMint: outM, inAmount: String(amt), outAmount: String(out), otherAmountThreshold: String(Math.floor(out * (1 - bps / 1e4))), slippageBps: bps, priceImpactPct: '0', routePlan: [{ swapInfo: { label: 'Raydium' }, percent: 100 }], contextSlot: 1 };
+  }
   if (u.host === 'api.rugcheck.xyz') { const m = u.pathname.split('/')[3]; const t = tokens.find(x => x.mint === m); return { score: 101, score_normalised: 3, risks: t && t.freeze ? [{ name: 'Freeze Authority still enabled', level: 'danger', value: '', description: 'x', score: 5000 }] : [{ name: 'Low amount of LP Providers', level: 'warn', value: '', description: '', score: 400 }], lpLockedPct: 100 }; }
   if (method === 'POST') {
     const b = JSON.parse(body || '{}');
     if (b.method === 'getSlot') return { jsonrpc: '2.0', id: 1, result: 312345678 + Math.floor(Date.now() / 400) % 1000 };
     if (b.method === 'getAccountInfo') { const t = tokens.find(x => x.mint === b.params[0]); return { jsonrpc: '2.0', id: 1, result: { context: { slot: 1 }, value: { owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', data: { program: 'spl-token', parsed: { type: 'mint', info: { decimals: 6, supply: '1000000000000000', isInitialized: true, mintAuthority: null, freezeAuthority: t && t.freeze ? mint(9999) : null } } } } } }; }
+    if (b.method === 'getRecentPrioritizationFees') return { jsonrpc: '2.0', id: 1, result: Array.from({ length: 10 }, (_, i) => ({ slot: 312345000 + i, prioritizationFee: 20000 * (i + 1) })) };
     if (b.method === 'getTokenLargestAccounts') return { jsonrpc: '2.0', id: 1, result: { value: Array.from({ length: 12 }, (_, i) => ({ address: mint(7000 + i), amount: String(30000000000000 - i * 1000000000000), decimals: 6 })) } };
     return { jsonrpc: '2.0', id: 1, error: { code: -32601, message: 'Method not found' } };
   }

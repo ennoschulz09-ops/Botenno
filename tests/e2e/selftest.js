@@ -29,7 +29,7 @@ const { route } = require('./mock.js');
   const fail = tr.filter(x => x.startsWith('FAIL'));
   console.log('SELF-TESTS:', pass.length, 'pass,', fail.length, 'fail');
   fail.forEach(x => console.log('  FAIL:', x));
-  tr.filter(x => /Lern-KI|Adaptive KI|Monitoring/.test(x)).forEach(x => console.log('  ', x)); const lossTest = tr.find(x => /Loss-Cooldown/.test(x));
+  tr.filter(x => /Lern-KI|Adaptive KI|Monitoring|Ehrliche Simulation/.test(x)).forEach(x => console.log('  ', x)); const lossTest = tr.find(x => /Loss-Cooldown/.test(x));
   console.log('LOSS-COOLDOWN TEST:', lossTest);
 
   console.log('CONSOLE/PAGE ERRORS:', errors.length);
