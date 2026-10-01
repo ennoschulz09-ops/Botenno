@@ -31,4 +31,17 @@ let APP_URL, USER = process.env.E2E_USER, PASS = process.env.E2E_PASS;
 if (USER && PASS) APP_URL = 'file://' + APP_FILE;
 else { const t = testCopy(); APP_URL = 'file://' + t.file; USER = t.user; PASS = t.pass; }
 
-module.exports = { chromium, APP_URL, USER, PASS, OUT };
+// Seit 2.11.0 scheitert ein Teil der simulierten Transaktionen zufällig, und die Füllung erfolgt erst nach einer
+// Wartezeit zum dann gültigen Kurs. Browser-Tests, die einen Kauf durchspielen, brauchen ein festes Ergebnis:
+// keine zufälligen Fehlschläge und eine weite Slippage-Grenze (die Mock-Preise steigen bei jedem Abruf).
+// Die Fehlschlag-Logik selbst prüfen die Selbsttests der App. Aufruf nach page.goto, vor dem Login.
+const DETERMINISTIC = { simTxFailPct: 0, maxSlippagePct: 10 };
+async function seedDeterministic(page) {
+  await page.evaluate(s => {
+    const k = 'smartlab.v3.settings', cur = JSON.parse(localStorage.getItem(k) || 'null');
+    const d = cur && cur.settings ? cur : { v: 3, settings: {}, strategies: {}, watchlist: {}, ui: {} };
+    Object.assign(d.settings, s); localStorage.setItem(k, JSON.stringify(d));
+  }, DETERMINISTIC);
+}
+
+module.exports = { chromium, APP_URL, USER, PASS, OUT, seedDeterministic };

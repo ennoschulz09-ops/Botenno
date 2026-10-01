@@ -1,5 +1,5 @@
 // E2E: Voll-Backup exportieren und auf einem „zweiten Gerät“ (frischer Browser-Kontext) wiederherstellen
-const { chromium, APP_URL, USER, PASS, OUT } = require('./env.js');
+const { chromium, APP_URL, USER, PASS, OUT, seedDeterministic } = require('./env.js');
 const { route } = require('./mock.js');
 const fs = require('fs');
 let failures = 0; const ok = (c, m) => { if (!c) failures++; console.log((c ? 'OK: ' : 'FAIL: ') + m); };
@@ -9,7 +9,7 @@ let failures = 0; const ok = (c, m) => { if (!c) failures++; console.log((c ? 'O
     const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, acceptDownloads: true }); const page = await ctx.newPage();
     page.on('pageerror', e => errors.push(e.message)); page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
     await ctx.route('https://**/*', async r => { const req = r.request(); const data = route(req.url(), req.method(), req.postData()); if (data == null) return r.fulfill({ status: 404, body: 'nf' }); r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(data) }); });
-    await page.goto(APP_URL); return { ctx, page };
+    await page.goto(APP_URL); await seedDeterministic(page); return { ctx, page };
   }
   const login = async (page, w = 5000) => { await page.fill('#loginUser', USER); await page.fill('#loginPass', PASS); await page.click('#loginForm button[type=submit]'); await page.waitForTimeout(w); };
   // Gerät A: Trade eröffnen, Einstellung ändern, Backup exportieren

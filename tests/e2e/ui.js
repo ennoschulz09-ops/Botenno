@@ -1,4 +1,4 @@
-const { chromium, APP_URL, USER, PASS, OUT } = require('./env.js');
+const { chromium, APP_URL, USER, PASS, OUT, seedDeterministic } = require('./env.js');
 const { route } = require('./mock.js');
 let failures = 0;
 const ok = (c, m) => { if (!c) failures++; console.log((c ? 'OK: ' : 'FAIL: ') + m); };
@@ -17,7 +17,7 @@ const ok = (c, m) => { if (!c) failures++; console.log((c ? 'OK: ' : 'FAIL: ') +
       if (data == null) return r.fulfill({ status: 404, body: 'nf' });
       r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(data) });
     });
-    await page.goto(APP_URL);
+    await page.goto(APP_URL); await seedDeterministic(page);
     await page.fill('#loginUser', USER); await page.fill('#loginPass', PASS);
     await page.click('#loginForm button[type=submit]');
     await page.waitForTimeout(7000);

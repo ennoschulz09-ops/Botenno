@@ -1,5 +1,5 @@
 // E2E: Lern-KI (Migration aus Journal, Ansicht einfach/Analyse, echter Trade → Record, Export, Logs, Reload, Mobil)
-const { chromium, APP_URL, USER, PASS, OUT } = require('./env.js');
+const { chromium, APP_URL, USER, PASS, OUT, seedDeterministic } = require('./env.js');
 const { route } = require('./mock.js');
 const fs = require('fs');
 let failures = 0;
@@ -42,7 +42,7 @@ function seedJournal(mints) {
       if (data == null) return r.fulfill({ status: 404, body: 'nf' });
       r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(data) });
     });
-    await page.goto(APP_URL);
+    await page.goto(APP_URL); await seedDeterministic(page);
     return { ctx, page };
   }
   const login = async (page, wait = 6000) => { await page.fill('#loginUser', USER); await page.fill('#loginPass', PASS); await page.click('#loginForm button[type=submit]'); await page.waitForTimeout(wait); };
@@ -102,6 +102,13 @@ function seedJournal(mints) {
   await page.click('#detail [data-act="buy"]'); await page.waitForTimeout(500); await page.click('#mb-ok'); await page.waitForTimeout(2500);
   await page.keyboard.press('Escape');
   await page.click('#nv-positions'); await page.waitForTimeout(700);
+  if (!(await page.locator('#v-positions [data-act="sell"][data-frac="ALL"]').first().isVisible({ timeout: 8000 }).catch(() => false))) {
+    try { // Diagnose: warum ist keine Position entstanden?
+      await page.click('#nv-orders', { timeout: 3000 }); await page.waitForTimeout(500);
+      console.log('  Orders nach dem Kauf:', (await page.locator('#v-orders').innerText()).split('\n').slice(0, 8).join(' | '));
+      await page.click('#nv-positions'); await page.waitForTimeout(500);
+    } catch (e) { console.log('  Diagnose nicht möglich:', e.message.split('\n')[0]); }
+  }
   await page.locator('#v-positions [data-act="sell"][data-frac="ALL"]').first().click(); await page.waitForTimeout(500);
   await page.click('#mb-ok'); await page.waitForTimeout(2500); await page.keyboard.press('Escape');
   await goLearn(page);
