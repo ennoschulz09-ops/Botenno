@@ -1,0 +1,34 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Syntax-Prüfung
+        run: node tests/e2e/check-syntax.js
+      - name: Selbsttests und Browser-Tests
+        # Ohne E2E_USER/E2E_PASS nutzen die Tests eine Testkopie mit Wegwerf-Passwort – keine Secrets nötig.
+        run: node tests/e2e/run-all.js
+      - name: Screenshots bei Fehlern
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-out
+          path: tests/e2e/out
+          retention-days: 7

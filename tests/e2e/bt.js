@@ -1,0 +1,31 @@
+// E2E: Backtest-Report (Run-Protokoll, Stress, Monte-Carlo, Regime, CSV, Run-Historie)
+const { chromium, APP_URL, USER, PASS, OUT } = require('./env.js');
+const { route } = require('./mock.js');
+const fs = require('fs');
+let failures = 0; const ok = (c, m) => { if (!c) failures++; console.log((c ? 'OK: ' : 'FAIL: ') + m); };
+(async () => {
+  const browser = await chromium.launch(); const errors = [];
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, acceptDownloads: true }); const page = await ctx.newPage();
+  page.on('pageerror', e => errors.push(e.message)); page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+  await ctx.route('https://**/*', async r => { const req = r.request(); const data = route(req.url(), req.method(), req.postData()); if (data == null) return r.fulfill({ status: 404, body: 'nf' }); r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(data) }); });
+  await page.goto(APP_URL);
+  await page.fill('#loginUser', USER); await page.fill('#loginPass', PASS); await page.click('#loginForm button[type=submit]'); await page.waitForTimeout(5000);
+  await page.click('#nv-backtest'); await page.waitForTimeout(600);
+  ok(!(await page.locator('#btWf').count()) && /Walk-Forward ist verpflichtend/.test(await page.locator('#v-backtest').innerText()), 'Walk-Forward verpflichtend (kein Abschalten mehr)');
+  await page.selectOption('#btTf', '1m');
+  await page.click('#btRunBtn'); await page.waitForTimeout(3000);
+  const txt = await page.locator('#btRes').innerText();
+  for (const [re, name] of [[/Run-ID\s*BT-/i, 'Run-ID'], [/Zeitraum/i, 'Zeitraum'], [/Datenquelle\s*GeckoTerminal OHLCV/i, 'Datenquelle'], [/Strategie-\/Code-Version/i, 'Code-Version'], [/Kosten \(je Seite\)/i, 'Kostenannahmen'], [/Out-of-Sample-Anteil\s*50/i, 'OOS-Anteil'], [/Stress-Szenarien/i, 'Stress'], [/Gebühren ×2/, 'Stress Gebühren'], [/Monte-Carlo-Drawdown/i, 'Monte-Carlo'], [/Ergebnisse nach Regime/i, 'Regime'], [/Wesentliche Limitierungen/i, 'Limitierungen']]) ok(re.test(txt), 'Backtest-Bericht zeigt: ' + name);
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#btRes [data-act="btCsv"]')]);
+  const csv = fs.readFileSync(await dl.path(), 'utf8').split('\n');
+  ok(/entryTime,exitTime/.test(csv[0]) && /regime/.test(csv[0]), `Trades-CSV exportiert (${csv.length - 1} Zeilen)`);
+  await page.click('#btRunBtn'); await page.waitForTimeout(3000);
+  await page.click('#nv-scanner'); await page.waitForTimeout(300); await page.click('#nv-backtest'); await page.waitForTimeout(600);
+  const hist = await page.locator('#v-backtest').innerText();
+  const ids = (hist.match(/BT-[0-9A-Z]+/g) || []);
+  ok(/Run-Historie/i.test(hist) && ids.length >= 1, 'Run-Historie sichtbar');
+  await page.screenshot({ path: OUT + '/d-backtest.png', fullPage: true });
+  ok(errors.length === 0, 'Keine Konsolen-/JS-Fehler (' + errors.length + ')'); errors.slice(0, 5).forEach(e => console.log('   ', e));
+  console.log(failures ? `\n${failures} FEHLER` : '\nALLE BACKTEST-TESTS BESTANDEN');
+  await browser.close(); process.exit(failures ? 1 : 0);
+})();

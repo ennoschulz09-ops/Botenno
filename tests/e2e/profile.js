@@ -1,0 +1,27 @@
+const { chromium, APP_URL, USER, PASS, OUT } = require('./env.js');
+const { route } = require('./mock.js');
+let failures = 0; const ok = (c, m) => { if (!c) failures++; console.log((c ? 'OK: ' : 'FAIL: ') + m); };
+(async () => {
+  const b = await chromium.launch(); const ctx = await b.newContext({ viewport: { width: 1440, height: 900 } }); const p = await ctx.newPage();
+  const errors = []; p.on('pageerror', e => errors.push(e.message)); p.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+  await ctx.route('https://**/*', r => { const q = r.request(); const d = route(q.url(), q.method(), q.postData()); r.fulfill(d == null ? { status: 404, body: '' } : { status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(d) }); });
+  await p.goto(APP_URL);
+  await p.fill('#loginUser', USER); await p.fill('#loginPass', PASS); await p.click('#loginForm button[type=submit]'); await p.waitForTimeout(5000);
+  await p.click('#nv-settings'); await p.waitForTimeout(400);
+  const v = async k => p.locator(`#v-settings [data-set="${k}"]`).first().evaluate(e => e.type === 'checkbox' ? e.checked : e.value);
+  ok(await v('maxBuysPerCoin') === '2' && await v('sellCooldownMin') === '15', 'Standardwerte unverändert (2 Käufe, 15 min)');
+  ok((await p.locator('#v-settings').innerText()).indexOf('HART') < 0, 'Kein „HART“-Hinweis mehr in den Einstellungen');
+  await p.locator('#v-settings [data-act="profile"][data-p="Lernmodus (ohne Limits)"]').click(); await p.waitForTimeout(600);
+  const vals = {}; for (const k of ['maxBuysPerCoin', 'sellCooldownMin', 'dailyLossLimitPct', 'ddStopPct', 'maxTradesPerHour', 'maxOpenPositions', 'lossStreakLimit', 'addOnlyInProfit', 'autoSafeMode', 'minScore']) vals[k] = await v(k);
+  console.log('  nach Profil:', JSON.stringify(vals));
+  ok(vals.maxBuysPerCoin === '0' && vals.sellCooldownMin === '0' && vals.dailyLossLimitPct === '0' && vals.ddStopPct === '0' && vals.maxTradesPerHour === '0' && vals.maxOpenPositions === '0' && vals.lossStreakLimit === '0' && vals.addOnlyInProfit === false && vals.autoSafeMode === false, 'Profil „Lernmodus“ setzt alle Limits auf 0/aus');
+  ok(vals.minScore === '65', 'Kauf-Filter bleiben unverändert (Min. Score 65)');
+  await p.click('#nv-risk').catch(async () => { await p.evaluate(() => document.querySelector('[data-view="risk"]').click()); }); await p.waitForTimeout(600);
+  const rt = await p.locator('#v-risk').innerText();
+  ok(/Limits \(alle einstellbar, 0 = aus\)/i.test(rt) && /unbegrenzt/.test(rt) && /aus/.test(rt), 'Risiko-Ansicht zeigt Limits als einstellbar mit „aus/unbegrenzt“');
+  await p.reload(); await p.fill('#loginUser', USER); await p.fill('#loginPass', PASS); await p.click('#loginForm button[type=submit]'); await p.waitForTimeout(3000);
+  await p.click('#nv-settings'); await p.waitForTimeout(400);
+  ok(await v('maxBuysPerCoin') === '0' && await v('sellCooldownMin') === '0', 'Einstellungen bleiben nach Neuladen erhalten');
+  ok(errors.length === 0, 'Keine Konsolen-/JS-Fehler (' + errors.length + ')'); errors.slice(0, 3).forEach(e => console.log('   ', e));
+  console.log(failures ? failures + ' FEHLGESCHLAGEN' : 'ALLE PROFIL-TESTS BESTANDEN'); await b.close(); process.exit(failures ? 1 : 0);
+})();
