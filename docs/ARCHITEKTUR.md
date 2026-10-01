@@ -1,6 +1,6 @@
 # Smart Lab – Architektur & technischer Audit
 
-Stand: Phase 7 des Master-Prompts „Ganzheitliche Optimierung“ (App-Version 2.10.0).
+Stand: Phase 8 des Master-Prompts „Ganzheitliche Optimierung“ abgeschlossen (App-Version 2.10.1). Abschlussbericht: `docs/ABSCHLUSSBERICHT.md`.
 Dieses Dokument wird in jeder Phase fortgeschrieben (siehe „Änderungsprotokoll“ am Ende).
 
 ## 1. Überblick
@@ -112,7 +112,7 @@ UI-Schicht (DOM): Views, Detail-Panel, Modals, Charts (Canvas), Toasts, Alarm-Fe
 
 - Risiko-Limits: seit 2.9.0 keine festen Grenzen mehr – alle über `SETTINGS_SCHEMA` einstellbar (0 = aus), validiert auf gültige Bereiche. Die Lern-KI verändert sie nie. Nicht abschaltbar bleiben: Security-Blocker (CRITICAL, Prüfung ausstehend), Datenprüfungen (kein Preis, veraltete Daten, Gebühren unbekannt), Doppel-Order-Schutz, Abgleich nach Neustart, LIVE-Gating.
 - `globalBlockers` / `execCheck` / `MANUAL_HARD`: letzte Prüfung vor jeder Order.
-- `setMode('LIVE')` / `liveReadiness`: LIVE nie aktivierbar ohne Provider.
+- `setMode('LIVE')` / `liveReadiness`: LIVE nie aktivierbar ohne Provider; seit 2.10.1 zusätzlich nur mit aktiven Risiko-Limits (kein Lernmodus).
 - `requestSignature`: deaktiviert.
 - Lern-KI: `mergeParams` (nur verschärfend), `sanitizeRules`, Übernahme nur SIMULATION.
 - Login: Hash im Quelltext öffentlich sichtbar (GitHub Pages) → clientseitige Sperre, **kein** Server-Schutz. PBKDF2 macht Offline-Raten teuer, verhindert es aber nicht bei schwachen Passwörtern.
@@ -154,6 +154,7 @@ Kein Hotspot gefunden, der eine Optimierung rechtfertigt. Render ist bereits ged
 ## Änderungsprotokoll
 
 - Phase 0: Audit erstellt.
+- Roadmap A3 / Phase 8 (2.10.1): Sicherheitsprüfung (CSP, Escaping, Links, kein eval, keine Geheimnisse) ohne Befund bis auf das LIVE-Gate: Limits auf 0 = aus galten als „geprüft“ – jetzt müssen alle Risiko-Limits aktiv sein. Performance mit 400 Tokens unverändert (Scan 17–41 ms, Analyse 11–20 ms, Render 4–22 ms, 25 MB). Abschlussbericht und Release-Checkliste in `docs/ABSCHLUSSBERICHT.md`.
 - Roadmap A2 / Phase 7 (2.10.0): Monitoring-Kennzahlen, Anomalie-Monitor mit Reason Codes und Aktionen (Standard nur warnen, einstellbar unter System → „Anomalie-Monitor: Reaktion“), Statusleiste mit Daten, Live-Gate und Monitor, Pill „Pos“ zeigt ∞ bei unbegrenzten Positionen. 3 neue Selbsttests, UI-E2E erweitert.
 - Roadmap A1: Tests ins Repo (`tests/e2e/`, gemeinsames `env.js`, Runner `run-all.js`, Syntax-Prüfung), CI über GitHub Actions; XSS-Test mit echten Prüfungen statt reiner Ausgabe; Login-Test wartet auf das Ende der PBKDF2-Prüfung statt fester Zeiten.
 - 2.9.0 (Nutzerwunsch): feste Grenzen (`HARD_LIMITS`) entfernt – Max. Käufe pro Coin, Coin-Cooldown, Verlustserie, Exposure, Positionsgröße, Min. Trades für Optimierung frei einstellbar; 0 = aus für Tageslimit, Drawdown-Modus/-Grenze, Overtrading (inkl. Bremse), max. Positionen, Korrelation, System-Health; neue Schalter: Nachkauf nur im Gewinn, Strategie-Cooldowns, marktweite Handelspause, automatischer Safe Mode; Profil „Lernmodus (ohne Limits)“ (nur Limits, Kauf-Filter unverändert); Risiko-Ansicht zeigt Limits als einstellbar. Standardwerte unverändert. Selbsttests angepasst + 1 neuer (Lernmodus), neuer E2E-Test für das Profil.
