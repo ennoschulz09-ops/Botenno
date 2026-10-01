@@ -255,7 +255,6 @@ body:not(.pro) .ov{grid-template-columns:repeat(5,minmax(0,1fr))}
 .fld{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
 .fld.inl{flex-direction:row;align-items:center;justify-content:space-between;gap:10px}
 .fld input:not([type=checkbox]),.fld select{width:100%}
-.fld .hard{color:var(--orange);font-size:10px;font-weight:700}
 .fld.err input{border-color:var(--red)}
 textarea{width:100%;min-height:90px;font:12px var(--mono)}
 pre.raw{white-space:pre-wrap;word-break:break-all;font:11px/1.4 var(--mono);background:#050912;border:1px solid var(--line);border-radius:10px;padding:10px;max-height:320px;overflow:auto;color:#c9d2f5}
@@ -467,7 +466,7 @@ pre.raw{white-space:pre-wrap;word-break:break-all;font:11px/1.4 var(--mono);back
    ===================================================================== */
 
 /* ============================== KONSTANTEN ============================== */
-const APP_VERSION = '2.8.0';
+const APP_VERSION = '2.9.0';
 /* true, wenn Version a älter als b ist (fehlende Version = sehr alt). */
 const verLt = (a, b) => { if (typeof a !== 'string') return true; const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const STRATEGY_VERSION = '1.0.0';
@@ -493,17 +492,8 @@ const GT_HEADERS = { Accept: 'application/json;version=20230302' };
 const PYRAMID_MIN_PNL_PCT = 10;     // Buy #2 nur bei Gewinn (kein Averaging Down / Martingale)
 const MIN_ORDER_USD = 5;
 
-/* Unveränderliche Sicherheitsgrenzen – weder Auto-Tuning noch Import dürfen sie aufheben. */
-const HARD_LIMITS = Object.freeze({
-  MAX_BUYS_PER_COIN: 2,
-  MIN_SELL_COOLDOWN_MIN: 15,
-  MIN_LOSS_COOLDOWN_MIN: 0, // Entscheidung Nutzer (2026-09-29, ab 2.8.0): Loss-Cooldown und globale Pause dürfen 0 sein
-  MAX_LOSS_STREAK_LIMIT: 3,
-  MIN_GLOBAL_PAUSE_MIN: 0,
-  MIN_TRADES_FOR_TUNING: 20,
-  MAX_EXPOSURE_PCT: 50,
-  MAX_POSITION_PCT: 20
-});
+/* Ab 2.9.0 gibt es keine festen (harten) Grenzen mehr – Entscheidung Nutzer (2026-10-01). Alle Risiko-Limits sind
+   Einstellungen und lassen sich bis „0 = aus“ stellen. Die Lern-KI verändert sie weiterhin nie (LEARN_SETTING_KEYS). */
 /* Parameter, die Self-Optimization verändern darf – nur innerhalb dieser Grenzen. */
 const TUNING_BOUNDS = Object.freeze({ minScore: [55, 90], stopLossPct: [8, 25], trailPct: [8, 20] });
 
@@ -745,35 +735,38 @@ const SETTINGS_SCHEMA = [
   { k: 'minMcap', s: 'Filter', l: 'Min. MC (Market Cap)', t: 'num', def: 50000, min: 0, max: 1e11, u: '$' },
   { k: 'maxMcap', s: 'Filter', l: 'Max. MC (Market Cap)', t: 'num', def: 5000000, min: 1000, max: 1e12, u: '$' },
   { k: 'minBuyRatio', s: 'Filter', l: 'Min. Käuferanteil 1h (0–1)', t: 'num', def: 0.55, min: 0, max: 1, step: 0.01 },
-  { k: 'minScore', s: 'Filter', l: 'Min. Final Score', t: 'int', def: 65, min: 40, max: 100 },
+  { k: 'minScore', s: 'Filter', l: 'Min. Final Score', t: 'int', def: 65, min: 0, max: 100 },
   { k: 'minPairAgeMin', s: 'Filter', l: 'Min. Pair-Alter für Auto-Buys', t: 'int', def: 10, min: 0, max: 10080, u: 'min' },
   // Risiko
   { k: 'simCapitalUsd', s: 'Risiko', l: 'Startkapital Simulation/Paper', t: 'num', def: 1000, min: 10, max: 1e7, u: '$' },
-  { k: 'maxExposurePct', s: 'Risiko', l: 'Max. Portfolio-Exposure', t: 'num', def: 30, min: 1, max: HARD_LIMITS.MAX_EXPOSURE_PCT, u: '%' },
-  { k: 'maxPositionPct', s: 'Risiko', l: 'Max. Positionsgröße', t: 'num', def: 5, min: 0.1, max: HARD_LIMITS.MAX_POSITION_PCT, u: '%' },
-  { k: 'maxOpenPositions', s: 'Risiko', l: 'Max. offene Positionen', t: 'int', def: 3, min: 1, max: 10 },
-  { k: 'dailyLossLimitPct', s: 'Risiko', l: 'Tagesverlust-Limit (Auto-Trading aus)', t: 'num', def: 10, min: 1, max: 50, u: '%' },
-  { k: 'maxRiskScore', s: 'Risiko', l: 'Max. Risk Score für Käufe', t: 'int', def: 60, min: 10, max: 85 },
-  { k: 'minConfidence', s: 'Risiko', l: 'Min. Data Confidence', t: 'int', def: 60, min: 40, max: 100 },
-  { k: 'minSystemHealth', s: 'Risiko', l: 'Min. System Health für Trading', t: 'int', def: 60, min: 30, max: 100 },
+  { k: 'maxExposurePct', s: 'Risiko', l: 'Max. Portfolio-Exposure', t: 'num', def: 30, min: 1, max: 100, u: '%' },
+  { k: 'maxPositionPct', s: 'Risiko', l: 'Max. Positionsgröße', t: 'num', def: 5, min: 0.1, max: 100, u: '%' },
+  { k: 'maxOpenPositions', s: 'Risiko', l: 'Max. offene Positionen (0 = unbegrenzt)', t: 'int', def: 3, min: 0, max: 100 },
+  { k: 'dailyLossLimitPct', s: 'Risiko', l: 'Tagesverlust-Limit – Auto-Trading aus (0 = aus)', t: 'num', def: 10, min: 0, max: 100, u: '%' },
+  { k: 'maxRiskScore', s: 'Risiko', l: 'Max. Risk Score für Käufe', t: 'int', def: 60, min: 0, max: 100 },
+  { k: 'minConfidence', s: 'Risiko', l: 'Min. Data Confidence', t: 'int', def: 60, min: 0, max: 100 },
+  { k: 'minSystemHealth', s: 'Risiko', l: 'Min. System Health für Trading (0 = aus)', t: 'int', def: 60, min: 0, max: 100 },
   { k: 'requireVerifiedSecurity', s: 'Risiko', l: 'Nur VERIFIED Security (RPC + RugCheck)', t: 'bool', def: false },
-  { k: 'maxBuysPerCoin', s: 'Risiko', l: 'Max. Käufe pro Coin', t: 'int', def: 2, min: 1, max: HARD_LIMITS.MAX_BUYS_PER_COIN, hard: true },
-  { k: 'sellCooldownMin', s: 'Risiko', l: 'Coin-Cooldown nach Verkauf', t: 'int', def: 15, min: HARD_LIMITS.MIN_SELL_COOLDOWN_MIN, max: 1440, u: 'min', hard: true },
-  { k: 'lossCooldownMin', s: 'Risiko', l: 'Loss-Cooldown (global) nach Verlust', t: 'int', def: 0, min: HARD_LIMITS.MIN_LOSS_COOLDOWN_MIN, max: 1440, u: 'min', hard: true },
-  { k: 'lossStreakLimit', s: 'Risiko', l: 'Verlustserie bis globale Pause', t: 'int', def: 3, min: 1, max: HARD_LIMITS.MAX_LOSS_STREAK_LIMIT, hard: true },
-  { k: 'globalPauseMin', s: 'Risiko', l: 'Globale Pause nach Verlustserie', t: 'int', def: 0, min: HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN, max: 1440, u: 'min', hard: true },
-  { k: 'maxTradesPerHour', s: 'Risiko', l: 'Overtrading-Limit (Käufe/Stunde)', t: 'int', def: 6, min: 1, max: 30 },
-  { k: 'correlationLimit', s: 'Risiko', l: 'Korrelations-Grenze (Konzentration)', t: 'num', def: 0.85, min: 0.5, max: 1, step: 0.01 },
-  { k: 'ddReducePct', s: 'Risiko', l: 'Drawdown-Modus: Positionsgröße halbieren ab', t: 'num', def: 10, min: 2, max: 50, u: '%' },
-  { k: 'ddStopPct', s: 'Risiko', l: 'Drawdown-Grenze: keine Auto-Käufe ab', t: 'num', def: 20, min: 5, max: 80, u: '%' },
+  { k: 'maxBuysPerCoin', s: 'Risiko', l: 'Max. Käufe pro Coin (0 = unbegrenzt)', t: 'int', def: 2, min: 0, max: 100 },
+  { k: 'addOnlyInProfit', s: 'Risiko', l: `Nachkauf nur im Gewinn (ab +${PYRAMID_MIN_PNL_PCT} %, kein Nachkaufen im Verlust)`, t: 'bool', def: true },
+  { k: 'sellCooldownMin', s: 'Risiko', l: 'Coin-Cooldown nach Verkauf (0 = aus)', t: 'int', def: 15, min: 0, max: 1440, u: 'min' },
+  { k: 'lossCooldownMin', s: 'Risiko', l: 'Loss-Cooldown (global) nach Verlust (0 = aus)', t: 'int', def: 0, min: 0, max: 1440, u: 'min' },
+  { k: 'lossStreakLimit', s: 'Risiko', l: 'Verlustserie bis globale Pause & Review (0 = aus)', t: 'int', def: 3, min: 0, max: 100 },
+  { k: 'globalPauseMin', s: 'Risiko', l: 'Globale Pause nach Verlustserie (0 = aus)', t: 'int', def: 0, min: 0, max: 1440, u: 'min' },
+  { k: 'maxTradesPerHour', s: 'Risiko', l: 'Overtrading-Limit Käufe/Stunde inkl. Bremse (0 = aus)', t: 'int', def: 6, min: 0, max: 1000 },
+  { k: 'correlationLimit', s: 'Risiko', l: 'Korrelations-Grenze Konzentration (0 = aus)', t: 'num', def: 0.85, min: 0, max: 1, step: 0.01 },
+  { k: 'ddReducePct', s: 'Risiko', l: 'Drawdown-Modus: Positionsgröße halbieren ab (0 = aus)', t: 'num', def: 10, min: 0, max: 100, u: '%' },
+  { k: 'ddStopPct', s: 'Risiko', l: 'Drawdown-Grenze: keine Auto-Käufe ab (0 = aus)', t: 'num', def: 20, min: 0, max: 100, u: '%' },
   { k: 'signalConflictBlock', s: 'Risiko', l: 'Auto-Kauf bei widersprüchlichen Signalen verhindern', t: 'bool', def: true },
-  { k: 'consensusMinWeight', s: 'Risiko', l: 'Min. Strategie-Konsens (Summe Gewichte)', t: 'num', def: 1.5, min: 0.5, max: 5, step: 0.1 },
+  { k: 'strategyCooldowns', s: 'Risiko', l: 'Strategie-Cooldown je Coin anwenden (Dauer je Strategie einstellbar)', t: 'bool', def: true },
+  { k: 'lowQualityMarketBlock', s: 'Risiko', l: 'Marktweite Handelspause bei schlechter Datenlage', t: 'bool', def: true },
+  { k: 'consensusMinWeight', s: 'Risiko', l: 'Min. Strategie-Konsens (Summe Gewichte)', t: 'num', def: 1.5, min: 0, max: 5, step: 0.1 },
   // Ausführung
-  { k: 'maxSlippagePct', s: 'Ausführung', l: 'Max. Slippage / Price Impact', t: 'num', def: 3, min: 0.1, max: 25, u: '%' },
+  { k: 'maxSlippagePct', s: 'Ausführung', l: 'Max. Slippage / Price Impact (100 = praktisch aus)', t: 'num', def: 3, min: 0.1, max: 100, u: '%' },
   { k: 'dexFeePct', s: 'Ausführung', l: 'DEX-Gebühr (Schätzung)', t: 'num', def: 0.25, min: 0, max: 5, step: 0.01, u: '%' },
   { k: 'priorityFeeLamports', s: 'Ausführung', l: 'Priority Fee', t: 'int', def: 100000, min: 0, max: 100000000, u: 'lamports' },
   { k: 'snapshotMaxAgeSec', s: 'Ausführung', l: 'Max. Datenalter beim Pre-Trade-Check', t: 'int', def: 5, min: 2, max: 30, u: 's' },
-  { k: 'maxActiveOrders', s: 'Ausführung', l: 'Max. gleichzeitige Orders', t: 'int', def: 1, min: 1, max: 3 },
+  { k: 'maxActiveOrders', s: 'Ausführung', l: 'Max. gleichzeitige Orders', t: 'int', def: 1, min: 1, max: 20 },
   // Exits
   { k: 'stopLossPct', s: 'Exits', l: 'Stop Loss', t: 'num', def: 15, min: 2, max: 50, u: '%' },
   { k: 'useAtrStop', s: 'Exits', l: 'ATR-Stop verwenden (wenn OHLCV vorhanden)', t: 'bool', def: true },
@@ -809,9 +802,10 @@ const SETTINGS_SCHEMA = [
   { k: 'ffHolderAnalysis', s: 'System', l: 'Feature: Holder-Analyse via RPC', t: 'bool', def: true },
   { k: 'ffShadowMode', s: 'System', l: 'Feature: Shadow Mode (deaktivierte Strategien mitrechnen)', t: 'bool', def: true },
   { k: 'ffAutoTuning', s: 'System', l: 'Feature: Parameter-Versionen überwachen & schlechtere zurückrollen (nur Simulation; neue Parameter nur über die Lern-KI)', t: 'bool', def: false },
-  { k: 'minTradesForTuning', s: 'System', l: 'Min. abgeschlossene Trades für Optimierung', t: 'int', def: 20, min: HARD_LIMITS.MIN_TRADES_FOR_TUNING, max: 1000, hard: true },
+  { k: 'minTradesForTuning', s: 'System', l: 'Min. abgeschlossene Trades für Optimierung', t: 'int', def: 20, min: 1, max: 1000 },
+  { k: 'autoSafeMode', s: 'System', l: 'Safe Mode automatisch nach 5 Scan-Fehlern (stoppt neue Käufe)', t: 'bool', def: true },
   { k: 'resetBuyCountOnSession', s: 'System', l: 'Buy-Zähler bei neuer Session zurücksetzen (nur ohne offene Position)', t: 'bool', def: true },
-  // Lern-KI (Adaptive Loss Intelligence) – verändert nie HARD_LIMITS, Security, Emergency Stop oder LIVE-Gating
+  // Lern-KI (Adaptive Loss Intelligence) – verändert nie Risiko-Limits, Security, Emergency Stop oder LIVE-Gating
   { k: 'learnEnabled', s: 'Lern-KI', l: 'Lern-KI aktiv (Verlust-Analyse, Muster, Experimente)', t: 'bool', def: true },
   { k: 'learnAutoPromote', s: 'Lern-KI', l: 'Validierte Verbesserungen automatisch übernehmen (nur SIMULATION, nach Shadow-Phase, mit Auto-Rollback)', t: 'bool', def: true },
   { k: 'learnMinPattern', s: 'Lern-KI', l: 'Min. Trades für ein stabiles Muster', t: 'int', def: 20, min: 10, max: 500 },
@@ -824,7 +818,9 @@ const defaultSettings = () => Object.fromEntries(SETTINGS_SCHEMA.map(d => [d.k, 
 const PROFILES = {
   Konservativ: { minLiq: 30000, minVol1h: 50000, minMcap: 100000, maxMcap: 10000000, minBuyRatio: 0.6, minScore: 75, maxRiskScore: 45, minConfidence: 70, maxPositionPct: 2, maxExposurePct: 15 },
   Ausgewogen: { minLiq: 10000, minVol1h: 20000, minMcap: 50000, maxMcap: 5000000, minBuyRatio: 0.55, minScore: 65, maxRiskScore: 60, minConfidence: 60, maxPositionPct: 5, maxExposurePct: 30 },
-  Aggressiv: { minLiq: 5000, minVol1h: 10000, minMcap: 20000, maxMcap: 5000000, minBuyRatio: 0.5, minScore: 60, maxRiskScore: 70, minConfidence: 55, maxPositionPct: 5, maxExposurePct: 40 }
+  Aggressiv: { minLiq: 5000, minVol1h: 10000, minMcap: 20000, maxMcap: 5000000, minBuyRatio: 0.5, minScore: 60, maxRiskScore: 70, minConfidence: 55, maxPositionPct: 5, maxExposurePct: 40 },
+  /* Lernmodus: alle Pausen und Risiko-Limits aus, damit durchgehend gehandelt und gelernt wird. Kauf-Filter bleiben unverändert. */
+  'Lernmodus (ohne Limits)': { dailyLossLimitPct: 0, ddStopPct: 0, ddReducePct: 0, lossCooldownMin: 0, globalPauseMin: 0, lossStreakLimit: 0, sellCooldownMin: 0, maxBuysPerCoin: 0, addOnlyInProfit: false, maxTradesPerHour: 0, maxOpenPositions: 0, maxExposurePct: 100, correlationLimit: 0, signalConflictBlock: false, strategyCooldowns: false, lowQualityMarketBlock: false, minPairAgeMin: 0, maxActiveOrders: 20, autoSafeMode: false }
 };
 
 function coerceSetting(d, v) {
@@ -866,14 +862,7 @@ function validateSettings(input, base) {
   if (out.tp1Frac + out.tp2Frac > 1) revert(['tp1Frac', 'tp2Frac'], 'TP1- + TP2-Anteil darf 100 % nicht überschreiten');
   if (out.maxPositionPct > out.maxExposurePct) revert(['maxPositionPct'], 'Max. Positionsgröße darf Max. Exposure nicht überschreiten');
   if (out.maxPositionPct > out.maxExposurePct) out.maxPositionPct = out.maxExposurePct; // auch der Rückfallwert darf die Exposure nicht überschreiten
-  if (!(out.ddReducePct < out.ddStopPct)) revert(['ddReducePct', 'ddStopPct'], 'Drawdown-Modus muss unter der Drawdown-Grenze liegen');
-  // harte Grenzen (redundant zur Schema-Grenze, bewusst doppelt abgesichert)
-  out.maxBuysPerCoin = Math.min(out.maxBuysPerCoin, HARD_LIMITS.MAX_BUYS_PER_COIN);
-  out.sellCooldownMin = Math.max(out.sellCooldownMin, HARD_LIMITS.MIN_SELL_COOLDOWN_MIN);
-  out.lossCooldownMin = Math.max(out.lossCooldownMin, HARD_LIMITS.MIN_LOSS_COOLDOWN_MIN);
-  out.lossStreakLimit = Math.min(out.lossStreakLimit, HARD_LIMITS.MAX_LOSS_STREAK_LIMIT);
-  out.globalPauseMin = Math.max(out.globalPauseMin, HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN);
-  out.minTradesForTuning = Math.max(out.minTradesForTuning, HARD_LIMITS.MIN_TRADES_FOR_TUNING);
+  if (out.ddReducePct > 0 && out.ddStopPct > 0 && !(out.ddReducePct < out.ddStopPct)) revert(['ddReducePct', 'ddStopPct'], 'Drawdown-Modus muss unter der Drawdown-Grenze liegen (oder eines davon 0 = aus)');
   return { settings: out, errors };
 }
 
@@ -899,7 +888,7 @@ function defaultStrategies() {
     trend: { ...base, enabled: true }
   };
 }
-const STRATEGY_FIELDS = { weight: [0, 3], minScore: [40, 100], riskLimit: [10, 85], minLiquidity: [0, 1e9], minConfidence: [40, 100], cooldownMin: [0, 1440], positionSizePct: [0.1, HARD_LIMITS.MAX_POSITION_PCT] };
+const STRATEGY_FIELDS = { weight: [0, 3], minScore: [0, 100], riskLimit: [0, 100], minLiquidity: [0, 1e9], minConfidence: [0, 100], cooldownMin: [0, 1440], positionSizePct: [0.1, 100] };
 function validateStrategies(input, base) {
   const out = deepClone(base || defaultStrategies()); const errors = [];
   if (!input || typeof input !== 'object') return { strategies: out, errors };
@@ -2155,12 +2144,12 @@ function walkForward(candles, cfg) {
    (zeitlich getrennt, Walk-Forward, Sensitivität, Bootstrap) → Champion/Challenger → Shadow → Promotion/Rollback.
    Grundsätze: keine Gewinn-Garantie, kein Look-Ahead (Features nur zum Einstiegszeitpunkt), keine erfundenen Werte
    (fehlend = UNKNOWN / NOT_ENOUGH_DATA). Lernen verschärft höchstens Einstiegsfilter bzw. passt Exits innerhalb
-   LEARN_BOUNDS an – HARD_LIMITS, Security-Blocker, Emergency Stop und LIVE-Gating bleiben unberührt. */
+   LEARN_BOUNDS an – Risiko-Limits, Security-Blocker, Emergency Stop und LIVE-Gating bleiben unberührt. */
 const LEARN_VERSION = 1;
 const FEATURE_VERSION = 1;
 const LOSS_FAMILIES = ['SIGNAL_FALSE_POSITIVE', 'REGIME_MISMATCH', 'LIQUIDITY_FAILURE', 'MOMENTUM_EXHAUSTION', 'VOLUME_DECOUPLING', 'SECURITY_RELATED', 'DATA_QUALITY', 'EXECUTION', 'EXIT_TOO_LATE', 'EXIT_TOO_EARLY', 'RISK_OVERSIZING', 'NOISE_OR_RANDOM'];
 const LOSS_FAMILY_DE = { SIGNAL_FALSE_POSITIVE: 'Fehlsignal', REGIME_MISMATCH: 'Regime passt nicht', LIQUIDITY_FAILURE: 'Liquiditätsproblem', MOMENTUM_EXHAUSTION: 'Momentum erschöpft', VOLUME_DECOUPLING: 'Volumen ohne Preisbestätigung', SECURITY_RELATED: 'Security', DATA_QUALITY: 'Datenqualität', EXECUTION: 'Ausführungskosten', EXIT_TOO_LATE: 'Exit zu spät', EXIT_TOO_EARLY: 'Exit zu früh', RISK_OVERSIZING: 'Position zu groß', NOISE_OR_RANDOM: 'Zufall / normale Streuung' };
-/* Nur diese Parameter sind lernbar – nur innerhalb dieser Grenzen. HARD_LIMITS sind bewusst NICHT enthalten. */
+/* Nur diese Parameter sind lernbar – nur innerhalb dieser Grenzen. Risiko-Limits sind bewusst NICHT enthalten. */
 const LEARN_BOUNDS = Object.freeze({
   minScore: TUNING_BOUNDS.minScore, stopLossPct: TUNING_BOUNDS.stopLossPct, trailPct: TUNING_BOUNDS.trailPct,
   minConfidence: [50, 90], minLiq: [5000, 250000], minPairAgeMin: [0, 120], regimeScoreBump: [0, 15], volumeConfirmPct: [0, 5]
@@ -3397,7 +3386,7 @@ function createCore(opts) {
     const liq = A.liq.usd, mi = s.maxSlippagePct / 2 / 100;
     // Risiko-Abschläge mit Reason Codes (können die Größe nur verkleinern)
     const adj = [], dd = drawdownPct();
-    if (dd >= s.ddReducePct) adj.push({ code: 'DRAWDOWN_MODE', f: 0.5, text: `Drawdown ${dd.toFixed(1)} % ≥ ${s.ddReducePct} % → Größe ×0,5` });
+    if (s.ddReducePct > 0 && dd >= s.ddReducePct) adj.push({ code: 'DRAWDOWN_MODE', f: 0.5, text: `Drawdown ${dd.toFixed(1)} % ≥ ${s.ddReducePct} % → Größe ×0,5` });
     if (isNum(A.dataAge) && A.dataAge > s.staleAfterSec * SEC * 0.5) adj.push({ code: 'DATA_AGE', f: 0.7, text: `Daten ${fmtAge(A.dataAge)} alt → Größe ×0,7` });
     if (A.liq.impactPlanned != null && A.liq.impactPlanned > s.maxSlippagePct / 2) adj.push({ code: 'EXECUTION_UNCERTAINTY', f: 0.6, text: `erwarteter Price Impact ${A.liq.impactPlanned.toFixed(2)} % → Größe ×0,6` });
     if (!A.crossChecked) adj.push({ code: 'UNCONFIRMED_DATA', f: 0.85, text: 'nicht von zweiter Quelle bestätigt → Größe ×0,85' });
@@ -3438,13 +3427,15 @@ function createCore(opts) {
     if (state.reconciliation.required) add('RECONCILIATION_REQUIRED', 'Abgleich nach Neustart erforderlich – bitte prüfen & bestätigen');
     const rpcSt = rpcEndpoints().map(e => http.status(e.name));
     if (rpcSt.length && rpcSt.every(x => x === 'OFFLINE') && (!s.ffRugcheck || http.status('rugcheck') === 'OFFLINE')) add('SECURITY_SOURCES_DOWN', 'Alle Security-Quellen (RPC' + (s.ffRugcheck ? ', RugCheck' : '') + ') OFFLINE');
-    if (r.dailyLimitHit) add('DAILY_LOSS_LIMIT', `Tagesverlust-Limit erreicht (${fmtSigned(r.dailyPnl)})`);
-    if (auto) { const dd = drawdownPct(); if (dd >= s.ddStopPct) add('DRAWDOWN_LIMIT', `Drawdown ${dd.toFixed(1)} % ≥ ${s.ddStopPct} % – keine neuen Auto-Käufe`); }
-    if (auto && arr(state.regime.tags).includes('LOW_QUALITY_MARKET')) add('LOW_QUALITY_MARKET', `${Math.round((state.regime.lowQ || 0) * 100)} % der Tokens mit veralteten/unsicheren Daten – No-Trade-Zone`);
-    if (r.globalPauseUntil > now) add('GLOBAL_PAUSE', `Globale Pause nach Verlustserie – noch ${fmtAge(r.globalPauseUntil - now)}`);
-    if (r.lossCooldownUntil > now) add('LOSS_COOLDOWN', `Loss-Cooldown – noch ${fmtAge(r.lossCooldownUntil - now)}`);
+    if (r.dailyLimitHit && s.dailyLossLimitPct > 0) add('DAILY_LOSS_LIMIT', `Tagesverlust-Limit erreicht (${fmtSigned(r.dailyPnl)})`);
+    if (auto && s.ddStopPct > 0) { const dd = drawdownPct(); if (dd >= s.ddStopPct) add('DRAWDOWN_LIMIT', `Drawdown ${dd.toFixed(1)} % ≥ ${s.ddStopPct} % – keine neuen Auto-Käufe`); }
+    if (auto && s.lowQualityMarketBlock && arr(state.regime.tags).includes('LOW_QUALITY_MARKET')) add('LOW_QUALITY_MARKET', `${Math.round((state.regime.lowQ || 0) * 100)} % der Tokens mit veralteten/unsicheren Daten – No-Trade-Zone`);
+    // Pause/Cooldown nur, solange sie eingestellt sind – auf 0 gestellt endet eine laufende Pause sofort
+    if (s.globalPauseMin > 0 && r.globalPauseUntil > now) add('GLOBAL_PAUSE', `Globale Pause nach Verlustserie – noch ${fmtAge(r.globalPauseUntil - now)}`);
+    if (s.lossCooldownMin > 0 && r.lossCooldownUntil > now) add('LOSS_COOLDOWN', `Loss-Cooldown – noch ${fmtAge(r.lossCooldownUntil - now)}`);
     const hourBuys = r.buyTimes.filter(x => now - x < HOUR).length;
-    if (hourBuys >= s.maxTradesPerHour) add('OVERTRADING', `${hourBuys} Käufe in 60 min (Limit ${s.maxTradesPerHour})`);
+    if (s.maxTradesPerHour <= 0) { /* Overtrading-Limit und -Bremse aus */ }
+    else if (hourBuys >= s.maxTradesPerHour) add('OVERTRADING', `${hourBuys} Käufe in 60 min (Limit ${s.maxTradesPerHour})`);
     else {
       const last = closedTradesRecent(5);
       if (last.length === 5 && now - last[0].closedAt < 30 * MIN && avg(last.map(j => j.holdMs || 0)) < 2 * MIN) add('OVERTRADING', 'Sehr kurze Haltezeiten der letzten 5 Trades – Throttle');
@@ -3460,16 +3451,16 @@ function createCore(opts) {
     const add = (c, m) => B.push(mkBlocker(c, m));
     const s = S(), now = env.now(), r = state.risk;
     const pos = openPos(t.id);
-    const maxBuys = Math.min(s.maxBuysPerCoin, HARD_LIMITS.MAX_BUYS_PER_COIN);
+    const maxBuys = s.maxBuysPerCoin; // 0 = unbegrenzt
     const bc = r.buyCount[t.id] || 0;
-    if (bc >= maxBuys) add('BUY_LIMIT_REACHED', `Buy #${bc + 1} blockiert – max. ${maxBuys} Käufe pro Coin`);
-    if (!pos && state.positions.length >= s.maxOpenPositions) add('MAX_POSITIONS', `${state.positions.length}/${s.maxOpenPositions} Positionen offen`);
-    if (pos) {
+    if (maxBuys > 0 && bc >= maxBuys) add('BUY_LIMIT_REACHED', `Buy #${bc + 1} blockiert – max. ${maxBuys} Käufe pro Coin`);
+    if (!pos && s.maxOpenPositions > 0 && state.positions.length >= s.maxOpenPositions) add('MAX_POSITIONS', `${state.positions.length}/${s.maxOpenPositions} Positionen offen`);
+    if (pos && s.addOnlyInProfit) {
       const pnl = isNum(pos.lastPrice) && isNum(pos.entryPrice) && pos.priceLabel !== 'STALE' ? (pos.lastPrice / pos.entryPrice - 1) * 100 : null;
       if (pnl == null || pnl < PYRAMID_MIN_PNL_PCT) add('NO_AVERAGING_DOWN', pnl == null ? 'Kein aktueller Positionspreis – kein Nachkauf' : `Nachkauf nur ab +${PYRAMID_MIN_PNL_PCT} % (aktuell ${fmtPct(pnl)}) – kein Martingale/DCA`);
     }
-    if ((r.coinCooldown[t.id] || 0) > now) add('COOLDOWN_ACTIVE', `Coin-Cooldown noch ${fmtAge(r.coinCooldown[t.id] - now)}`);
-    if (auto && (r.stratCooldown[t.id] || 0) > now) add('STRATEGY_COOLDOWN', `Strategie-Cooldown noch ${fmtAge(r.stratCooldown[t.id] - now)}`);
+    if (s.sellCooldownMin > 0 && (r.coinCooldown[t.id] || 0) > now) add('COOLDOWN_ACTIVE', `Coin-Cooldown noch ${fmtAge(r.coinCooldown[t.id] - now)}`);
+    if (auto && s.strategyCooldowns && (r.stratCooldown[t.id] || 0) > now) add('STRATEGY_COOLDOWN', `Strategie-Cooldown noch ${fmtAge(r.stratCooldown[t.id] - now)}`);
     if (!ownOrder && (state.locks.has(t.id) || (!fromQueue && state.queue.some(q => q.tokenId === t.id)))) add('TRADE_LOCKED', 'Laufende/eingereihte Order für diesen Token');
     const es = effectiveSnap(t, now, s);
     if (preTrade) {
@@ -3477,7 +3468,7 @@ function createCore(opts) {
       else if (es.fallback) add('DATA_FALLBACK', 'Pre-Trade: nur Fallback-Quelle aktuell');
       else if (es.age > s.snapshotMaxAgeSec * SEC) add('DATA_STALE', `Pre-Trade: Daten ${fmtAge(es.age)} alt (max. ${s.snapshotMaxAgeSec}s)`);
     }
-    if (!pos && state.positions.length) { const c = maxCorrelation(t); if (c && c.r >= s.correlationLimit) add('CONCENTRATION', `Korrelation ${c.r.toFixed(2)} mit offener Position ${c.sym}`); }
+    if (!pos && state.positions.length && s.correlationLimit > 0) { const c = maxCorrelation(t); if (c && c.r >= s.correlationLimit) add('CONCENTRATION', `Korrelation ${c.r.toFixed(2)} mit offener Position ${c.sym}`); }
     const sizing = sizePosition(t, A, lead, sizeUsd);
     if (!(sizing.size > 0)) add('SIZE_ZERO', sizing.reason || 'Positionsgröße 0');
     else {
@@ -3829,7 +3820,7 @@ function createCore(opts) {
     if (!win) {
       r.lossStreak++; r.lossCooldownUntil = now + s.lossCooldownMin * MIN;
       log.risk(`Verlust ${pos.symbol} ${fmtSigned(pnl)} → ${s.lossCooldownMin > 0 ? `Loss-Cooldown ${s.lossCooldownMin} min` : 'kein Loss-Cooldown (0 min)'} (Serie ${r.lossStreak})`);
-      if (r.lossStreak >= s.lossStreakLimit) {
+      if (s.lossStreakLimit > 0 && r.lossStreak >= s.lossStreakLimit) {
         r.globalPauseUntil = now + s.globalPauseMin * MIN; r.reviewRequired = true;
         const pauseTxt = s.globalPauseMin > 0 ? `globale Pause ${s.globalPauseMin} min` : 'keine globale Pause (0 min)';
         log.risk(`${r.lossStreak} Verluste in Folge → ${pauseTxt}`);
@@ -3856,7 +3847,7 @@ function createCore(opts) {
   function checkDailyLimit() {
     const r = state.risk, s = S();
     const base = r.dailyStartEquity || state.portfolio.startCapital;
-    if (!r.dailyLimitHit && r.dailyPnl <= -base * s.dailyLossLimitPct / 100) {
+    if (s.dailyLossLimitPct > 0 && !r.dailyLimitHit && r.dailyPnl <= -base * s.dailyLossLimitPct / 100) {
       r.dailyLimitHit = true;
       if (state.bot.autoTrading) { state.bot.autoTrading = false; audit('BOT', 'AUTO_TRADING_OFF', 'Tagesverlust-Limit erreicht'); }
       log.risk(`Tagesverlust-Limit erreicht (${fmtSigned(r.dailyPnl)}) → Auto-Trading deaktiviert`);
@@ -4058,7 +4049,8 @@ function createCore(opts) {
     } catch (e) {
       sc.errors++; state.bot.errorStreak++; state.bot.lastError = e.message;
       log.error('SCANNER', `Scan #${scanId} fehlgeschlagen: ${e.message}`);
-      if (state.bot.errorStreak >= 5 && !['ERROR', 'EMERGENCY_STOP', 'STOPPED'].includes(state.bot.state)) {
+      if (state.bot.errorStreak >= 5 && !S().autoSafeMode) { if (state.bot.errorStreak === 5) alert('SYSTEM', null, 'Wiederholte Scan-Fehler – automatischer Safe Mode ist aus, der Bot handelt weiter: ' + e.message, 'WARNING', { key: 'scanerr' }); }
+      else if (state.bot.errorStreak >= 5 && !['ERROR', 'EMERGENCY_STOP', 'STOPPED'].includes(state.bot.state)) {
         setBotState('ERROR', e.message); state.bot.errorAt = env.now(); state.bot.safeMode = true; state.bot.safeAuto = true;
         alert('SYSTEM', null, 'Wiederholte Scan-Fehler – Safe Mode aktiviert: ' + e.message, 'CRITICAL', { key: 'scanerr' });
       }
@@ -4235,7 +4227,7 @@ function createCore(opts) {
     if (on) {
       if (state.mode !== 'SIMULATION') return { ok: false, error: `Auto-Trading nur im SIMULATION-Modus (aktuell ${state.mode})` };
       if (b.emergency) return { ok: false, error: 'Emergency Stop aktiv' };
-      if (state.risk.dailyLimitHit) return { ok: false, error: 'Tagesverlust-Limit erreicht – heute kein Auto-Trading' };
+      if (state.risk.dailyLimitHit && S().dailyLossLimitPct > 0) return { ok: false, error: 'Tagesverlust-Limit erreicht – heute kein Auto-Trading' };
     }
     b.autoTrading = !!on; audit('USER', on ? 'AUTO_TRADING_ON' : 'AUTO_TRADING_OFF', state.mode);
     log.info('SYSTEM', `Auto-Trading ${on ? 'AN' : 'AUS'} (${state.mode})`); persistNow();
@@ -4288,7 +4280,7 @@ function createCore(opts) {
   function maybeTune() {
     const s = S(); if (!s.ffAutoTuning || state.mode !== 'SIMULATION') return;
     const cur = state.paramVersions.find(p => p.version === state.activeParam); if (!cur) return;
-    const minN = Math.max(s.minTradesForTuning, HARD_LIMITS.MIN_TRADES_FOR_TUNING);
+    const minN = Math.max(1, s.minTradesForTuning);
     const trades = state.journal.filter(j => j.status === 'CLOSED' && j.paramVersion === cur.version && j.mode === 'SIMULATION');
     cur.tradeCount = trades.length;
     if (trades.length < minN) return;
@@ -4534,7 +4526,7 @@ function createCore(opts) {
     learnTimeline(rec.outcome.win ? 'WIN' : 'LOSS', `${rec.symbol} ${fmtPct(rec.outcome.pnlPct)}${fam ? ' · ' + (LOSS_FAMILY_DE[fam] || fam) : ''}`, rec.tradeId);
     shadowEval(rec); liveEval(rec);
     const r = state.risk;
-    if (!rec.outcome.win && r.lossStreak >= S().lossStreakLimit) {
+    if (!rec.outcome.win && S().lossStreakLimit > 0 && r.lossStreak >= S().lossStreakLimit) {
       const rv = lossStreakReview(state.learn.records, Math.min(r.lossStreak, 10), state.learn.drift, state.research.hypotheses, env.now());
       if (!state.learn.reviews.some(x => x.id === rv.id)) {
         state.learn.reviews.unshift(rv); if (state.learn.reviews.length > LEARN_CAPS.reviews) state.learn.reviews.length = LEARN_CAPS.reviews;
@@ -4738,7 +4730,7 @@ function createCore(opts) {
     rejectChallenger(v, 'Manuell verworfen', 'USER'); persistNow(); return { ok: true };
   }
   /* Übernahme: nur SIMULATION, nur nach bestandener Shadow-Phase, nur LEARN_SETTING_KEYS innerhalb LEARN_BOUNDS,
-     Einstiegsfilter nur verschärfend (mergeParams gegen die AKTUELLEN Einstellungen). HARD_LIMITS bleiben unberührt. */
+     Einstiegsfilter nur verschärfend (mergeParams gegen die AKTUELLEN Einstellungen). Risiko-Limits bleiben unberührt. */
   function learnPromote(id, who = 'USER') {
     const M = state.models, v = M.versions.find(x => x.id === id);
     if (!v || !(v.status === 'READY' || (who === 'AUTO' && v.status === 'CHALLENGER'))) return { ok: false, error: 'Nur ein Challenger mit bestandener Shadow-Phase kann übernommen werden' };
@@ -4876,7 +4868,7 @@ function createCore(opts) {
       else if (s[k] === def.def) { source = 'DEFAULT'; reason = 'unverändert'; }
       else { source = 'UNTRACKED'; reason = last ? `letzter protokollierter Wert ${last.to}` : 'kein Eintrag im Änderungsprotokoll (max. 200)'; }
       const lb = LEARN_BOUNDS[k];
-      return { key: k, label: def.l || k, unit: def.u || '', value: s[k], def: def.def, source, reason, since, learnable: LEARN_SETTING_KEYS.includes(k), bounds: lb ? `${lb[0]}–${lb[1]} (lernbar, nur verschärfend)` : LEARN_SETTING_KEYS.includes(k) ? 'lernbar, nur einschaltbar' : isNum(def.min) ? `${def.min}–${def.max}${def.hard ? ' (harte Grenze)' : ''}` : '—' };
+      return { key: k, label: def.l || k, unit: def.u || '', value: s[k], def: def.def, source, reason, since, learnable: LEARN_SETTING_KEYS.includes(k), bounds: lb ? `${lb[0]}–${lb[1]} (lernbar, nur verschärfend)` : LEARN_SETTING_KEYS.includes(k) ? 'lernbar, nur einschaltbar' : isNum(def.min) ? `${def.min}–${def.max}` : '—' };
     });
   }
 
@@ -4951,7 +4943,7 @@ function createCore(opts) {
     const numMap = (o, maxV) => { const out = {}; if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) if (k.startsWith('solana:') && isNum(v) && v >= 0) out[k] = maxV != null ? Math.min(v, maxV) : v; return out; };
     if (d.risk && typeof d.risk === 'object') {
       const r = d.risk, R = state.risk;
-      R.buyCount = numMap(r.buyCount, HARD_LIMITS.MAX_BUYS_PER_COIN); R.coinCooldown = numMap(r.coinCooldown); R.stratCooldown = numMap(r.stratCooldown);
+      R.buyCount = numMap(r.buyCount); R.coinCooldown = numMap(r.coinCooldown); R.stratCooldown = numMap(r.stratCooldown);
       for (const k of ['lossCooldownUntil', 'globalPauseUntil', 'lossStreak', 'dailyPnl', 'dailyTrades']) if (isNum(r[k])) R[k] = r[k];
       if (oldVer) { R.lossCooldownUntil = 0; R.globalPauseUntil = 0; } // laufende Pause/Cooldown aus der alten 10/5-Regel beenden
       if (isNum(r.dailyStartEquity)) R.dailyStartEquity = r.dailyStartEquity;
@@ -5011,7 +5003,7 @@ function createCore(opts) {
     const sid = state.session ? state.session.id : null;
     if (sid) {
       const cnt = {}; for (const o of state.orders) if (o.side === 'BUY' && o.state === 'COMPLETED' && o.key && o.key.endsWith(':' + sid)) cnt[o.tokenId] = (cnt[o.tokenId] || 0) + 1;
-      for (const [id, n] of Object.entries(cnt)) if ((state.risk.buyCount[id] || 0) < n) { state.risk.buyCount[id] = Math.min(n, HARD_LIMITS.MAX_BUYS_PER_COIN); issues.push(`Buy-Zähler ${id.slice(7, 13)}… auf ${n} korrigiert`); }
+      for (const [id, n] of Object.entries(cnt)) if ((state.risk.buyCount[id] || 0) < n) { state.risk.buyCount[id] = n; issues.push(`Buy-Zähler ${id.slice(7, 13)}… auf ${n} korrigiert`); }
     }
     const sq = loadInfo.seqs;
     if (sq) { const vals = [sq.runtime, sq.positions, sq.trades].filter(x => x != null); if (vals.length && new Set(vals).size > 1) issues.push(`Speicherbereiche nicht synchron (Runtime ${sq.runtime}, Positionen ${sq.positions}, Trades ${sq.trades})`); }
@@ -5192,7 +5184,7 @@ function createCore(opts) {
   }
 
   return {
-    state, log, http, env, on, init, S, HARD_LIMITS,
+    state, log, http, env, on, init, S,
     start, pause, stop, emergencyStop, releaseEmergency, setMode, setAutoTrading, setSafeMode,
     executeBuy, executeSell, execCheck: (t, o) => execCheck(t, t.A, o), globalBlockers, buildCtx, estFees, estImpact, equityInfo, portfolioRisk, positionCorrelations,
     systemHealth, diagnostics, botHealth, readiness, drawdownPct, portfolioIntegrity, execProvider: m => execProvider(m).id, candidateChain, liveReadiness, preLiveChecks, ackReconciliation, requestSignature, rpcEndpoints, fetchOhlcv, fetchCandlesForBacktest, walletConnect, walletDisconnect, walletBalance, walletNetwork,
@@ -5322,17 +5314,18 @@ const SELF_TESTS = [
     assert(rawToUi('1234500', 6) === 1.2345, 'rawToUi');
     return 'Preise, SOL und Token-Decimals exakt';
   }],
-  ['Grundlagen', 'Config Validation & harte Grenzen', async () => {
+  ['Grundlagen', 'Config Validation: Bereiche, Logik-Checks, Limits frei einstellbar', async () => {
     const { settings: s, errors } = validateSettings({ simCapitalUsd: -5, maxBuysPerCoin: 5, sellCooldownMin: 1, lossStreakLimit: 9, scanIntervalMs: 'abc', minMcap: 1e6, maxMcap: 1e5 });
     assert(s.simCapitalUsd === 10, 'negatives Kapital nicht begrenzt');
-    assert(s.maxBuysPerCoin === 2, 'Buy-Limit > 2 akzeptiert');
-    assert(s.sellCooldownMin === 15 && s.lossStreakLimit === 3, 'Cooldown/Serie unter Sicherheitsgrenze');
+    assert(s.maxBuysPerCoin === 5 && s.sellCooldownMin === 1 && s.lossStreakLimit === 9, 'Limits nicht frei einstellbar: ' + [s.maxBuysPerCoin, s.sellCooldownMin, s.lossStreakLimit]);
+    const off = validateSettings({ maxBuysPerCoin: 0, sellCooldownMin: 0, lossStreakLimit: 0, dailyLossLimitPct: 0, ddStopPct: 0, ddReducePct: 0, maxTradesPerHour: 0, maxOpenPositions: 0, correlationLimit: 0, maxExposurePct: 100 }).settings;
+    assert(off.maxBuysPerCoin === 0 && off.sellCooldownMin === 0 && off.lossStreakLimit === 0 && off.dailyLossLimitPct === 0 && off.ddStopPct === 0 && off.ddReducePct === 0 && off.maxTradesPerHour === 0 && off.maxOpenPositions === 0 && off.correlationLimit === 0 && off.maxExposurePct === 100, '0 = aus nicht einstellbar');
     assert(s.scanIntervalMs === 1000 && errors.some(e => e.key === 'scanIntervalMs'), 'NaN nicht abgelehnt');
     assert(s.minMcap <= s.maxMcap && errors.some(e => /Market Cap/.test(e.msg)), 'Min/Max nicht geprüft');
-    assert(Object.isFrozen(HARD_LIMITS) && !Object.keys(TUNING_BOUNDS).some(k => ['maxBuysPerCoin', 'sellCooldownMin', 'lossCooldownMin', 'globalPauseMin', 'maxExposurePct'].includes(k)), 'Auto-Tuning darf harte Limits nicht verändern');
-    return `${errors.length} Validierungsfehler korrekt erkannt`;
+    assert(!Object.keys(TUNING_BOUNDS).some(k => ['maxBuysPerCoin', 'sellCooldownMin', 'lossCooldownMin', 'globalPauseMin', 'maxExposurePct'].includes(k)), 'Auto-Tuning darf Risiko-Limits nicht verändern');
+    return `${errors.length} Validierungsfehler korrekt erkannt · alle Limits bis 0 = aus einstellbar`;
   }],
-  ['Grundlagen', 'Grenzwert-Fuzz: harte Limits durch keine Eingabe umgehbar', async () => {
+  ['Grundlagen', 'Grenzwert-Fuzz: keine Eingabe erzeugt ungültige Einstellungen', async () => {
     const pool = [-1e9, -1, 0, 0.4, 1, 2, 3, 4, 7, 50, 51, 99, 1e9, NaN, Infinity, -Infinity, '12', '-5', 'abc', '', null, true, {}, [], '1e308'];
     const keys = ['maxBuysPerCoin', 'sellCooldownMin', 'lossCooldownMin', 'lossStreakLimit', 'globalPauseMin', 'minTradesForTuning', 'maxExposurePct', 'maxPositionPct', 'minScore', 'stopLossPct', 'simCapitalUsd', 'maxSlippagePct'];
     const rnd = prng(4242);
@@ -5340,14 +5333,9 @@ const SELF_TESTS = [
       const input = {}; for (const k of keys) if (rnd() < 0.7) input[k] = pool[Math.floor(rnd() * pool.length)];
       const { settings: o } = validateSettings(input);
       const bad = [];
-      if (!(o.maxBuysPerCoin <= HARD_LIMITS.MAX_BUYS_PER_COIN)) bad.push('maxBuysPerCoin');
-      if (!(o.sellCooldownMin >= HARD_LIMITS.MIN_SELL_COOLDOWN_MIN)) bad.push('sellCooldownMin');
-      if (!(o.lossCooldownMin >= HARD_LIMITS.MIN_LOSS_COOLDOWN_MIN)) bad.push('lossCooldownMin');
-      if (!(o.lossStreakLimit <= HARD_LIMITS.MAX_LOSS_STREAK_LIMIT)) bad.push('lossStreakLimit');
-      if (!(o.globalPauseMin >= HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN)) bad.push('globalPauseMin');
-      if (!(o.minTradesForTuning >= HARD_LIMITS.MIN_TRADES_FOR_TUNING)) bad.push('minTradesForTuning');
-      if (!(o.maxExposurePct <= HARD_LIMITS.MAX_EXPOSURE_PCT && o.maxPositionPct <= HARD_LIMITS.MAX_POSITION_PCT && o.maxPositionPct <= o.maxExposurePct)) bad.push('exposure/position');
-      for (const k of keys) if (!isNum(o[k])) bad.push(k + ' nicht endlich');
+      for (const k of keys) { const d = SETTINGS_INDEX[k]; if (!(o[k] >= d.min && o[k] <= d.max)) bad.push(k + ' außerhalb ' + d.min + '–' + d.max); }
+      if (!(o.maxPositionPct <= o.maxExposurePct)) bad.push('Position > Exposure');
+    for (const k of keys) if (!isNum(o[k])) bad.push(k + ' nicht endlich');
       assert(!bad.length, `Eingabe ${JSON.stringify(input)} verletzt: ${bad.join(', ')}`);
     }
     const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1); core._t.analyzeAll();
@@ -5357,7 +5345,7 @@ const SELF_TESTS = [
       if (x.sizing.size > 0) assert(x.sizing.size <= eq * S.maxPositionPct / 100 + 1e-6 && x.sizing.size <= core.state.portfolio.cash + 1e-6, `Größe ${x.sizing.size} über Limit (Eingabe ${sz})`);
       else assert(x.blockers.some(b => b.code === 'SIZE_ZERO'), `ungültige Größe ${sz} nicht blockiert`);
     }
-    return '400 Zufallseingaben · alle harten Grenzen gehalten · Positionsgröße nie über Max./Cash';
+    return '400 Zufallseingaben · alle Werte im gültigen Bereich · Positionsgröße nie über Max./Cash';
   }],
   ['Daten', 'Datenvalidierung: NaN/Infinity/negativ/unplausibel → null (nie 0) und gezählt', async () => {
     const dq = newDq(), m = tMint(3);
@@ -5404,7 +5392,7 @@ const SELF_TESTS = [
     return 'Cooldown aktiv direkt nach Verkauf, frei nach 15 min';
   }],
   ['Trading', 'Loss-Cooldown & globale Pause: Standard 0 (aus), einstellbar, nie negativ', async () => {
-    assert(HARD_LIMITS.MIN_LOSS_COOLDOWN_MIN === 0 && HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN === 0 && defaultSettings().lossCooldownMin === 0 && defaultSettings().globalPauseMin === 0, 'Standard/Untergrenze nicht 0');
+    assert(SETTINGS_INDEX.lossCooldownMin.min === 0 && SETTINGS_INDEX.globalPauseMin.min === 0 && defaultSettings().lossCooldownMin === 0 && defaultSettings().globalPauseMin === 0, 'Standard/Untergrenze nicht 0');
     const v = validateSettings({ lossCooldownMin: -5, globalPauseMin: -3 }).settings;
     assert(v.lossCooldownMin === 0 && v.globalPauseMin === 0, 'negative Werte nicht auf 0 begrenzt: ' + v.lossCooldownMin + '/' + v.globalPauseMin);
     // Standard 0/0: drei Verluste in Folge → weder Cooldown noch Pause, aber Review-Hinweis
@@ -5445,6 +5433,30 @@ const SELF_TESTS = [
     assert(cm.S().lossCooldownMin === 0 && cm.S().globalPauseMin === 0 && cm.state.risk.lossCooldownUntil === 0 && cm.state.risk.globalPauseUntil === 0, 'Umstellung 2.8.0: Werte/laufende Pause nicht zurückgesetzt');
     assert(cm.state.configLog.some(c => c.who === 'MIGRATION' && c.changes.some(x => x.key === 'lossCooldownMin' && x.from === 10 && x.to === 0)), 'Umstellung 2.8.0 nicht protokolliert');
     return 'Standard 0/0: kein Cooldown, keine Pause, Review-Hinweis · eingestellt 10/5: Cooldown nach jedem Verlust, Pause nach 3 Verlusten, beide laufen ab · Umstellung aus 2.7.0 protokolliert';
+  }],
+  ['Trading', 'Lernmodus (ohne Limits): keine Limit-Sperren mehr – Security- & Datenprüfungen bleiben', async () => {
+    const H = makeTestHarness(); const core = await testCore(H, PROFILES['Lernmodus (ohne Limits)']), S = core.S();
+    assert(S.maxBuysPerCoin === 0 && S.sellCooldownMin === 0 && S.dailyLossLimitPct === 0 && S.ddStopPct === 0 && S.maxTradesPerHour === 0 && S.maxOpenPositions === 0 && !S.addOnlyInProfit && !S.autoSafeMode && S.minScore === 65, 'Profil nicht (nur auf Limits) angewendet');
+    const LIMITS = ['BUY_LIMIT_REACHED', 'COOLDOWN_ACTIVE', 'STRATEGY_COOLDOWN', 'LOSS_COOLDOWN', 'GLOBAL_PAUSE', 'NO_AVERAGING_DOWN', 'OVERTRADING', 'MAX_POSITIONS', 'DAILY_LOSS_LIMIT', 'DRAWDOWN_LIMIT', 'CONCENTRATION', 'LOW_QUALITY_MARKET'];
+    const limitHit = r => codes(r).filter(c => LIMITS.includes(c));
+    const t = await prepToken(core, H, 1), price = async p => { H.market[t.mint] = H.pair(t.mint, { price: p }); await core._t.fetchChunk([t.mint], true); };
+    for (let i = 1; i <= 4; i++) { // gleicher Coin, 4× Kauf → Verlust → sofort wieder kaufen
+      const b = await core.executeBuy(t.id, { sizeUsd: 20 }); assert(b.ok, `Kauf ${i} blockiert: ` + codes(b).join(','));
+      await price(0.0009);
+      assert((await core.executeSell(core.state.positions.find(p => p.tokenId === t.id).id, 'ALL', 'MANUAL')).ok, 'Verkauf fehlgeschlagen');
+      await price(0.001);
+    }
+    assert(core.state.risk.lossStreak === 4 && !core.state.risk.reviewRequired, 'Verlustserie/Review falsch');
+    assert((await core.executeBuy(t.id, { sizeUsd: 20 })).ok, 'Kauf nach 4 Verlusten blockiert'); await price(0.0009);
+    const avgDown = await core.executeBuy(t.id, { sizeUsd: 20 }); assert(avgDown.ok, 'Nachkauf im Verlust blockiert: ' + codes(avgDown).join(','));
+    for (let n = 2; n <= 6; n++) { const r = await core.executeBuy((await prepToken(core, H, n)).id, { sizeUsd: 20 }); assert(r.ok, `Position ${n} blockiert: ` + codes(r).join(',')); }
+    assert(core.state.positions.length === 6, 'unbegrenzte Positionen nicht möglich: ' + core.state.positions.length);
+    core.state.risk.dailyLimitHit = true; core.state.risk.dailyPnl = -900; core.state.portfolio.peakEquity = 1e6;
+    const auto = core.execCheck(await prepToken(core, H, 7), { auto: true });
+    assert(!limitHit(auto).length, 'Limit-Sperren trotz Lernmodus: ' + limitHit(auto).join(','));
+    const bad = await prepToken(core, H, 8); bad.sec = buildSecurity({ exists: true, program: 'spl-token', mintAuthority: null, freezeAuthority: tMint(4), extensions: [] }, null, normRug({ score: 1, risks: [] }), H.env.now());
+    const sec = await core.executeBuy(bad.id, { sizeUsd: 20 }); assert(!sec.ok && codes(sec).includes('SECURITY_CRITICAL'), 'Security-Sperre aufgehoben');
+    return '4 Verluste in Folge auf demselben Coin ohne Pause · Nachkauf im Verlust · 6 Positionen · Tageslimit/Drawdown/Overtrading aus · Security bleibt';
   }],
   ['Trading', 'Frischer Start: Startkapital & Positionen neu, Analysedaten bleiben', async () => {
     const H = makeTestHarness(); const core = await testCore(H);
@@ -5952,7 +5964,7 @@ const SELF_TESTS = [
   }],
   ['Lern-KI', 'Champion/Challenger: Shadow → Übernahme (SIMULATION) → Auto-Rollback', async () => {
     const H = makeTestHarness(); const core = await testCore(H, { minScore: 60, learnShadowTrades: 5 }); const st = core.state, T = core._t;
-    const hard0 = SETTINGS_SCHEMA.filter(d => d.hard).map(d => core.S()[d.k]).join(','), hl0 = JSON.stringify(HARD_LIMITS);
+    const riskKeys = ['maxBuysPerCoin', 'sellCooldownMin', 'lossCooldownMin', 'lossStreakLimit', 'globalPauseMin', 'maxExposurePct', 'maxPositionPct', 'dailyLossLimitPct', 'ddStopPct', 'maxTradesPerHour', 'maxOpenPositions'], risk0 = riskKeys.map(k => core.S()[k]).join(',');
     oosSet(60).forEach(r => T.addRecord(r)); T.learnRun(true);
     const ch = st.models.versions.find(v => v.id === st.models.challenger);
     assert(ch && ch.status === 'CHALLENGER' && core.S().minScore === 60, 'kein Challenger im Shadow: ' + JSON.stringify(st.research.hypotheses.map(h => h.status + ':' + (h.result ? h.result.reason : ''))) + ' · Drift ' + (st.learn.drift && st.learn.drift.status));
@@ -5963,16 +5975,16 @@ const SELF_TESTS = [
     assert(promoted, 'Übernahme ohne Wirkung');
     const t2 = H.env.now() + 10 * SEC; for (let i = 0; i < 5; i++) { const r = mkLearnRec(200 + i, { score: 80, pnlPct: -12 }); r.openedAt = t2 + i * SEC; r.closedAt = r.openedAt + 500; T.liveEval(r); }
     assert(ch.status === 'ROLLED_BACK' && st.models.champion === 'M-1' && core.S().minScore === 60 && !Object.keys(st.models.rules.regimeScoreBump).length, 'Auto-Rollback fehlgeschlagen: ' + ch.status);
-    assert(SETTINGS_SCHEMA.filter(d => d.hard).map(d => core.S()[d.k]).join(',') === hard0 && JSON.stringify(HARD_LIMITS) === hl0, 'harte Grenzen verändert');
+    assert(riskKeys.map(k => core.S()[k]).join(',') === risk0, 'Risiko-Limits durch die Lern-KI verändert');
     assert(st.auditLog.some(a => a.what === 'MODEL_PROMOTE') && st.auditLog.some(a => a.what === 'MODEL_ROLLBACK'), 'Audit fehlt');
     return `${ch.id}: Shadow ${fmtSigned(ch.shadow.chNet)} vs. ${fmtSigned(ch.shadow.baseNet)} → übernommen → Live schlechter → Rollback auf M-1`;
   }],
-  ['Lern-KI', 'Lernen verschärft nur: HARD_LIMITS, Security & manuelle Trades unberührt', async () => {
+  ['Lern-KI', 'Lernen verschärft nur: Risiko-Limits, Security & manuelle Trades unberührt', async () => {
     const base = learnTestBase(); base.requireVerifiedSecurity = true;
     const P = mergeParams(base, { minScore: 10, minConfidence: 5, minLiq: 1, minPairAgeMin: -5, stopLossPct: 99, trailPct: 1, requireVerifiedSecurity: false, rules: { regimeScoreBump: { CHOPPY: 99 }, volumeConfirmPct: 99 } });
     assert(P.minScore === 60 && P.minConfidence === 60 && P.minLiq === 10000 && P.minPairAgeMin === 0 && P.requireVerifiedSecurity === true, 'Einstiegsfilter gelockert');
     assert(P.stopLossPct === LEARN_BOUNDS.stopLossPct[1] && P.trailPct === LEARN_BOUNDS.trailPct[0] && P.rules.regimeScoreBump.CHOPPY === 15 && P.rules.volumeConfirmPct === 5, 'Grenzen nicht eingehalten');
-    assert(!LEARN_SETTING_KEYS.some(k => SETTINGS_INDEX[k].hard) && !LEARN_SETTING_KEYS.some(k => /cooldown|pause|buys|exposure|position|daily|streak/i.test(k)), 'Lern-Parameter berühren harte Limits');
+    assert(!LEARN_SETTING_KEYS.some(k => /cooldown|pause|buys|exposure|position|daily|streak|drawdown|^dd|trades|health/i.test(k)), 'Lern-Parameter berühren Risiko-Limits');
     const H = makeTestHarness(); const core = await testCore(H, { minScore: 85 }); const t = await prepToken(core, H, 1);
     core.state.models.rules = sanitizeRules({ regimeScoreBump: { CHOPPY: 15 } });
     core.state.regime = { tags: ['CHOPPY'] }; core._t.analyzeAll();
@@ -6118,7 +6130,7 @@ const SELF_TESTS = [
   }],
   ['Adaptive KI', 'Aktive Parameter: Wert, Herkunft & Grund nachvollziehbar (Standard, manuell, gelernt, unprotokolliert)', async () => {
     const H = makeTestHarness(); const core = await testCore(H), row = k => core.activeParams().find(p => p.key === k);
-    assert(row('maxOpenPositions').source === 'DEFAULT' && /harte Grenze/.test(row('lossCooldownMin').bounds) && /lernbar/.test(row('minScore').bounds), 'Standard/Grenzen falsch');
+    assert(row('maxOpenPositions').source === 'DEFAULT' && row('lossCooldownMin').bounds === '0–1440' && /lernbar/.test(row('minScore').bounds), 'Standard/Grenzen falsch');
     core.updateSettings({ minConfidence: 70 }, 'USER');
     const r1 = row('minConfidence'); assert(r1.source === 'USER' && r1.value === 70 && isNum(r1.since) && r1.reason.includes('→ 70'), 'manuelle Änderung nicht nachvollziehbar: ' + JSON.stringify(r1));
     const M = core.state.models, from = core.S().minScore;
@@ -6863,7 +6875,7 @@ function renderAnalytics(sec) {
     <div class="panel"><h3 style="margin-top:0">False Signals (starke Signale, sofortige Gegenbewegung)</h3>${st.falseSignals.length ? html`<table class="tbl">${st.falseSignals.slice(0, 12).map(f => html`<tr><td class="num">${fmtTime(f.ts)}</td><td>${f.symbol}</td><td>${f.signals.join(', ')}</td><td class="r num dn">${fmtPct(f.mae2m)}</td></tr>`)}</table>` : html`<div class="empty">Keine erfasst.</div>`}</div></div>
     <div class="panel tw"><h3 style="margin-top:0">Parameter-Versionen (Überwachung ${core.S().ffAutoTuning ? 'AN' : 'AUS'})</h3><table class="tbl"><tr><th>Version</th><th>Zeit</th><th>Status</th><th>Parameter</th><th class="r">Trades</th><th class="r">Expectancy</th><th>Notiz</th><th></th></tr>
       ${[...st.paramVersions].reverse().map(p => html`<tr><td>v${p.version}${p.version === st.activeParam ? ' (aktiv)' : ''}</td><td class="num">${fmtDateTime(p.ts)}</td><td><span class="chip ${p.status === 'STABLE' ? 'ok' : p.status === 'ROLLED_BACK' ? 'bad' : 'info'}">${p.status}</span></td><td class="mut">${Object.entries(p.params).map(([k, v]) => k + '=' + v).join(', ')}</td><td class="r num">${p.tradeCount || 0}</td><td class="r num">${p.perf ? fmtUsd(p.perf.expectancy) : '—'}</td><td class="mut">${p.note || ''}</td><td>${p.version !== st.activeParam ? html`<button class="btn sm" data-act="rollback" data-v="${p.version}">Aktivieren</button>` : ''}</td></tr>`)}</table>
-      <p class="note">Neue Parameter entstehen nur über die Lern-KI (Train → Validation → Test, Walk-Forward, Shadow-Phase, nur verschärfend) – nie aus einer Suche über dieselben Trades, an denen sie gemessen werden. Bewertung einer Version erst ab ${Math.max(core.S().minTradesForTuning, HARD_LIMITS.MIN_TRADES_FOR_TUNING)} abgeschlossenen Trades, nur in SIMULATION, nur innerhalb fester Grenzen (${Object.entries(TUNING_BOUNDS).map(([k, v]) => k + ' ' + v[0] + '–' + v[1]).join(', ')}). Buy-Limit, Exposure, Kill Switch, Security- und Stale-Data-Blocks sind unveränderbar. Schlechtere Versionen werden automatisch zurückgerollt.</p></div>
+      <p class="note">Neue Parameter entstehen nur über die Lern-KI (Train → Validation → Test, Walk-Forward, Shadow-Phase, nur verschärfend) – nie aus einer Suche über dieselben Trades, an denen sie gemessen werden. Bewertung einer Version erst ab ${core.S().minTradesForTuning} abgeschlossenen Trades, nur in SIMULATION, nur innerhalb fester Grenzen (${Object.entries(TUNING_BOUNDS).map(([k, v]) => k + ' ' + v[0] + '–' + v[1]).join(', ')}). Risiko-Limits, Kill Switch, Security- und Stale-Data-Blocks verändert sie nie. Schlechtere Versionen werden automatisch zurückgerollt.</p></div>
     <div class="panel"><h3 style="margin-top:0">Trading Session</h3><div class="grid4">${kv('Session', st.session ? st.session.id : '—')}${kv('Start', st.session ? fmtDateTime(st.session.startedAt) : '—')}${kv('Trades', st.session ? st.session.trades : 0)}${kv('Wins / Losses', st.session ? st.session.wins + ' / ' + st.session.losses : '—')}${kv('Session PnL', st.session ? fmtSigned(st.session.pnl) : '—', 'SIMULATED')}${kv('Heute PnL', fmtSigned(st.risk.dailyPnl))}${kv('Käufe heute', st.risk.dailyTrades)}${kv('Tag', st.risk.dayKey)}</div>
       <div class="row" style="margin-top:10px"><button class="btn" data-act="newSession">↻ Neue Session</button><button class="btn sm" data-act="export" data-kind="analytics-json">⬇ Analytics JSON</button><button class="btn sm" data-act="export" data-kind="journal-csv">⬇ Journal CSV</button></div>
       ${st.sessions.length ? html`<table class="tbl" style="margin-top:10px"><tr><th>Session</th><th>Start</th><th>Ende</th><th class="r">Trades</th><th class="r">PnL</th></tr>${st.sessions.slice(0, 8).map(s => html`<tr><td>${s.id}</td><td class="num">${fmtDateTime(s.startedAt)}</td><td class="num">${fmtDateTime(s.endedAt)}</td><td class="r num">${s.trades}</td><td class="r num">${fmtSigned(s.pnl)}</td></tr>`)}</table>` : ''}</div>`);
@@ -6908,7 +6920,7 @@ function renderLearning(sec) {
   const NMV = { FILTER_COSTLY: ['warn', 'kostet eher Chancen'], FILTER_HELPS: ['ok', 'schützt eher'], NOT_ENOUGH_DATA: ['', 'zu wenig Daten'] };
   const openD = new Set([...sec.querySelectorAll('details[data-k][open]')].map(d => d.dataset.k));
   const changed = patch(sec, html`<h2>🧠 Learning KI <span class="lbl SIMULATED">SIMULATED</span></h2>
-    <p class="note">Lernt aus jedem abgeschlossenen (simulierten) Trade – vor allem aus Verlusten: Was war beim Einstieg messbar, wie verlief der Coin-Preis danach, welche Ursache ist belegt? Regeln entstehen nur aus zeitlich getrennt validierten Experimenten (Train → Validation → Test, Walk-Forward), laufen danach im Shadow-Modus (keine Orders) und werden nur in SIMULATION übernommen – ausschließlich verschärfend und mit automatischem Rollback. HARD_LIMITS, Security-Blocker, Emergency Stop und LIVE-Gating werden nie verändert. Keine Gewinn-Garantie.</p>
+    <p class="note">Lernt aus jedem abgeschlossenen (simulierten) Trade – vor allem aus Verlusten: Was war beim Einstieg messbar, wie verlief der Coin-Preis danach, welche Ursache ist belegt? Regeln entstehen nur aus zeitlich getrennt validierten Experimenten (Train → Validation → Test, Walk-Forward), laufen danach im Shadow-Modus (keine Orders) und werden nur in SIMULATION übernommen – ausschließlich verschärfend und mit automatischem Rollback. Risiko-Limits, Security-Blocker, Emergency Stop und LIVE-Gating werden von der KI nie verändert. Keine Gewinn-Garantie.</p>
     ${!S.learnEnabled ? html`<div class="panel bad">Lern-KI ist ausgeschaltet (Einstellungen → Lern-KI). Gelernte Regeln sind inaktiv.</div>` : ''}
     ${L.corrupted.length ? html`<div class="panel warn">Beschädigte Lerndaten (${L.corrupted.join(', ')}) wurden beim Start verworfen und neu begonnen. Handel war nicht betroffen.</div>` : ''}
     <div class="grid4">${kv('Lern-KI', S.learnEnabled ? 'AN' : 'AUS')}${kv('Ausgewertete Trades', recs.length + (legacy ? ` (${legacy} legacy)` : ''))}${kv('Davon Verluste', losses.length)}${kv('Aktives Modell', champ ? champ.id + ' · ' + champ.status : '—')}${kv('Challenger', ch ? ch.id + ' · ' + ch.status : 'keiner')}${kv('Drift', drift ? drift.status : 'NOT_ENOUGH_DATA')}${kv('Gelernte Regeln aktiv', lv.rulesText.length ? lv.rulesText.length + '' : 'keine')}${kv('Letzter Lernlauf', L.lastRunAt ? fmtTime(L.lastRunAt) : '—')}</div>
@@ -6993,8 +7005,9 @@ function renderRisk(sec) {
     <div class="grid4">${kv('Portfolio Risk', pr.score)}${kv('Open Exposure', fmtUsd(eq.exposure) + ' (' + eq.exposurePct.toFixed(1) + '%)')}${kv('Max. Exposure', S.maxExposurePct + '%')}${kv('Max. Position', S.maxPositionPct + '% = ' + fmtUsd(eq.equity * S.maxPositionPct / 100))}${kv('Drawdown aktuell', dd.toFixed(2) + '%')}${kv('Max Drawdown', (pf.maxDD || 0).toFixed(2) + '%')}${kv('Verlustserie', r.lossStreak + ' / ' + S.lossStreakLimit)}${kv('Globale Pause', r.globalPauseUntil > now ? 'noch ' + fmtAge(r.globalPauseUntil - now) : 'nein')}${kv('Loss-Cooldown', r.lossCooldownUntil > now ? 'noch ' + fmtAge(r.lossCooldownUntil - now) : 'frei')}${kv('Tages-PnL / Limit', fmtSigned(r.dailyPnl) + ' / −' + S.dailyLossLimitPct + '%')}${kv('Execution Risk (Ø Exit-Impact)', isNum(avg(st.positions.map(p => p.exitImpactPct).filter(isNum))) ? avg(st.positions.map(p => p.exitImpactPct).filter(isNum)).toFixed(2) + '%' : '—', 'ESTIMATED')}${kv('Data Risk (Ø Confidence)', posT.length ? Math.round(avg(posT.map(t => t.A.confidence.total))) + '%' : '—')}${kv('Security Risk', posT.length ? posT.filter(t => t.A.sec.status !== 'VERIFIED').length + ' nicht VERIFIED' : '—')}${kv('Käufe letzte Stunde', r.buyTimes.filter(x => now - x < HOUR).length + ' / ' + S.maxTradesPerHour)}${kv('Offene Positionen', st.positions.length + ' / ' + S.maxOpenPositions)}${kv('Tageslimit erreicht', r.dailyLimitHit ? 'JA – Auto-Trading aus' : 'nein')}</div>
     ${r.reviewRequired ? html`<div class="panel" style="margin-top:12px"><b class="warn">Review nach Verlustserie empfohlen.</b> <span class="mut">Prüfe History & Analytics. Der Bot wird nach Verlusten nicht aggressiver (keine Revenge-Logik, kein Martingale).</span>${st.learn.reviews[0] ? html` <span class="mut">Die Lern-KI hat die Serie analysiert (${st.learn.reviews[0].id}: ${Object.entries(st.learn.reviews[0].shares).map(([k, n]) => k + ' ' + n).join(', ') || '—'}; ${st.learn.reviews[0].unusual.unusual ? 'statistisch ungewöhnlich' : 'im Rahmen normaler Streuung'}).</span> <button class="btn sm" data-act="view" data-view="learning">🧠 Analyse ansehen</button>` : ''} <button class="btn sm" data-act="ackReview">Review erledigt</button></div>` : ''}
     <h3>Risk-Graph: Exposure, Drawdown, Portfolio Risk</h3><div class="chartbox small"><canvas data-chart="risk" aria-label="Risikoverlauf"></canvas></div>
-    <div class="grid2" style="margin-top:12px"><div class="panel"><h3 style="margin-top:0">Critical Limits (unveränderlich)</h3><table class="tbl">
-      <tr><td>MAX_BUYS_PER_COIN</td><td class="r num">${Math.min(S.maxBuysPerCoin, 2)} (hart ≤ ${HARD_LIMITS.MAX_BUYS_PER_COIN})</td></tr><tr><td>SELL_COOLDOWN</td><td class="r num">${S.sellCooldownMin} min (≥ ${HARD_LIMITS.MIN_SELL_COOLDOWN_MIN})</td></tr><tr><td>LOSS_COOLDOWN</td><td class="r num">${S.lossCooldownMin} min (≥ ${HARD_LIMITS.MIN_LOSS_COOLDOWN_MIN})</td></tr><tr><td>LOSS_STREAK_LIMIT</td><td class="r num">${S.lossStreakLimit} (≤ ${HARD_LIMITS.MAX_LOSS_STREAK_LIMIT})</td></tr><tr><td>GLOBAL_PAUSE</td><td class="r num">${S.globalPauseMin} min (≥ ${HARD_LIMITS.MIN_GLOBAL_PAUSE_MIN})</td></tr><tr><td>Nachkauf nur im Gewinn</td><td class="r num">≥ +${PYRAMID_MIN_PNL_PCT}%</td></tr><tr><td>Min. Trades für Optimierung</td><td class="r num">${HARD_LIMITS.MIN_TRADES_FOR_TUNING}</td></tr></table></div>
+    <div class="grid2" style="margin-top:12px"><div class="panel"><h3 style="margin-top:0">Limits (alle einstellbar, 0 = aus)</h3><table class="tbl">
+      ${[['Max. Käufe pro Coin', S.maxBuysPerCoin > 0 ? S.maxBuysPerCoin : 'unbegrenzt'], ['Coin-Cooldown nach Verkauf', S.sellCooldownMin > 0 ? S.sellCooldownMin + ' min' : 'aus'], ['Loss-Cooldown', S.lossCooldownMin > 0 ? S.lossCooldownMin + ' min' : 'aus'], ['Verlustserie bis Pause', S.lossStreakLimit > 0 ? S.lossStreakLimit : 'aus'], ['Globale Pause', S.globalPauseMin > 0 ? S.globalPauseMin + ' min' : 'aus'], ['Nachkauf nur im Gewinn', S.addOnlyInProfit ? '≥ +' + PYRAMID_MIN_PNL_PCT + ' %' : 'aus'], ['Tagesverlust-Limit', S.dailyLossLimitPct > 0 ? S.dailyLossLimitPct + ' %' : 'aus'], ['Drawdown-Grenze', S.ddStopPct > 0 ? S.ddStopPct + ' %' : 'aus'], ['Käufe pro Stunde', S.maxTradesPerHour > 0 ? S.maxTradesPerHour : 'aus'], ['Max. offene Positionen', S.maxOpenPositions > 0 ? S.maxOpenPositions : 'unbegrenzt'], ['Safe Mode nach Scan-Fehlern', S.autoSafeMode ? 'an' : 'aus']].map(([k, v]) => html`<tr><td>${k}</td><td class="r num">${v}</td></tr>`)}</table>
+      <p class="note">Einstellungen → Risiko. Profil „Lernmodus (ohne Limits)“ stellt alle auf einmal ab. Security-Sperren, Datenprüfungen und LIVE-Gating sind keine Limits und bleiben aktiv.</p></div>
     <div class="panel"><h3 style="margin-top:0">Aktive Cooldowns</h3>${cool.length ? html`<table class="tbl">${cool.map(([id, v, k]) => html`<tr><td>${(tok(id) || { symbol: shortAddr(mintOfId(id)) }).symbol}</td><td>${k}</td><td class="r num">${fmtAge(v - now)}</td></tr>`)}</table>` : html`<div class="empty">Keine Coin-Cooldowns.</div>`}
       <h3>Korrelation offener Positionen</h3>${corr.length ? html`<table class="tbl">${corr.map(c => html`<tr><td>${c.a} ↔ ${c.b}</td><td class="r num ${c.r != null && c.r >= S.correlationLimit ? 'bad' : ''}">${c.r == null ? 'zu wenig Daten' : c.r.toFixed(2)}</td></tr>`)}</table>` : html`<div class="empty">Weniger als 2 Positionen.</div>`}</div></div>
     ${walletPanel()}`);
@@ -7090,10 +7103,10 @@ function renderLogs() {
 /* ---------- Einstellungen ---------- */
 function settingField(d, S) {
   const v = S[d.k];
-  if (d.t === 'bool') return html`<label class="fld inl">${d.l}${d.hard ? html` <span class="hard">HART</span>` : ''}<input type="checkbox" data-set="${d.k}" ${v ? raw('checked') : ''}></label>`;
+  if (d.t === 'bool') return html`<label class="fld inl">${d.l}<input type="checkbox" data-set="${d.k}" ${v ? raw('checked') : ''}></label>`;
   if (d.t === 'select') return html`<label class="fld">${d.l}<select data-set="${d.k}">${d.opts.map(o => html`<option value="${o[0]}" ${o[0] === v ? raw('selected') : ''}>${o[1]}</option>`)}</select></label>`;
   if (d.t === 'text') return html`<label class="fld" style="grid-column:1/-1">${d.l}<input data-set="${d.k}" value="${v}" autocomplete="off" spellcheck="false"><small class="dim">Keine API-Keys in öffentliche Geräte eingeben; Keys werden nur lokal gespeichert und in Logs maskiert.</small></label>`;
-  return html`<label class="fld">${d.l}${d.u ? ' (' + d.u + ')' : ''}${d.hard ? html` <span class="hard" title="Sicherheitsgrenze: nur verschärfbar">HART ${d.min}–${d.max}</span>` : ''}<input type="number" data-set="${d.k}" value="${v}" min="${d.min}" max="${d.max}" step="${d.step || (d.t === 'int' ? 1 : 'any')}"></label>`;
+  return html`<label class="fld">${d.l}${d.u ? ' (' + d.u + ')' : ''}<input type="number" data-set="${d.k}" value="${v}" min="${d.min}" max="${d.max}" step="${d.step || (d.t === 'int' ? 1 : 'any')}"></label>`;
 }
 function renderSettings(sec) {
   const S = core.S(), st = core.state;
@@ -7124,7 +7137,7 @@ const KB = [
   ['Trading', 'NO TRADE ist eine valide Entscheidung', 'Ein entdeckter Token ist kein Kaufgrund. Der Bot handelt nur, wenn Datenqualität, Sicherheit, Risiko, Portfolio-Limits, Cooldowns und Strategie-Konsens gleichzeitig passen.'],
   ['Risk Management', 'Positionsgröße', 'Größe = Kapital × Strategie-% × Risiko-, Confidence- und Volatilitätsfaktor, begrenzt durch Liquidität (Impact ≤ halbe max. Slippage), freie Exposure, max. Positionsgröße und Cash. Bei zu geringer Datenqualität ist die Größe 0.'],
   ['Risk Management', 'Stops & Take Profits', 'Prozent-Stop, optional ATR-Stop (aus 1m-OHLCV), Trailing ab definiertem Gewinn, Break-even nach TP1, TP1–TP3 als Teilverkäufe, Time Exit, Liquiditätsabfluss- und Risiko-Exit.'],
-  ['Risk Management', 'Buy-Limit & Cooldowns', 'Pro Mint maximal 2 Käufe. Nachkauf nur im Gewinn (≥ +10 %), nie im Verlust (kein Martingale/Blind DCA). Nach jedem Verkauf 15 min Coin-Cooldown. Globaler Loss-Cooldown nach Verlust und globale Pause nach 3 Verlusten in Folge sind einstellbar (Standard 0 min = aus).'],
+  ['Risk Management', 'Buy-Limit & Cooldowns', 'Alle Limits sind Einstellungen (Einstellungen → Risiko) und lassen sich bis 0 = aus stellen. Standard: max. 2 Käufe pro Coin, Nachkauf nur im Gewinn (≥ +10 %), 15 min Coin-Cooldown nach Verkauf, Loss-Cooldown und globale Pause 0 min. Das Profil „Lernmodus (ohne Limits)“ schaltet alle Pausen und Limits auf einmal ab.'],
   ['Market Structure', 'Käufer/Verkäufer-Verhältnis', 'DexScreener liefert Transaktionszahlen (nicht Buy-/Sell-Volumen). Das Verhältnis zeigt Druck, sagt aber nichts über Trade-Größen – deshalb wird zusätzlich die Ø-Trade-Größe relativ zur Liquidität betrachtet.'],
   ['Market Structure', 'Pump- & Manipulationsmuster', 'Vertikaler Anstieg, extreme Kaufquote, Volumen- oder Liquiditäts-Spikes und Whale-dominierte Bewegungen erhöhen das Risiko. Ein Pump wird nie automatisch als Kaufsignal gewertet.'],
   ['Solana', 'Mint Authority', 'Ist die Mint Authority aktiv, kann jederzeit neue Supply erzeugt werden. Der Bot prüft das per Solana RPC (getAccountInfo, jsonParsed) und blockiert aktive Mint Authorities.'],
@@ -7143,7 +7156,7 @@ const KB = [
   ['Diagnostics', 'System Health', 'Kombiniert Status der APIs und RPCs, Datenfrische und Fehlerraten. Liegt der Wert unter der Mindestschwelle, wird Trading eingeschränkt; nach Ausfällen geht der Bot in RECOVERING, bis die Datenqualität reicht.'],
   ['Lern-KI', 'Wie lernt der Bot aus Verlusten?', 'Jeder abgeschlossene Trade wird als Learning Record eingefroren: Merkmale zum Einstiegszeitpunkt (kein Look-Ahead), Preisverlauf (MAE/MFE nach 1/2/5/15 min), Exit und 15 min Nachlauf. Verluste bekommen eine Ursachenfamilie mit Evidenz (z. B. Fehlsignal, Momentum erschöpft, Liquiditätsproblem, Exit zu spät) – ohne ausreichende Daten UNKNOWN statt Vermutung.'],
   ['Lern-KI', 'Wann ändert die KI etwas?', 'Nur wenn ein Muster als Hypothese in einem zeitlich getrennten Experiment (Train/Validation/Test + Walk-Forward, Sensitivität, Bootstrap, Leakage-Test) besteht, danach als Challenger im Shadow-Modus besser abschneidet und der Modus SIMULATION ist. Änderungen verschärfen nur Einstiegsfilter bzw. passen Exits in festen Grenzen an; nach der Übernahme wird überwacht und bei schlechterer Live-Evidenz automatisch zurückgerollt.'],
-  ['Lern-KI', 'Was die KI nie verändert', 'HARD_LIMITS (Buy-Limit, Cooldown-Grenzen, Exposure), Security-Blocker, Emergency Stop, LIVE-Gating und manuelle Trades. Es wird kein Code zur Laufzeit erzeugt oder ausgeführt, und es gibt keine Gewinn-Garantie.'],
+  ['Lern-KI', 'Was die KI nie verändert', 'Risiko-Limits (Buy-Limit, Cooldowns, Pausen, Exposure – die stellst nur du ein), Security-Blocker, Emergency Stop, LIVE-Gating und manuelle Trades. Es wird kein Code zur Laufzeit erzeugt oder ausgeführt, und es gibt keine Gewinn-Garantie.'],
   ['Diagnostics', 'Warum ist LIVE nicht verfügbar?', 'Echte Orders erfordern einen verifizierten Wallet-Adapter mit Signatur-Freigabe, einen Swap-/Routing-Provider sowie echte Bestätigungen und Reconciliation. Das ist in dieser Datei nicht sicher umsetzbar – daher REQUIRES EXTERNAL PROVIDER statt vorgetäuschter Funktion.']
 ];
 function renderKnowledge(sec) {
@@ -7650,7 +7663,7 @@ const ACTIONS = {
   resetSettings: async () => { if (await confirmDialog('Einstellungen zurücksetzen?', 'Alle Einstellungen und Strategien werden auf sichere Defaults gesetzt (Journal, Watchlist und Positionen bleiben).', { danger: true })) { core.resetSettings(); toast('SUCCESS', 'Einstellungen zurückgesetzt'); renderView(true); renderFilterForm(); } },
   factoryReset: async () => { if (await confirmDialog('Factory Reset', 'Löscht ALLE lokalen Daten (Einstellungen, Watchlist, Journal, Positionen, Logs). Nicht umkehrbar.', { danger: true, requireText: 'RESET', confirmLabel: 'Alles löschen' })) { core.factoryReset(); location.reload(); } },
   learnRun: () => { const r = core.learnRunNow(); toast('SUCCESS', 'Lernlauf ausgeführt', r ? `${r.n} Trades ausgewertet` : 'Lern-KI ist ausgeschaltet'); renderView(true); },
-  learnPromote: async el => { if (await confirmDialog('Gelerntes Modell übernehmen?', `${el.dataset.id} hat die Shadow-Phase bestanden. Die Änderung wird nur in SIMULATION übernommen, verschärft ausschließlich Einstiegsfilter bzw. passt Exits innerhalb fester Grenzen an und wird danach überwacht (automatischer Rollback bei schlechterer Live-Evidenz). HARD_LIMITS und Security bleiben unverändert.`)) { const r = core.learnPromote(el.dataset.id, 'USER'); toast(r.ok ? 'SUCCESS' : 'ERROR', r.ok ? 'Modell übernommen' : r.error); renderView(true); } },
+  learnPromote: async el => { if (await confirmDialog('Gelerntes Modell übernehmen?', `${el.dataset.id} hat die Shadow-Phase bestanden. Die Änderung wird nur in SIMULATION übernommen, verschärft ausschließlich Einstiegsfilter bzw. passt Exits innerhalb fester Grenzen an und wird danach überwacht (automatischer Rollback bei schlechterer Live-Evidenz). Risiko-Limits und Security bleiben unverändert.`)) { const r = core.learnPromote(el.dataset.id, 'USER'); toast(r.ok ? 'SUCCESS' : 'ERROR', r.ok ? 'Modell übernommen' : r.error); renderView(true); } },
   learnReject: async el => { if (await confirmDialog('Challenger verwerfen?', `${el.dataset.id} wird verworfen; die zugrunde liegende Hypothese wird erst mit deutlich mehr Daten erneut getestet.`)) { const r = core.learnReject(el.dataset.id); toast(r.ok ? 'SUCCESS' : 'ERROR', r.ok ? 'Challenger verworfen' : r.error); renderView(true); } },
   learnRollback: async el => { if (await confirmDialog('Rollback des gelernten Modells?', 'Die vom Modell gesetzten Einstellungen werden auf die vorherigen Werte zurückgesetzt (nur solange du sie nicht selbst geändert hast) und gelernte Regeln entfernt.', { danger: true })) { const r = core.learnRollback(el.dataset.id, 'USER', 'manuell'); toast(r.ok ? 'SUCCESS' : 'ERROR', r.ok ? 'Rollback ausgeführt' : r.error, r.ok && r.skipped.length ? 'Nicht überschrieben (von dir geändert): ' + r.skipped.join(', ') : ''); renderView(true); } },
   export: el => { try { const f = core.exportData(el.dataset.kind); download(f.name, f.mime, f.data); toast('SUCCESS', 'Export erstellt', f.name); } catch (e) { toast('ERROR', 'Export fehlgeschlagen', e.message); } },
