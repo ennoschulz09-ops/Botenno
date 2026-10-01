@@ -1,6 +1,6 @@
 # Smart Lab – Architektur & technischer Audit
 
-Stand: Phase 6 des Master-Prompts „Ganzheitliche Optimierung“ (App-Version 2.9.0).
+Stand: Phase 7 des Master-Prompts „Ganzheitliche Optimierung“ (App-Version 2.10.0).
 Dieses Dokument wird in jeder Phase fortgeschrieben (siehe „Änderungsprotokoll“ am Ende).
 
 ## 1. Überblick
@@ -63,7 +63,7 @@ UI-Schicht (DOM): Views, Detail-Panel, Modals, Charts (Canvas), Toasts, Alarm-Fe
 | Analytics / Backtest | 1771–1864 | perfStats, Backtest ohne Look-Ahead, Walk-Forward |
 | Lern-KI (reine Funktionen) | 1865–2468 | Features, Records, Attribution, Muster, Experimente, Drift, Modell |
 | Core (createCore) | 2469–4605 | Scanner, Execution, Positionen, Risk, Lern-Orchestrierung, Persistenz |
-| Testsystem | (Ende des Skripts) | Mock-Harness, 70 Selbsttests |
+| Testsystem | (Ende des Skripts) | Mock-Harness, 73 Selbsttests |
 | UI-Schicht | 5205–Ende | Views, Detail, Aktionen, Rendering |
 
 ## 4. State & Persistenz
@@ -104,8 +104,8 @@ UI-Schicht (DOM): Views, Detail-Panel, Modals, Charts (Canvas), Toasts, Alarm-Fe
 | Wallet | nur lesend, Phantom (`window.phantom.solana`), Balance per RPC, Signieren deaktiviert, stille Wiederverbindung nur mit `onlyIfTrusted` (kein Popup) | – |
 | Backtest | kein Look-Ahead, Stops vor TPs, Fees/Slippage, Walk-Forward Pflicht (Validierung/Test getrennt, OOS-Anteil ausgewiesen), Run-Protokoll mit Run-ID, Datensatz-Hash, Parametern, Kosten, Code-Version und Limitierungen, Stress-Tests (Gebühren/Slippage ×2, Einstieg 1 Kerze später, engerer Stop, niedrigerer TP), Monte-Carlo-Drawdown (deterministisch), Regime-Auswertung, Trade-CSV, Lauf-Historie (20) | Daten nur aus GeckoTerminal-OHLCV eines Pools (kein Survivorship-freier Universums-Test), keine Orderbuch-Simulation |
 | Lernen | Learning Records, Ursachen mit Evidenz, Counterfactuals, Muster, Hypothesen → Experimente (Train/Validation/Test, Walk-Forward) → Shadow → Übernahme nur in SIMULATION, nur verschärfend, Auto-Rollback; Fehlerklassen (statistisch · Execution · Daten · Security · Modell · Prozess) mit Prüfung „erwartbarer Verlust?“ gegen den beim Einstieg geplanten Stop; Near-Miss-Tracking (15 min Nachlauf, verpasster Gewinn vs. vermiedener Verlust je Filter, reine Messung); Tabelle aktiver Parameter mit Herkunft/Grund; neue Parameter nur noch über die Lern-KI | Near-Miss-Ergebnisse sind simuliert (ohne Kosten); Herkunft nur für die letzten 200 Konfigurationsänderungen |
-| Monitoring | System/Bot Health, API Health Center, Metriken, Diagnose | keine Anomalie-Erkennung mit Aktionen (warn/degrade/pause/stop), keine Block-/Erfolgsraten (7) |
-| UI | einfache/Analyse-Ansicht, „Warum?“-Tab, Entscheidungsketten | Status-Leiste System/Data/Wallet/Risk/Live-Gate nur teilweise (7) |
+| Monitoring | System/Bot Health, API Health Center, Diagnose; Kennzahlen der letzten 60 min (Signale/Stunde, Security- und Risiko-Blockquote, Freigabequote, Orders, Erfolgsquote, Ø Ausführungszeit, Fehlercodes, Datenfrische, Zustand der Lern-KI); Anomalie-Monitor mit 12 Reason Codes (u. a. DATA_STALE_WIDE, PRIMARY_API_DOWN, EXEC_FAILURES, EXEC_SLOW, SLIPPAGE_SPIKE, RECONCILIATION, PORTFOLIO_INTEGRITY, LOSS_BURST, EQUITY_DROP, LEARNING_ERRORS, STORAGE_FAIL), Schweregrad und Aktion WARN / DEGRADE / PAUSE / HARD_STOP; Standard „nur warnen“, mit „handeln“ Größe ×0,5, Pause neuer Auto-Käufe (ANOMALY_PAUSE) bzw. einmaliger Not-Stopp; Alarm + Verlauf je Anomalie | Kennzahlen nur für die laufende Sitzung (nicht gespeichert) |
+| UI | einfache/Analyse-Ansicht, „Warum?“-Tab, Entscheidungsketten, Statusleiste (Analyse-Ansicht) mit System, Daten, Wallet, Risiko, Live-Gate und Monitor; Monitor-Pill auch in der einfachen Ansicht, sobald eine Anomalie aktiv ist; Pills brechen auf dem Desktop um statt abgeschnitten zu werden | – |
 | Login | PBKDF2 (600k), kein Klartext, kein Persistieren, Reload → neu anmelden, Sperre 30 s → 15 min nach je 5 Fehlversuchen, gesperrt keine App-Aktionen, Eingaben während der Prüfung gesperrt | bleibt clientseitig (kein Server) |
 
 ## 7. Sicherheitskritische Stellen
@@ -135,7 +135,7 @@ Kein Hotspot gefunden, der eine Optimierung rechtfertigt. Render ist bereits ged
 
 ## 9. Tests (Ist)
 
-- **70 Selbsttests** in der App (System → Selbsttest): Grundlagen, Trading-Limits, Daten/Stale, Security, Chaos (API-/RPC-Ausfall, 429, falsches JSON, Scanner-Lock, verspätete Antworten, Reload-Recovery), Status-Logik, LIVE-Gating, Storage, Backtest (Look-Ahead, Reproduzierbarkeit, Stress/Einstiegsverzögerung, Monte-Carlo/Regime), Portfolio & Execution, Signal & Risk, 11 Lern-KI-Tests, 4 Adaptive-KI-Tests (Fehlerklassen, Near-Misses, aktive Parameter, kein naives Tuning).
+- **73 Selbsttests** in der App (System → Selbsttest): Grundlagen, Trading-Limits, Daten/Stale, Security, Chaos (API-/RPC-Ausfall, 429, falsches JSON, Scanner-Lock, verspätete Antworten, Reload-Recovery), Status-Logik, LIVE-Gating, Storage, Backtest (Look-Ahead, Reproduzierbarkeit, Stress/Einstiegsverzögerung, Monte-Carlo/Regime), Portfolio & Execution, Signal & Risk, 11 Lern-KI-Tests, 4 Adaptive-KI-Tests (Fehlerklassen, Near-Misses, aktive Parameter, kein naives Tuning), 3 Monitoring-Tests (Anomalien & Modi, Not-Stopp, Kennzahlen).
 - **Browser-E2E** (Playwright, `tests/e2e/`, seit Roadmap-Schritt A1 im Repo): Selbsttests, Login, UI einfach/Analyse inkl. Mobil, Lern-KI, Backup/Restore, Migration, Backtest-Bericht, Lernmodus-Profil, XSS-Schutz; `npm test` bzw. `node tests/e2e/run-all.js`.
 - **CI** (GitHub Actions, `.github/workflows/tests.yml`): Syntax-Prüfung + alle Suiten bei jedem Push auf `main` und jedem PR. Ohne `E2E_USER`/`E2E_PASS` nutzen die Tests eine Testkopie der App mit zufälligem Wegwerf-Passwort – das echte Passwort steht nirgends im Repo und wird nicht als Secret gebraucht.
 - **Lücken:** Monitoring-Aktionen (Phase 7), UI-Smoke für LIVE-Gate/Wallet.
@@ -154,6 +154,7 @@ Kein Hotspot gefunden, der eine Optimierung rechtfertigt. Render ist bereits ged
 ## Änderungsprotokoll
 
 - Phase 0: Audit erstellt.
+- Roadmap A2 / Phase 7 (2.10.0): Monitoring-Kennzahlen, Anomalie-Monitor mit Reason Codes und Aktionen (Standard nur warnen, einstellbar unter System → „Anomalie-Monitor: Reaktion“), Statusleiste mit Daten, Live-Gate und Monitor, Pill „Pos“ zeigt ∞ bei unbegrenzten Positionen. 3 neue Selbsttests, UI-E2E erweitert.
 - Roadmap A1: Tests ins Repo (`tests/e2e/`, gemeinsames `env.js`, Runner `run-all.js`, Syntax-Prüfung), CI über GitHub Actions; XSS-Test mit echten Prüfungen statt reiner Ausgabe; Login-Test wartet auf das Ende der PBKDF2-Prüfung statt fester Zeiten.
 - 2.9.0 (Nutzerwunsch): feste Grenzen (`HARD_LIMITS`) entfernt – Max. Käufe pro Coin, Coin-Cooldown, Verlustserie, Exposure, Positionsgröße, Min. Trades für Optimierung frei einstellbar; 0 = aus für Tageslimit, Drawdown-Modus/-Grenze, Overtrading (inkl. Bremse), max. Positionen, Korrelation, System-Health; neue Schalter: Nachkauf nur im Gewinn, Strategie-Cooldowns, marktweite Handelspause, automatischer Safe Mode; Profil „Lernmodus (ohne Limits)“ (nur Limits, Kauf-Filter unverändert); Risiko-Ansicht zeigt Limits als einstellbar. Standardwerte unverändert. Selbsttests angepasst + 1 neuer (Lernmodus), neuer E2E-Test für das Profil.
 - 2.8.0 (Nutzerwunsch): Loss-Cooldown und globale Pause wieder 0 min (Standard und Untergrenze), einmalige Umstellung gespeicherter Werte inkl. Beenden laufender Pausen, protokolliert. **Verhaltensänderung:** nach Verlusten keine automatische Handelspause mehr. Selbsttest und Migrations-E2E angepasst.

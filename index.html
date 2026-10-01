@@ -47,6 +47,7 @@ small{font-size:11px}
 .pills{display:flex;gap:6px;overflow-x:auto;flex:1;min-width:0;scrollbar-width:none;padding:2px 0}.pills::-webkit-scrollbar{display:none}
 .pill{flex:none;display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:4px 9px;border-radius:999px;border:1px solid var(--line2);background:#ffffff08;white-space:nowrap;color:var(--muted)}
 .pill b{color:var(--text);font-weight:700}
+@media (min-width:701px){.pills{flex-wrap:wrap;row-gap:6px}} /* Desktop: alle Status-Pills sichtbar (Umbruch statt Abschneiden) */
 .pill.ok{border-color:#22e58f55}.pill.ok b{color:var(--green)}
 .pill.warn{border-color:#fbbf2466}.pill.warn b{color:var(--yellow)}
 .pill.bad{border-color:#ff547088;background:#ff547014}.pill.bad b{color:var(--red)}
@@ -466,7 +467,7 @@ pre.raw{white-space:pre-wrap;word-break:break-all;font:11px/1.4 var(--mono);back
    ===================================================================== */
 
 /* ============================== KONSTANTEN ============================== */
-const APP_VERSION = '2.9.0';
+const APP_VERSION = '2.10.0';
 /* true, wenn Version a älter als b ist (fehlende Version = sehr alt). */
 const verLt = (a, b) => { if (typeof a !== 'string') return true; const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const STRATEGY_VERSION = '1.0.0';
@@ -804,6 +805,7 @@ const SETTINGS_SCHEMA = [
   { k: 'ffAutoTuning', s: 'System', l: 'Feature: Parameter-Versionen überwachen & schlechtere zurückrollen (nur Simulation; neue Parameter nur über die Lern-KI)', t: 'bool', def: false },
   { k: 'minTradesForTuning', s: 'System', l: 'Min. abgeschlossene Trades für Optimierung', t: 'int', def: 20, min: 1, max: 1000 },
   { k: 'autoSafeMode', s: 'System', l: 'Safe Mode automatisch nach 5 Scan-Fehlern (stoppt neue Käufe)', t: 'bool', def: true },
+  { k: 'anomalyMode', s: 'System', l: 'Anomalie-Monitor: Reaktion', t: 'select', def: 'warn', opts: [['warn', 'nur warnen (Standard)'], ['act', 'handeln: drosseln, pausieren, bei kritischen Fehlern Not-Stopp']] },
   { k: 'resetBuyCountOnSession', s: 'System', l: 'Buy-Zähler bei neuer Session zurücksetzen (nur ohne offene Position)', t: 'bool', def: true },
   // Lern-KI (Adaptive Loss Intelligence) – verändert nie Risiko-Limits, Security, Emergency Stop oder LIVE-Gating
   { k: 'learnEnabled', s: 'Lern-KI', l: 'Lern-KI aktiv (Verlust-Analyse, Muster, Experimente)', t: 'bool', def: true },
@@ -820,7 +822,7 @@ const PROFILES = {
   Ausgewogen: { minLiq: 10000, minVol1h: 20000, minMcap: 50000, maxMcap: 5000000, minBuyRatio: 0.55, minScore: 65, maxRiskScore: 60, minConfidence: 60, maxPositionPct: 5, maxExposurePct: 30 },
   Aggressiv: { minLiq: 5000, minVol1h: 10000, minMcap: 20000, maxMcap: 5000000, minBuyRatio: 0.5, minScore: 60, maxRiskScore: 70, minConfidence: 55, maxPositionPct: 5, maxExposurePct: 40 },
   /* Lernmodus: alle Pausen und Risiko-Limits aus, damit durchgehend gehandelt und gelernt wird. Kauf-Filter bleiben unverändert. */
-  'Lernmodus (ohne Limits)': { dailyLossLimitPct: 0, ddStopPct: 0, ddReducePct: 0, lossCooldownMin: 0, globalPauseMin: 0, lossStreakLimit: 0, sellCooldownMin: 0, maxBuysPerCoin: 0, addOnlyInProfit: false, maxTradesPerHour: 0, maxOpenPositions: 0, maxExposurePct: 100, correlationLimit: 0, signalConflictBlock: false, strategyCooldowns: false, lowQualityMarketBlock: false, minPairAgeMin: 0, maxActiveOrders: 20, autoSafeMode: false }
+  'Lernmodus (ohne Limits)': { dailyLossLimitPct: 0, ddStopPct: 0, ddReducePct: 0, lossCooldownMin: 0, globalPauseMin: 0, lossStreakLimit: 0, sellCooldownMin: 0, maxBuysPerCoin: 0, addOnlyInProfit: false, maxTradesPerHour: 0, maxOpenPositions: 0, maxExposurePct: 100, correlationLimit: 0, signalConflictBlock: false, strategyCooldowns: false, lowQualityMarketBlock: false, minPairAgeMin: 0, maxActiveOrders: 20, autoSafeMode: false, anomalyMode: 'warn' }
 };
 
 function coerceSetting(d, v) {
@@ -1389,6 +1391,7 @@ const BLOCKER_DEFS = {
   SIGNAL_CONFLICT: [8, 'STRATEGY', 'Widersprüchliche Signale'],
   LOW_QUALITY_MARKET: [2, 'DATA', 'Marktweit schlechte Datenqualität (No-Trade-Zone)'],
   DRAWDOWN_LIMIT: [4, 'PORTFOLIO', 'Drawdown-Grenze erreicht'],
+  ANOMALY_PAUSE: [3, 'SYSTEM', 'Anomalie-Monitor: neue Auto-Käufe pausiert'],
   NO_SIGNAL: [9, 'SIGNAL', 'Kein Kaufsignal']
 };
 function mkBlocker(code, msg, extra) {
@@ -2872,7 +2875,7 @@ const BOT_TRANSITIONS = {
 const MANUAL_HARD = new Set(['PRICE_MISSING', 'DATA_STALE', 'DATA_FALLBACK', 'DATA_CONFLICT', 'SECURITY_CRITICAL', 'SECURITY_UNKNOWN', 'SECURITY_UNVERIFIED', 'SECURITY_STALE', 'LOW_LIQUIDITY', 'LIQUIDITY_SHOCK']);
 const ALERT_TAGS = { BUY_CANDIDATE: '🔔 BUY CANDIDATE', SCORE: '⭐ SCORE', X2: '🚀 x2 seit Fund', NEW_TOKEN: '🆕 NEUER TOKEN', LIQ_SPIKE: '💧 LIQUIDITY SPIKE', LIQ_COLLAPSE: '⚠️ LIQUIDITY COLLAPSE', VOL_SPIKE: '📈 VOLUME SPIKE', WHALE: '🐋 WHALE ACTIVITY', SECURITY: '🛡 SECURITY RISK', SELL_CANDIDATE: '↘ SELL CANDIDATE', STOP_HIT: '⛔ STOP HIT', TP_HIT: '🎯 TAKE PROFIT', API_FAIL: '📡 API FAILURE', RPC_FAIL: '🛰 RPC FAILURE', WATCH: '👁 WATCHLIST', RISK: '⚠️ RISK', SYSTEM: '⚙ SYSTEM', TRADE: '💱 TRADE', POSITION_DATA: '⚠️ POSITIONSDATEN', LEGACY: '🔔 Alarm' };
 /* Nur diese globalen Blocker bedeuten „BLOCKED“. Kein Kandidat / niedriger Score / kein Konsens → WAITING, nie BLOCKED. */
-const HARD_GLOBAL = new Set(['EMERGENCY_STOP', 'SAFE_MODE', 'OFFLINE', 'SYSTEM_UNHEALTHY', 'FEE_UNKNOWN', 'DAILY_LOSS_LIMIT', 'GLOBAL_PAUSE', 'LOSS_COOLDOWN', 'RECONCILIATION_REQUIRED', 'SECURITY_SOURCES_DOWN', 'LIVE_UNAVAILABLE', 'LOW_QUALITY_MARKET', 'DRAWDOWN_LIMIT']);
+const HARD_GLOBAL = new Set(['EMERGENCY_STOP', 'SAFE_MODE', 'OFFLINE', 'SYSTEM_UNHEALTHY', 'FEE_UNKNOWN', 'DAILY_LOSS_LIMIT', 'GLOBAL_PAUSE', 'LOSS_COOLDOWN', 'RECONCILIATION_REQUIRED', 'SECURITY_SOURCES_DOWN', 'LIVE_UNAVAILABLE', 'LOW_QUALITY_MARKET', 'DRAWDOWN_LIMIT', 'ANOMALY_PAUSE']);
 const GENESIS = { '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d': 'mainnet-beta', 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG': 'devnet', '4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY': 'testnet' };
 const CHAIN_STEPS = [
   ['DATA', ['PRICE_MISSING', 'DATA_STALE', 'DATA_CONFLICT', 'DATA_FALLBACK']],
@@ -2934,6 +2937,7 @@ function createCore(opts) {
     rpc: { slot: null, prevSlot: null, slotAt: 0, latency: null, endpoint: null },
     wallet: { status: 'NOT_CONNECTED', pubkey: null, provider: null, network: null, networkAt: 0, balanceLamports: null, balanceAt: 0, error: '' },
     tradeSeq: 0, reconciliation: { required: false, issues: [], at: 0 },
+    monitor: { active: {}, history: [], sigTimes: [] },
     metrics: { perf: { scan: null, analysis: null, exec: null, render: null }, counters: { scans: 0, buySignals: 0, rejected: 0, executed: 0, apiErrors: 0 }, funnel: {}, scanStats: {}, minute: { t: 0, scans: 0, candidates: 0, accepted: 0, rejected: 0, executed: 0 }, rejectReasons: {}, preTradeRejects: {} },
     hist: { equity: [], risk: [], api: [], scanner: [] },
     paramVersions: [], activeParam: 1, configLog: [], auditLog: [], sessions: [], session: null, stratStats: {}, falseSignals: [],
@@ -3390,6 +3394,7 @@ function createCore(opts) {
     if (isNum(A.dataAge) && A.dataAge > s.staleAfterSec * SEC * 0.5) adj.push({ code: 'DATA_AGE', f: 0.7, text: `Daten ${fmtAge(A.dataAge)} alt → Größe ×0,7` });
     if (A.liq.impactPlanned != null && A.liq.impactPlanned > s.maxSlippagePct / 2) adj.push({ code: 'EXECUTION_UNCERTAINTY', f: 0.6, text: `erwarteter Price Impact ${A.liq.impactPlanned.toFixed(2)} % → Größe ×0,6` });
     if (!A.crossChecked) adj.push({ code: 'UNCONFIRMED_DATA', f: 0.85, text: 'nicht von zweiter Quelle bestätigt → Größe ×0,85' });
+    const deg = anomalyActive('DEGRADE'); if (deg) adj.push({ code: 'ANOMALY_DEGRADE', f: 0.5, text: `Anomalie ${deg.code}: ${deg.msg} → Größe ×0,5` });
     const cl = clusterShare(leadId, eq); if (cl >= 0.5) adj.push({ code: 'CLUSTER_EXPOSURE', f: 0.7, text: `${Math.round(cl * 100)} % des erlaubten Exposures bereits in Strategie ${leadId} → Größe ×0,7` });
     const fAdj = adj.reduce((m, a) => m * a.f, 1);
     const caps = {
@@ -3429,6 +3434,7 @@ function createCore(opts) {
     if (rpcSt.length && rpcSt.every(x => x === 'OFFLINE') && (!s.ffRugcheck || http.status('rugcheck') === 'OFFLINE')) add('SECURITY_SOURCES_DOWN', 'Alle Security-Quellen (RPC' + (s.ffRugcheck ? ', RugCheck' : '') + ') OFFLINE');
     if (r.dailyLimitHit && s.dailyLossLimitPct > 0) add('DAILY_LOSS_LIMIT', `Tagesverlust-Limit erreicht (${fmtSigned(r.dailyPnl)})`);
     if (auto && s.ddStopPct > 0) { const dd = drawdownPct(); if (dd >= s.ddStopPct) add('DRAWDOWN_LIMIT', `Drawdown ${dd.toFixed(1)} % ≥ ${s.ddStopPct} % – keine neuen Auto-Käufe`); }
+    if (auto) { const an = anomalyActive('PAUSE'); if (an) add('ANOMALY_PAUSE', `Anomalie ${an.code}: ${an.msg}`); }
     if (auto && s.lowQualityMarketBlock && arr(state.regime.tags).includes('LOW_QUALITY_MARKET')) add('LOW_QUALITY_MARKET', `${Math.round((state.regime.lowQ || 0) * 100)} % der Tokens mit veralteten/unsicheren Daten – No-Trade-Zone`);
     // Pause/Cooldown nur, solange sie eingestellt sind – auf 0 gestellt endet eine laufende Pause sofort
     if (s.globalPauseMin > 0 && r.globalPauseUntil > now) add('GLOBAL_PAUSE', `Globale Pause nach Verlustserie – noch ${fmtAge(r.globalPauseUntil - now)}`);
@@ -3929,7 +3935,7 @@ function createCore(opts) {
       if (t.D.decision === 'APPROVED') approved++;
       if (t.D.decision === 'APPROVED' || t.D.decision === 'BUY_CANDIDATE') cand++;
       if (t.D.decision !== 'APPROVED' && t.D.decision !== 'BUY_CANDIDATE') { if (t.D.decision === 'REJECTED') rejected++; const ab = t.D.analysisBlockers.filter(b => !(b.code === 'SECURITY_UNKNOWN' && !t.D.fastPass)); const c = ab[0] && ab[0].code; if (c) reasons[c] = (reasons[c] || 0) + 1; }
-      if (t.A.strat) for (const v of t.A.strat.votes) if (v.enabled && v.vote === 'BUY') { const k = v.id + ':' + t.id; if (!state.stratMarks[k] || now - state.stratMarks[k] > 30 * MIN) { state.stratMarks[k] = now; stratStat(v.id, 'signals'); state.metrics.counters.buySignals++; } }
+      if (t.A.strat) for (const v of t.A.strat.votes) if (v.enabled && v.vote === 'BUY') { const k = v.id + ':' + t.id; if (!state.stratMarks[k] || now - state.stratMarks[k] > 30 * MIN) { state.stratMarks[k] = now; stratStat(v.id, 'signals'); state.metrics.counters.buySignals++; state.monitor.sigTimes.push(now); } }
     }
     state.metrics.funnel = funnel; state.metrics.rejectReasons = reasons;
     state.metrics.scanStats = { tokens: analyses.length, fastPass, approved, candidates: cand, rejected, withSignals };
@@ -4043,6 +4049,7 @@ function createCore(opts) {
       await managePositions();
       try { learnFollowUps(); learnRun(false); } catch (e) { log.error('LEARNING', 'Lernlauf fehlgeschlagen: ' + e.message); }
       runAlerts();
+      try { monitorTick(env.now()); } catch (e) { log.error('SYSTEM', 'Anomalie-Monitor: ' + e.message); }
       await maybeAutoTrade();
       state.bot.errorStreak = 0;
       return { scanId };
@@ -4440,6 +4447,74 @@ function createCore(opts) {
       { name: 'UI', status: rl == null ? 'OK' : rl < 50 ? 'OK' : rl < 200 ? 'DEGRADED' : 'ERROR', detail: rl == null ? '—' : `Render ${rl} ms` }
     ];
   }
+
+  /* ---------- Monitoring: Kennzahlen der letzten Stunde + Anomalie-Monitor ----------
+     Jede Anomalie hat einen Reason Code, einen Schweregrad und eine Aktion (WARN / DEGRADE / PAUSE / HARD_STOP).
+     Standard „nur warnen“ (anomalyMode 'warn'); erst mit 'act' drosselt, pausiert oder stoppt der Monitor wirklich. */
+  const CRIT_INTEGRITY = new Set(['NEGATIVE_CASH', 'QTY_MISMATCH', 'DOUBLE_FILL', 'DUPLICATE_POSITION']);
+  const RISK_CATS = new Set(['LIMITS', 'COOLDOWN', 'PORTFOLIO']);
+  function monitorMetrics() {
+    const now = env.now(), s = S(), M = state.monitor;
+    while (M.sigTimes.length && now - M.sigTimes[0] > HOUR) M.sigTimes.shift();
+    const toks = [...state.markets.values()].filter(t => t.snap), dec = [...state.markets.values()].filter(t => t.D);
+    const share = fn => (dec.length ? lr2(dec.filter(fn).length / dec.length) : null);
+    const ords = state.orders.filter(o => now - o.createdAt <= HOUR), done = ords.filter(o => o.state === 'COMPLETED'), failed = ords.filter(o => o.state === 'FAILED');
+    const last5 = state.orders.filter(o => o.state === 'COMPLETED' && isNum(o.latencyMs)).slice(0, 5);
+    const fills = state.orders.filter(o => o.state === 'COMPLETED' && isNum(o.expSlipPct)).slice(0, 5);
+    const codes = {}; for (const o of failed) codes[o.failureCode || 'UNBEKANNT'] = (codes[o.failureCode || 'UNBEKANNT'] || 0) + 1;
+    const L = state.learn, learnErr = log.entries.filter(e => e.category === 'LEARNING' && (e.level === 'ERROR' || e.level === 'CRITICAL') && now - e.ts <= HOUR).length;
+    const learnStatus = !s.learnEnabled ? 'AUS' : learnErr || (L.records.length && now - L.lastRunAt > 10 * MIN) ? 'WARN' : 'OK';
+    return {
+      signals: { perHour: M.sigTimes.length, analyzed: dec.length },
+      blocks: { security: share(t => t.D.analysisBlockers.some(b => /^SECURITY_/.test(b.code) && b.code !== 'SECURITY_UNKNOWN')), risk: share(t => [...t.D.analysisBlockers, ...t.D.execBlockers].some(b => b.code === 'RISK_TOO_HIGH' || RISK_CATS.has((BLOCKER_DEFS[b.code] || [])[1]))), approved: share(t => t.D.decision === 'APPROVED') },
+      exec: { orders: ords.length, completed: done.length, failed: failed.length, failed10: failed.filter(o => now - o.createdAt <= 10 * MIN).length, successRate: done.length + failed.length ? lr2(done.length / (done.length + failed.length)) : null, avgLatencyMs: done.filter(o => isNum(o.latencyMs)).length ? Math.round(avg(done.map(o => o.latencyMs).filter(isNum))) : null, recentLatencyMs: last5.length >= 3 ? Math.round(avg(last5.map(o => o.latencyMs))) : null, recentSlipPct: fills.length >= 3 ? lr2(avg(fills.map(o => o.expSlipPct))) : null, failureCodes: codes },
+      data: { tokens: toks.length, fresh: toks.length ? lr2(toks.filter(t => now - t.snap.fetchedAt <= s.staleAfterSec * SEC).length / toks.length) : null, primary: http.status('dexPairs') },
+      learn: { status: learnStatus, enabled: !!s.learnEnabled, lastRunAgeMs: L.lastRunAt ? now - L.lastRunAt : null, records: L.records.length, followUps: L.followUps.length, nearMissOpen: L.nearMiss.open.length, drift: driftStatus(), errorsHour: learnErr }
+    };
+  }
+  function monitorTick(now) {
+    const s = S(), M = state.monitor, mm = monitorMetrics(), found = [];
+    const add = (code, sev, action, msg) => found.push({ code, sev, action, msg });
+    if (mm.data.tokens >= 5 && mm.data.fresh != null && mm.data.fresh < 0.5) add('DATA_STALE_WIDE', 'HIGH', 'PAUSE', `nur ${Math.round(mm.data.fresh * 100)} % der Marktdaten frisch`);
+    if (mm.data.primary === 'OFFLINE') add('PRIMARY_API_DOWN', 'HIGH', 'PAUSE', 'DexScreener (Hauptquelle) offline');
+    if (mm.exec.failed10 >= 3) add('EXEC_FAILURES', 'HIGH', 'PAUSE', `${mm.exec.failed10} fehlgeschlagene Orders in 10 min`);
+    if (mm.exec.recentLatencyMs != null && mm.exec.recentLatencyMs > 5000) add('EXEC_SLOW', 'WARN', 'DEGRADE', `Ø Ausführungszeit ${mm.exec.recentLatencyMs} ms (letzte Orders)`);
+    if (mm.exec.recentSlipPct != null && mm.exec.recentSlipPct > s.maxSlippagePct) add('SLIPPAGE_SPIKE', 'WARN', 'DEGRADE', `Ø Slippage ${mm.exec.recentSlipPct} % > ${s.maxSlippagePct} % (letzte Orders)`);
+    if (state.reconciliation.required) add('RECONCILIATION', 'HIGH', 'PAUSE', 'Abgleich nach Neustart offen');
+    const pi = portfolioIntegrity(), crit = pi.issues.filter(i => CRIT_INTEGRITY.has(i.code));
+    if (crit.length) add('PORTFOLIO_INTEGRITY', 'CRITICAL', 'HARD_STOP', str(crit.map(i => i.msg).join(' · '), 200));
+    else if (pi.issues.length) add('PORTFOLIO_CHECK', 'WARN', 'WARN', str(pi.issues.map(i => i.msg).join(' · '), 200));
+    const losses30 = state.journal.filter(j => j.status === 'CLOSED' && j.result && !j.result.win && now - j.closedAt <= 30 * MIN).length;
+    if (losses30 >= 5) add('LOSS_BURST', 'HIGH', 'PAUSE', `${losses30} Verluste in 30 min`);
+    const eqs = state.hist.risk.filter(x => now - x.t <= HOUR && isNum(x.equity)).map(x => x.equity), eqNow = equityInfo().equity;
+    if (eqs.length && isNum(eqNow)) { const top = Math.max(...eqs); if (top > 0 && (top - eqNow) / top >= 0.1) add('EQUITY_DROP', 'HIGH', 'PAUSE', `Kapital in 60 min um ${((top - eqNow) / top * 100).toFixed(1)} % gefallen`); }
+    if (mm.learn.errorsHour >= 3) add('LEARNING_ERRORS', 'WARN', 'WARN', `${mm.learn.errorsHour} Fehler der Lern-KI in 60 min`);
+    if (!state.storageOk) add('STORAGE_FAIL', 'HIGH', 'WARN', 'Speichern im Browser fehlgeschlagen');
+    const act = s.anomalyMode === 'act', ACT_DE = { WARN: 'nur Warnung', DEGRADE: 'Positionsgröße ×0,5', PAUSE: 'neue Auto-Käufe pausiert', HARD_STOP: 'Not-Stopp' };
+    const seen = new Set();
+    for (const f of found) {
+      seen.add(f.code);
+      let a = M.active[f.code];
+      if (a) { a.msg = f.msg; a.last = now; }
+      else {
+        a = M.active[f.code] = { ...f, since: now, last: now };
+        M.history.unshift({ ts: now, code: f.code, sev: f.sev, action: f.action, msg: f.msg, event: 'START', applied: act });
+        const what = act ? ACT_DE[f.action] : f.action === 'WARN' ? 'nur Warnung' : `nur Warnung (Modus „nur warnen“, sonst: ${ACT_DE[f.action]})`;
+        log.warn('SYSTEM', `Anomalie ${f.code}: ${f.msg} → ${what}`);
+        alert('SYSTEM', null, `Anomalie ${f.code}: ${f.msg} → ${what}`, f.sev === 'CRITICAL' ? 'CRITICAL' : 'WARNING', { key: 'anom:' + f.code, cooldownMs: 10 * MIN });
+      }
+      // Not-Stopp genau einmal je Anomalie (auch wenn erst später auf „handeln“ umgestellt wird)
+      if (act && f.action === 'HARD_STOP' && !a.stopDone && !state.bot.emergency) { a.stopDone = true; emergencyStop('Anomalie-Monitor: ' + f.msg).catch(e => log.error('SYSTEM', 'Not-Stopp fehlgeschlagen: ' + e.message)); }
+    }
+    for (const code of Object.keys(M.active)) if (!seen.has(code)) {
+      const a = M.active[code]; delete M.active[code];
+      M.history.unshift({ ts: now, code, sev: a.sev, action: a.action, msg: 'behoben', event: 'END', applied: act });
+      log.info('SYSTEM', `Anomalie ${code} behoben (seit ${fmtAge(now - a.since)})`);
+    }
+    if (M.history.length > 50) M.history.length = 50;
+    return { active: Object.values(M.active), metrics: mm };
+  }
+  const anomalyActive = action => S().anomalyMode === 'act' ? Object.values(state.monitor.active).find(a => a.action === action) || null : null;
 
   /* ---------- ADAPTIVE LOSS INTELLIGENCE: Orchestrierung ----------
      Trade schließt → Learning Record (Features zum Einstieg, Preispfad, Exit) → Labels & Ursachen → Counterfactuals →
@@ -5189,9 +5264,9 @@ function createCore(opts) {
     executeBuy, executeSell, execCheck: (t, o) => execCheck(t, t.A, o), globalBlockers, buildCtx, estFees, estImpact, equityInfo, portfolioRisk, positionCorrelations,
     systemHealth, diagnostics, botHealth, readiness, drawdownPct, portfolioIntegrity, execProvider: m => execProvider(m).id, candidateChain, liveReadiness, preLiveChecks, ackReconciliation, requestSignature, rpcEndpoints, fetchOhlcv, fetchCandlesForBacktest, walletConnect, walletDisconnect, walletBalance, walletNetwork,
     updateSettings, updateStrategies, rollbackTo, addWatch, removeWatch, updateWatch, select, exportData, importSettings, resetSettings, resetPortfolio, freshStart,
-    learnView, learnDecision, learnPromote, learnReject, learnRollback, activeParams, exportBackup, validateBackup, restoreBackup, recordBacktest, learnRunNow: () => { const r = learnRun(true); persistNow(); return r; },
+    learnView, learnDecision, learnPromote, learnReject, learnRollback, activeParams, monitorMetrics, exportBackup, validateBackup, restoreBackup, recordBacktest, learnRunNow: () => { const r = learnRun(true); persistNow(); return r; },
     newSession, factoryReset, persistNow, enqueueSecurity, clearFeed: () => { state.feed = []; persist(); },
-    _t: { posTransition, runProviderSteps, liveProvider, simProvider, scanOnce, updateSolPrice, applySnapshot, applyAlt, fetchChunk, reconcile, analyzeAll, startScanner, stopScanner, timers, managePositions, closePosition, processQueue, enqueue, checkSecurity, ensureToken, maybeAutoTrade, setBotState, learnRun, learnOnClose, learnFollowUps, finishFollowUp, createChallenger, shadowEval, liveEval, addRecord, nearMissTick, maybeTune, updateSettings }
+    _t: { posTransition, runProviderSteps, liveProvider, simProvider, scanOnce, updateSolPrice, applySnapshot, applyAlt, fetchChunk, reconcile, analyzeAll, startScanner, stopScanner, timers, managePositions, closePosition, processQueue, enqueue, checkSecurity, ensureToken, maybeAutoTrade, setBotState, learnRun, learnOnClose, learnFollowUps, finishFollowUp, createChallenger, shadowEval, liveEval, addRecord, nearMissTick, maybeTune, updateSettings, monitorTick }
   };
 }
 
@@ -6152,6 +6227,49 @@ const SELF_TESTS = [
     assert(st.paramVersions.find(p => p.version === v).perf, 'Version wird nicht mehr bewertet');
     return 'minScore bleibt 60 trotz scheinbarem In-Sample-Vorteil · Version bewertet';
   }],
+  ['Monitoring', 'Anomalie-Monitor: Reason Codes, Standard nur warnen, „handeln“ pausiert und drosselt', async () => {
+    const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1), st = core.state; core._t.analyzeAll();
+    const now = H.env.now();
+    for (let i = 0; i < 3; i++) st.orders.unshift({ id: 'TF' + i, side: 'BUY', symbol: 'X', state: 'FAILED', createdAt: now - i * SEC, failureCode: 'QUOTE_FAILED', history: [] });
+    for (let i = 0; i < 3; i++) st.orders.unshift({ id: 'TC' + i, side: 'BUY', symbol: 'X', state: 'COMPLETED', createdAt: now - i * SEC, latencyMs: 120, expSlipPct: core.S().maxSlippagePct * 3, history: [] });
+    let r = core._t.monitorTick(H.env.now());
+    const ex = r.active.find(a => a.code === 'EXEC_FAILURES'), sl = r.active.find(a => a.code === 'SLIPPAGE_SPIKE');
+    assert(ex && ex.action === 'PAUSE' && ex.sev === 'HIGH' && sl && sl.action === 'DEGRADE', 'Anomalien nicht erkannt: ' + JSON.stringify(r.active.map(a => a.code)));
+    assert(st.feed.some(e => /Anomalie EXEC_FAILURES/.test(e.detail)) && st.monitor.history.some(e => e.code === 'EXEC_FAILURES' && e.event === 'START'), 'kein Alarm/Verlauf');
+    const adj = () => (core.execCheck(t, { auto: false }).sizing.factors || { adj: [] }).adj.map(a => a.code);
+    assert(!core.globalBlockers({ auto: true }).some(b => b.code === 'ANOMALY_PAUSE') && !adj().includes('ANOMALY_DEGRADE'), 'Modus „nur warnen“ darf nicht eingreifen');
+    core.updateSettings({ anomalyMode: 'act' }, 'TEST');
+    assert(core.globalBlockers({ auto: true }).some(b => b.code === 'ANOMALY_PAUSE') && !core.globalBlockers({ auto: false }).some(b => b.code === 'ANOMALY_PAUSE'), 'Modus „handeln“ pausiert Auto-Käufe nicht (oder blockiert manuelle)');
+    assert(adj().includes('ANOMALY_DEGRADE'), 'Modus „handeln“ drosselt die Positionsgröße nicht');
+    st.orders = st.orders.filter(o => !/^T[FC]/.test(o.id)); H.env.advance(SEC);
+    r = core._t.monitorTick(H.env.now());
+    assert(!r.active.length && st.monitor.history.some(e => e.code === 'EXEC_FAILURES' && e.event === 'END') && !core.globalBlockers({ auto: true }).some(b => b.code === 'ANOMALY_PAUSE'), 'Anomalie endet nicht: ' + JSON.stringify(r.active.map(a => a.code)));
+    return 'EXEC_FAILURES → PAUSE · SLIPPAGE_SPIKE → DEGRADE · nur warnen greift nicht ein · handeln: nur Auto pausiert, Größe ×0,5 · Ende protokolliert';
+  }],
+  ['Monitoring', 'Kritischer Portfolio-Fehler: Not-Stopp nur im Modus „handeln“ und nur einmal', async () => {
+    const H = makeTestHarness(); const core = await testCore(H), st = core.state;
+    st.portfolio.cash = -50;
+    core._t.monitorTick(H.env.now());
+    assert(st.monitor.active.PORTFOLIO_INTEGRITY && st.monitor.active.PORTFOLIO_INTEGRITY.action === 'HARD_STOP' && !st.bot.emergency, 'Modus „nur warnen“: Anomalie erkannt, aber kein Not-Stopp erwartet');
+    core.updateSettings({ anomalyMode: 'act' }, 'TEST');
+    core._t.monitorTick(H.env.now());
+    assert(st.bot.emergency && /Anomalie-Monitor/.test(st.bot.emergencyReason), 'kein Not-Stopp im Modus „handeln“');
+    st.bot.emergency = false; core._t.monitorTick(H.env.now());
+    assert(!st.bot.emergency, 'Not-Stopp wird nach Freigabe sofort erneut ausgelöst');
+    return 'NEGATIVE_CASH → HARD_STOP · warnen: kein Eingriff · handeln: Not-Stopp genau einmal';
+  }],
+  ['Monitoring', 'Kennzahlen: Signale, Blockquoten, Order-Erfolg, Latenz, Datenfrische, Lern-KI', async () => {
+    const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1);
+    const b = await core.executeBuy(t.id, { sizeUsd: 20 }); assert(b.ok, 'Kauf fehlgeschlagen: ' + codes(b).join(','));
+    core._t.analyzeAll();
+    const m = core.monitorMetrics();
+    assert(m.exec.orders >= 1 && m.exec.completed >= 1 && m.exec.successRate === 1 && isNum(m.exec.avgLatencyMs), 'Order-Kennzahlen falsch: ' + JSON.stringify(m.exec));
+    assert(m.signals.analyzed >= 1 && m.blocks.security != null && m.blocks.risk != null && isNum(m.signals.perHour), 'Signale/Blockquoten fehlen: ' + JSON.stringify([m.signals, m.blocks]));
+    assert(m.learn.enabled && ['OK', 'WARN'].includes(m.learn.status) && m.data.fresh === 1, 'Lern-/Daten-Status falsch: ' + JSON.stringify([m.learn, m.data]));
+    core.updateSettings({ learnEnabled: false }, 'TEST');
+    assert(core.monitorMetrics().learn.status === 'AUS', 'Lern-KI aus nicht erkannt');
+    return `${m.exec.orders} Order(s), Erfolg ${Math.round(m.exec.successRate * 100)} %, Ø ${m.exec.avgLatencyMs} ms · Daten ${Math.round(m.data.fresh * 100)} % frisch · Lern-KI ${m.learn.status}`;
+  }],
   ['System', 'Backtest ohne Look-Ahead', async () => {
     const c = []; let p = 1;
     for (let i = 0; i < 300; i++) { const o = p; p = p * (1 + Math.sin(i / 7) * 0.02 + (i % 50 === 25 ? 0.12 : 0)); c.push({ t: i * MIN, o, h: Math.max(o, p) * 1.01, l: Math.min(o, p) * 0.99, c: p, v: 1000 + (i % 50 === 25 ? 9000 : 0) }); }
@@ -6425,6 +6543,7 @@ function renderTop() {
   const unknown = st.positions.some(p => !isNum(p.pnlUsd));
   const pnl = st.portfolio.realized + unreal;
   const pr = core.portfolioRisk(); const rpc = bestRpcStatus(); const w = st.wallet;
+  const mm = core.monitorMetrics(), lr = core.liveReadiness(), anoms = Object.values(st.monitor.active);
   const pills = [
     [ms.cls + ' pm', '', ms.text, ms.why],
     ['info pm', 'Modus', st.mode.replace('_', ' '), 'Handelsmodus · LIVE separat & nur mit erfülltem Gating'],
@@ -6432,8 +6551,11 @@ function renderTop() {
     [(w.status === 'CONNECTED' ? 'ok' : '') + ' pm an', 'Wallet', w.status === 'CONNECTED' ? shortAddr(w.pubkey) : w.status === 'NO_PROVIDER' ? 'kein Provider' : w.status === 'ERROR' ? 'Fehler' : 'nicht verbunden', 'nur lesend, keine Signaturen'],
     [stCls(rpc) + ' an', 'RPC', rpc + (st.rpc.latency != null && rpc === 'ONLINE' ? ' ' + st.rpc.latency + 'ms' : ''), st.rpc.slot ? 'Slot ' + st.rpc.slot + ' · ' + (st.rpc.endpoint || '') : 'kein verifizierter Slot'],
     [(h.score >= 80 ? 'ok' : h.score >= S.minSystemHealth ? 'warn' : 'bad') + ' an', 'Health', String(h.score), 'System Health 0–100 (APIs, RPC, Frische, Fehler)'],
+    [(mm.data.fresh == null ? '' : mm.data.fresh >= 0.8 ? 'ok' : mm.data.fresh >= 0.5 ? 'warn' : 'bad') + ' an', 'Daten', mm.data.fresh == null ? '—' : Math.round(mm.data.fresh * 100) + ' %', 'Anteil frischer Marktdaten'],
+    [(lr.ready ? 'ok' : 'bad') + ' an', 'Live', lr.ready ? 'bereit' : 'gesperrt', `LIVE-Gate: ${lr.checks.filter(c => !c.ok).length} von ${lr.checks.length} Prüfungen offen (${lr.checks.filter(c => !c.ok).map(c => c.name).join(', ')})`],
+    [(anoms.some(a => a.sev === 'CRITICAL') ? 'bad pm' : anoms.length ? 'warn pm' : 'ok an'), 'Monitor', anoms.length ? anoms.length + ' Anomalie' + (anoms.length > 1 ? 'n' : '') : 'ok', anoms.length ? anoms.map(a => `${a.code}: ${a.msg}`).join(' · ') + (S.anomalyMode === 'act' ? '' : ' · Modus „nur warnen“') : 'keine Anomalien'],
     [(pnl > 0.005 ? 'ok' : pnl < -0.005 ? 'bad' : '') + ' pm', 'PnL', fmtSigned(pnl) + (unknown ? '*' : ''), 'SIMULIERT · fee-adjusted' + (unknown ? ' · * Position ohne aktuellen Preis' : '')],
-    ['pm', 'Pos', `${st.positions.length}/${S.maxOpenPositions}`, 'offene Positionen'],
+    ['pm', 'Pos', `${st.positions.length}/${S.maxOpenPositions > 0 ? S.maxOpenPositions : '∞'}`, 'offene Positionen'],
     [(pr.score >= 60 ? 'bad' : pr.score >= 35 ? 'warn' : 'ok') + ' pm', 'Risk', String(pr.score), 'Portfolio Risk'],
     ['an', '', `${fmtTime(now)} · Scan ${st.scanner.lastAt ? fmtAge(now - st.scanner.lastAt) : '—'}`, 'Uhrzeit · letzter Scan']
   ];
@@ -7061,7 +7183,17 @@ function renderSystem(sec) {
   const wr = closed.length ? closed.filter(j => j.result.win).length / closed.length : null;
   const selT = selTok();
   const optional = new Set(['gecko', 'rugcheck', 'dexDisc', 'dexSol']);
+  const mm = core.monitorMetrics(), anoms = Object.values(st.monitor.active), act = core.S().anomalyMode === 'act';
+  const ACT_DE = { WARN: 'warnen', DEGRADE: 'Größe ×0,5', PAUSE: 'Auto-Käufe pausieren', HARD_STOP: 'Not-Stopp' }, SEV_CLS = { WARN: 'warn', HIGH: 'bad', CRITICAL: 'bad' };
+  const pct = v => (v == null ? '—' : Math.round(v * 100) + ' %');
   patch(sec, html`<h2>🖥 System & API Health</h2>
+    <div class="panel" id="monitorPanel"><h3 style="margin-top:0">Monitoring – letzte 60 Minuten</h3>
+      <div class="grid4">${kv('Signale / Stunde', mm.signals.perHour)}${kv('Security-Blockquote', pct(mm.blocks.security))}${kv('Risiko-Blockquote', pct(mm.blocks.risk))}${kv('Freigegeben (aktueller Scan)', pct(mm.blocks.approved))}${kv('Orders (60 min)', mm.exec.orders + (mm.exec.failed ? ` · ${mm.exec.failed} fehlgeschlagen` : ''))}${kv('Erfolgsquote Orders', pct(mm.exec.successRate))}${kv('Ø Ausführungszeit', mm.exec.avgLatencyMs == null ? '—' : mm.exec.avgLatencyMs + ' ms')}${kv('Frische Marktdaten', pct(mm.data.fresh))}${kv('Lern-KI', mm.learn.status)}${kv('Letzter Lernlauf', mm.learn.lastRunAgeMs == null ? '—' : 'vor ' + fmtAge(mm.learn.lastRunAgeMs))}${kv('Lern-Fehler (60 min)', mm.learn.errorsHour)}${kv('Drift', mm.learn.drift)}</div>
+      ${Object.keys(mm.exec.failureCodes).length ? html`<p class="mut">Fehlercodes: ${Object.entries(mm.exec.failureCodes).map(([k, n]) => k + ' ' + n).join(' · ')}</p>` : ''}
+      <h3>Anomalien ${anoms.length ? html`<span class="chip ${anoms.some(a => a.sev !== 'WARN') ? 'bad' : 'warn'}">${anoms.length} aktiv</span>` : html`<span class="chip ok">keine</span>`} <span class="chip ${act ? 'warn' : ''}">Modus: ${act ? 'handeln' : 'nur warnen'}</span></h3>
+      ${anoms.length ? anoms.map(a => html`<div class="check"><span class="ic ${SEV_CLS[a.sev] === 'warn' ? 'warn' : 'fail'}">${a.sev}</span><div><b>${a.code}</b> – ${a.msg}<small>seit ${fmtAge(now - a.since)} · Aktion: ${ACT_DE[a.action]}${act || a.action === 'WARN' ? '' : ' (nicht ausgeführt, Modus „nur warnen“)'}</small></div></div>`) : html`<p class="mut">Keine Auffälligkeiten: Datenfrische, Hauptquelle, Orders, Slippage, Abgleich, Portfolio-Integrität, Verlusthäufung, Kapitalverlauf, Lern-KI und Speicher werden bei jedem Scan geprüft.</p>`}
+      ${st.monitor.history.length ? html`<details class="an" data-k="mon-hist"><summary>Verlauf (${st.monitor.history.length})</summary><div class="tw"><table class="tbl">${st.monitor.history.slice(0, 20).map(e => html`<tr><td class="num">${fmtDateTime(e.ts)}</td><td>${e.event === 'START' ? 'Beginn' : 'Ende'}</td><td>${e.code}</td><td class="mut">${e.msg}</td></tr>`)}</table></div></details>` : ''}
+      <p class="note">Reaktion einstellbar unter Einstellungen → System → „Anomalie-Monitor: Reaktion“. Standard ist „nur warnen“; mit „handeln“ werden Positionen gedrosselt, neue Auto-Käufe pausiert und bei kritischen Portfolio-Fehlern der Not-Stopp ausgelöst.</p></div>
     <div class="grid2"><div class="panel"><h3 style="margin-top:0">Bot Health</h3>${core.botHealth().map(x => html`<div class="check"><span class="ic ${x.status === 'OK' ? 'pass' : x.status === 'DEGRADED' ? 'warn' : 'fail'}">${x.status}</span><div><b>${x.name}</b><small>${x.detail}</small></div></div>`)}</div>
     <div class="panel"><h3 style="margin-top:0">System Health ${h.score}/100</h3>${Object.entries(h.parts).map(([k, v]) => html`<div class="meter"><span>${k}</span>${bar(v == null ? 0 : v, v >= 80 ? 'var(--green)' : v >= 50 ? 'var(--yellow)' : 'var(--red)')}<span class="num r">${v == null ? '—' : v}</span></div>`)}
       <p class="note">Zählt nur kritische Quellen (DexScreener Pairs, RPC, Datenfrische, Fehlerrate). Optionale Quellen (GeckoTerminal, RugCheck, Discovery) senken die Health nicht, werden unten aber als DEGRADED/OFFLINE angezeigt.</p>

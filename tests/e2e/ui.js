@@ -96,6 +96,14 @@ const ok = (c, m) => { if (!c) failures++; console.log((c ? 'OK: ' : 'FAIL: ') +
   console.log('  Scanner-Spalten (Analyse):', headPro.join(' | '));
   ok(headPro.some(h => h.startsWith('Liq')) && headPro.some(h => h.startsWith('Conf')), 'Analyse-Ansicht zeigt alle Spalten');
   await page.screenshot({ path: OUT + '/d-scanner-pro.png' });
+  const pillsPro = await page.evaluate(() => [...document.querySelectorAll('#tbPills .pill')].filter(e => e.offsetParent !== null).map(e => e.textContent.trim()));
+  console.log('  Kopfzeile (Analyse):', pillsPro.join(' | '));
+  ok(['Wallet', 'Health', 'Daten', 'Risk', 'Live', 'Monitor'].every(k => pillsPro.some(p => p.startsWith(k))), 'Analyse-Ansicht: Statusleiste mit System, Daten, Wallet, Risiko, Live-Gate und Monitor');
+  ok(pillsPro.some(p => /^Live\s*gesperrt/.test(p)), 'Live-Gate wird als „gesperrt“ angezeigt');
+  await page.click('#nv-system'); await page.waitForTimeout(600);
+  const sysTxt = await page.locator('#monitorPanel').innerText();
+  ok(/Monitoring – letzte 60 Minuten/i.test(sysTxt) && /Signale \/ Stunde/i.test(sysTxt) && /Security-Blockquote/i.test(sysTxt) && /Erfolgsquote Orders/i.test(sysTxt) && /Lern-KI/i.test(sysTxt) && /Modus: nur warnen/i.test(sysTxt), 'System-Ansicht: Monitoring-Kennzahlen und Anomalie-Modus sichtbar');
+  await page.screenshot({ path: OUT + '/d-monitor-pro.png' });
 
   // Persistenz des Schalters über Reload
   await page.reload(); await page.fill('#loginUser', USER); await page.fill('#loginPass', PASS); await page.click('#loginForm button[type=submit]'); await page.waitForTimeout(3000);
