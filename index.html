@@ -467,7 +467,7 @@ pre.raw{white-space:pre-wrap;word-break:break-all;font:11px/1.4 var(--mono);back
    ===================================================================== */
 
 /* ============================== KONSTANTEN ============================== */
-const APP_VERSION = '2.10.0';
+const APP_VERSION = '2.10.1';
 /* true, wenn Version a älter als b ist (fehlende Version = sehr alt). */
 const verLt = (a, b) => { if (typeof a !== 'string') return true; const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const STRATEGY_VERSION = '1.0.0';
@@ -4185,7 +4185,7 @@ function createCore(opts) {
       { name: 'Wallet verbunden', ok: w.status === 'CONNECTED', detail: w.status === 'CONNECTED' ? `${w.provider} · ${shortAddr(w.pubkey)}` : 'nicht verbunden' },
       { name: 'Netzwerk mainnet-beta (Genesis-Hash via RPC)', ok: w.network === 'mainnet-beta' && now - w.networkAt < 10 * MIN, detail: w.network ? `${w.network} · ${fmtAge(now - w.networkAt)} alt` : 'nicht verifiziert' },
       { name: 'Balance verifiziert (RPC)', ok: w.balanceLamports != null && now - w.balanceAt < 5 * MIN, detail: w.balanceLamports != null ? lamportsToSol(BigInt(w.balanceLamports)) + ' SOL' : 'unbekannt' },
-      { name: 'Risikolimits geprüft', ok: hardErr === 0 && s.maxPositionPct <= 5 && s.dailyLossLimitPct <= 10 && s.maxExposurePct <= 30, detail: `Position ≤ 5 % (${s.maxPositionPct}), Tagesverlust ≤ 10 % (${s.dailyLossLimitPct}), Exposure ≤ 30 % (${s.maxExposurePct})` },
+      { name: 'Risikolimits geprüft (alle aktiv, kein Lernmodus)', ok: hardErr === 0 && s.maxPositionPct <= 5 && s.dailyLossLimitPct > 0 && s.dailyLossLimitPct <= 10 && s.maxExposurePct <= 30 && s.ddStopPct > 0 && s.maxOpenPositions > 0 && s.maxBuysPerCoin > 0 && s.addOnlyInProfit, detail: `Position ≤ 5 % (${s.maxPositionPct}), Tagesverlust 1–10 % (${s.dailyLossLimitPct || 'aus'}), Exposure ≤ 30 % (${s.maxExposurePct}), Drawdown-Grenze an (${s.ddStopPct || 'aus'}), Positionen begrenzt (${s.maxOpenPositions || 'aus'}), Käufe pro Coin begrenzt (${s.maxBuysPerCoin || 'aus'}), Nachkauf nur im Gewinn (${s.addOnlyInProfit ? 'an' : 'aus'})` },
       { name: 'Emergency Stop aus', ok: !state.bot.emergency, detail: state.bot.emergency ? 'aktiv' : 'aus' },
       { name: 'System Health ausreichend', ok: h.score >= s.minSystemHealth, detail: `${h.score} / min. ${s.minSystemHealth}` },
       { name: 'Kein offener Abgleich', ok: !state.reconciliation.required, detail: state.reconciliation.required ? 'RECONCILIATION REQUIRED' : 'ok' },
@@ -5531,7 +5531,10 @@ const SELF_TESTS = [
     assert(!limitHit(auto).length, 'Limit-Sperren trotz Lernmodus: ' + limitHit(auto).join(','));
     const bad = await prepToken(core, H, 8); bad.sec = buildSecurity({ exists: true, program: 'spl-token', mintAuthority: null, freezeAuthority: tMint(4), extensions: [] }, null, normRug({ score: 1, risks: [] }), H.env.now());
     const sec = await core.executeBuy(bad.id, { sizeUsd: 20 }); assert(!sec.ok && codes(sec).includes('SECURITY_CRITICAL'), 'Security-Sperre aufgehoben');
-    return '4 Verluste in Folge auf demselben Coin ohne Pause · Nachkauf im Verlust · 6 Positionen · Tageslimit/Drawdown/Overtrading aus · Security bleibt';
+    const rl = core.liveReadiness().checks.find(c => /^Risikolimits/.test(c.name)); assert(rl && !rl.ok, 'LIVE-Gate akzeptiert den Lernmodus ohne Limits');
+    core.updateSettings({ ...defaultSettings(), simCapitalUsd: core.S().simCapitalUsd, maxPositionPct: 5, maxExposurePct: 30 }, 'TEST');
+    assert(core.liveReadiness().checks.find(c => /^Risikolimits/.test(c.name)).ok, 'LIVE-Gate lehnt Standard-Limits ab');
+    return '4 Verluste in Folge auf demselben Coin ohne Pause · Nachkauf im Verlust · 6 Positionen · Tageslimit/Drawdown/Overtrading aus · Security bleibt · LIVE-Gate lehnt Lernmodus ab';
   }],
   ['Trading', 'Frischer Start: Startkapital & Positionen neu, Analysedaten bleiben', async () => {
     const H = makeTestHarness(); const core = await testCore(H);
