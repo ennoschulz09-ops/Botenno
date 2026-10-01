@@ -1,4 +1,4 @@
-const { chromium, APP_URL, USER, PASS, OUT } = require('./env.js');
+const { chromium, APP_URL, USER, PASS, OUT, seedDeterministic } = require('./env.js');
 const { route } = require('./mock.js');
 let failures = 0;
 const ok = (c, m) => { if (!c) failures++; console.log((c ? 'OK: ' : 'FAIL: ') + m); };
@@ -17,7 +17,7 @@ const ok = (c, m) => { if (!c) failures++; console.log((c ? 'OK: ' : 'FAIL: ') +
       if (data == null) return r.fulfill({ status: 404, body: 'nf' });
       r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(data) });
     });
-    await page.goto(APP_URL);
+    await page.goto(APP_URL); await seedDeterministic(page);
     await page.fill('#loginUser', USER); await page.fill('#loginPass', PASS);
     await page.click('#loginForm button[type=submit]');
     await page.waitForTimeout(7000);
@@ -102,7 +102,7 @@ const ok = (c, m) => { if (!c) failures++; console.log((c ? 'OK: ' : 'FAIL: ') +
   ok(pillsPro.some(p => /^Live\s*gesperrt/.test(p)), 'Live-Gate wird als „gesperrt“ angezeigt');
   await page.click('#nv-system'); await page.waitForTimeout(600);
   const sysTxt = await page.locator('#monitorPanel').innerText();
-  ok(/Monitoring – letzte 60 Minuten/i.test(sysTxt) && /Signale \/ Stunde/i.test(sysTxt) && /Security-Blockquote/i.test(sysTxt) && /Erfolgsquote Orders/i.test(sysTxt) && /Lern-KI/i.test(sysTxt) && /Modus: nur warnen/i.test(sysTxt), 'System-Ansicht: Monitoring-Kennzahlen und Anomalie-Modus sichtbar');
+  ok(/Monitoring – letzte 60 Minuten/i.test(sysTxt) && /Signale \/ Stunde/i.test(sysTxt) && /Security-Blockquote/i.test(sysTxt) && /Erfolgsquote Orders/i.test(sysTxt) && /Lern-KI/i.test(sysTxt) && /Modus: nur warnen/i.test(sysTxt) && /Ausführung \(ehrliche Simulation\)/i.test(sysTxt) && /Priority Fee/i.test(sysTxt), 'System-Ansicht: Monitoring-Kennzahlen, Ausführung und Anomalie-Modus sichtbar');
   await page.screenshot({ path: OUT + '/d-monitor-pro.png' });
 
   // Persistenz des Schalters über Reload

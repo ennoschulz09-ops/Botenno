@@ -467,7 +467,7 @@ pre.raw{white-space:pre-wrap;word-break:break-all;font:11px/1.4 var(--mono);back
    ===================================================================== */
 
 /* ============================== KONSTANTEN ============================== */
-const APP_VERSION = '2.10.1';
+const APP_VERSION = '2.11.0';
 /* true, wenn Version a älter als b ist (fehlende Version = sehr alt). */
 const verLt = (a, b) => { if (typeof a !== 'string') return true; const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const STRATEGY_VERSION = '1.0.0';
@@ -490,6 +490,15 @@ const DEX_API = 'https://api.dexscreener.com';
 const GT_API = 'https://api.geckoterminal.com/api/v2';
 const RUG_API = 'https://api.rugcheck.xyz/v1';
 const GT_HEADERS = { Accept: 'application/json;version=20230302' };
+/* Stufe B: echte Kursangebote über die Jupiter Quote API – nur Abfrage (GET /quote), nie /swap, nie Signatur. */
+const JUP_API_FREE = 'https://lite-api.jup.ag/swap/v1';   // kostenloser Zugang ohne Key (Rate-Limit)
+const JUP_API_KEYED = 'https://api.jup.ag/swap/v1';       // mit eigenem API-Key (Header x-api-key)
+const JUP_NO_ROUTE = new Set(['COULD_NOT_FIND_ANY_ROUTE', 'NO_ROUTES_FOUND', 'TOKEN_NOT_TRADABLE', 'ROUTE_PLAN_DOES_NOT_CONSUME_ALL_THE_AMOUNT', 'MARKET_NOT_FOUND']);
+const SWAP_CU = 300000;                  // geschätzte Compute Units eines Jupiter-Swaps (µLamports/CU → Lamports)
+const PRIO_FEE_MAX_LAMPORTS = 10000000;  // Obergrenze der automatischen Priority-Fee-Schätzung (0,01 SOL)
+const QUOTE_CHECK_TTL = 5 * MIN;         // so lange gilt ein Honeypot-/Rundreise-Befund für einen Coin
+const NO_ROUTE_WRITEOFF_MIN = 30;        // so lange ohne Verkaufsweg → Position wird als Totalverlust abgeschrieben
+const SELL_RETRY_MS = 20 * SEC;          // Wartezeit nach gescheitertem Verkaufsangebot
 const PYRAMID_MIN_PNL_PCT = 10;     // Buy #2 nur bei Gewinn (kein Averaging Down / Martingale)
 const MIN_ORDER_USD = 5;
 
@@ -765,7 +774,15 @@ const SETTINGS_SCHEMA = [
   // Ausführung
   { k: 'maxSlippagePct', s: 'Ausführung', l: 'Max. Slippage / Price Impact (100 = praktisch aus)', t: 'num', def: 3, min: 0.1, max: 100, u: '%' },
   { k: 'dexFeePct', s: 'Ausführung', l: 'DEX-Gebühr (Schätzung)', t: 'num', def: 0.25, min: 0, max: 5, step: 0.01, u: '%' },
-  { k: 'priorityFeeLamports', s: 'Ausführung', l: 'Priority Fee', t: 'int', def: 100000, min: 0, max: 100000000, u: 'lamports' },
+  { k: 'priorityFeeLamports', s: 'Ausführung', l: 'Priority Fee (fester Wert bzw. Mindestwert bei „automatisch“)', t: 'int', def: 100000, min: 0, max: 100000000, u: 'lamports' },
+  { k: 'priorityFeeMode', s: 'Ausführung', l: 'Priority Fee ermitteln', t: 'select', def: 'auto', opts: [['auto', 'automatisch aus aktuellen Netzwerkgebühren (Solana RPC)'], ['fixed', 'fester Wert']] },
+  { k: 'realQuotes', s: 'Ausführung', l: 'Echte Kursangebote (Jupiter) für Kauf und Verkauf abfragen – nur Abfrage, wird nie ausgeführt', t: 'bool', def: true },
+  { k: 'jupApiKey', s: 'Ausführung', l: 'Jupiter API-Key (optional, leer = kostenloser Zugang)', t: 'text', def: '', secret: true },
+  { k: 'quoteFallback', s: 'Ausführung', l: 'Ohne Jupiter-Angebot mit AMM-Schätzung weiter simulieren (als „geschätzt“ markiert)', t: 'bool', def: true },
+  { k: 'honeypotBlock', s: 'Ausführung', l: 'Kauf verhindern, wenn es keinen Verkaufsweg gibt (Honeypot-Verdacht)', t: 'bool', def: true },
+  { k: 'maxRoundTripLossPct', s: 'Ausführung', l: 'Max. Verlust bei Kauf und sofortigem Verkauf – Gebühren, Price Impact, Steuer (0 = aus)', t: 'num', def: 15, min: 0, max: 100, u: '%' },
+  { k: 'simLatencyMs', s: 'Ausführung', l: 'Ausführungszeit: Füllung zum Preis nach dieser Wartezeit (0 = sofort)', t: 'int', def: 1500, min: 0, max: 30000, u: 'ms' },
+  { k: 'simTxFailPct', s: 'Ausführung', l: 'Anteil gescheiterter Transaktionen – Netzwerkgebühr fällt trotzdem an (0 = aus)', t: 'num', def: 5, min: 0, max: 50, u: '%' },
   { k: 'snapshotMaxAgeSec', s: 'Ausführung', l: 'Max. Datenalter beim Pre-Trade-Check', t: 'int', def: 5, min: 2, max: 30, u: 's' },
   { k: 'maxActiveOrders', s: 'Ausführung', l: 'Max. gleichzeitige Orders', t: 'int', def: 1, min: 1, max: 20 },
   // Exits
@@ -822,7 +839,7 @@ const PROFILES = {
   Ausgewogen: { minLiq: 10000, minVol1h: 20000, minMcap: 50000, maxMcap: 5000000, minBuyRatio: 0.55, minScore: 65, maxRiskScore: 60, minConfidence: 60, maxPositionPct: 5, maxExposurePct: 30 },
   Aggressiv: { minLiq: 5000, minVol1h: 10000, minMcap: 20000, maxMcap: 5000000, minBuyRatio: 0.5, minScore: 60, maxRiskScore: 70, minConfidence: 55, maxPositionPct: 5, maxExposurePct: 40 },
   /* Lernmodus: alle Pausen und Risiko-Limits aus, damit durchgehend gehandelt und gelernt wird. Kauf-Filter bleiben unverändert. */
-  'Lernmodus (ohne Limits)': { dailyLossLimitPct: 0, ddStopPct: 0, ddReducePct: 0, lossCooldownMin: 0, globalPauseMin: 0, lossStreakLimit: 0, sellCooldownMin: 0, maxBuysPerCoin: 0, addOnlyInProfit: false, maxTradesPerHour: 0, maxOpenPositions: 0, maxExposurePct: 100, correlationLimit: 0, signalConflictBlock: false, strategyCooldowns: false, lowQualityMarketBlock: false, minPairAgeMin: 0, maxActiveOrders: 20, autoSafeMode: false, anomalyMode: 'warn' }
+  'Lernmodus (ohne Limits)': { dailyLossLimitPct: 0, ddStopPct: 0, ddReducePct: 0, lossCooldownMin: 0, globalPauseMin: 0, lossStreakLimit: 0, sellCooldownMin: 0, maxBuysPerCoin: 0, addOnlyInProfit: false, maxTradesPerHour: 0, maxOpenPositions: 0, maxExposurePct: 100, correlationLimit: 0, signalConflictBlock: false, strategyCooldowns: false, lowQualityMarketBlock: false, minPairAgeMin: 0, maxActiveOrders: 20, autoSafeMode: false, anomalyMode: 'warn', maxRoundTripLossPct: 0 }
 };
 
 function coerceSetting(d, v) {
@@ -835,6 +852,7 @@ function coerceSetting(d, v) {
       if (!list.length || list.length > 4 || list.some(u => !safeUrl(u))) return undefined;
       return list.join(', ');
     }
+    if (d.k === 'jupApiKey') { const k = v.trim(); return /^[\w.-]{0,200}$/.test(k) ? k : undefined; }
     return v.slice(0, 500);
   }
   const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
@@ -1109,7 +1127,8 @@ function createHttp(env, log) {
         const err = httpError('HTTP_429', `${s.cfg.label}: Rate Limit (HTTP 429)`);
         onFail(s, err.message, ms, { rateLimited: true, retryAfterMs: ra ? ra * 1000 : 0 }); throw err;
       }
-      if (!res.ok) {
+      const okStatus = !res.ok && Array.isArray(opts.okStatuses) && opts.okStatuses.includes(res.status); // Fachfehler mit JSON-Antwort (z. B. „keine Route“) – kein Quellenfehler
+      if (!res.ok && !okStatus) {
         const err = httpError('HTTP_' + res.status, `${s.cfg.label}: HTTP ${res.status}${res.status >= 500 ? ' (Serverfehler)' : ''}`);
         onFail(s, err.message, ms); throw err;
       }
@@ -1124,7 +1143,7 @@ function createHttp(env, log) {
       onSuccess(s, ms);
       if (opts.keepRaw) s.lastRaw = { ts: env.now(), url: opts.maskInLog ? maskUrl(url) : url, sample: text.slice(0, 4000) };
       if (opts.cacheMs) { cache.set(key, { ts: startedAt, data, rid }); if (cache.size > 300) cache.delete(cache.keys().next().value); }
-      return { data, cached: false, fetchedAt: startedAt, requestId: rid, ms };
+      return { data, cached: false, fetchedAt: startedAt, requestId: rid, ms, status: res.status };
     })();
     inflight.set(key, p);
     p.then(() => inflight.delete(key), () => inflight.delete(key));
@@ -1379,6 +1398,9 @@ const BLOCKER_DEFS = {
   DUPLICATE_ORDER: [7, 'EXECUTION', 'Doppelte Order verhindert'],
   MAX_ACTIVE_ORDERS: [7, 'EXECUTION', 'Max. gleichzeitige Orders'],
   SLIPPAGE_TOO_HIGH: [7, 'EXECUTION', 'Slippage/Price Impact zu hoch'],
+  NO_SELL_ROUTE: [3, 'SECURITY', 'Kein Verkaufsweg (Honeypot-Verdacht)'],
+  NO_ROUTE: [7, 'EXECUTION', 'Kein Handelsweg (Jupiter)'],
+  ROUND_TRIP_COST: [7, 'EXECUTION', 'Kauf + sofortiger Verkauf zu teuer (Gebühren/Impact/Steuer)'],
   SIZE_ZERO: [7, 'EXECUTION', 'Positionsgröße 0'],
   INSUFFICIENT_CASH: [7, 'EXECUTION', 'Nicht genug (virtuelles) Kapital'],
   MCAP_RANGE: [8, 'STRATEGY', 'MC (Market Cap) außerhalb Bereich'],
@@ -1827,6 +1849,8 @@ function decideToken(tok, A, ctx) {
       if (blk) add('LEARNED_RULE', `Gelernt: Strategie ${blk.split('|')[0]} im Regime ${blk.split('|')[1]} gesperrt`);
       if (R.volumeConfirmPct > 0 && A.signals.some(x => x.type === 'VOLUME_EXPANSION') && isNum(A.price.chg.m5) && A.price.chg.m5 < R.volumeConfirmPct) add('LEARNED_RULE', `Gelernt: Volume-Signal ohne Preisbestätigung (5m ${fmtPct(A.price.chg.m5)} < +${R.volumeConfirmPct} %)`);
       if (R.blockPostPump && ['PUMP', 'POST_PUMP'].includes(pumpStateOf({ pump: A.pump.detected, chg1h: A.price.chg.h1, chg5m: A.price.chg.m5 }))) add('LEARNED_RULE', 'Gelernt: kein Einstieg direkt nach Pump');
+      const disc = discoveryOf(tok).primary;
+      if (arr(R.blockDisc).includes(disc)) add('LEARNED_RULE', `Gelernt: Coins aus Quelle ${DISC_DE[disc]} meiden`);
     }
     return `Score ${A.finalScore}, Konsens ${strat.weightSum} (${strat.votes.filter(x => x.enabled && x.vote === 'BUY').map(x => x.name).join(', ')})`;
   });
@@ -2163,7 +2187,7 @@ const PARAM_TABLE_KEYS = ['minScore', 'minConfidence', 'minLiq', 'minPairAgeMin'
 const PARAM_SOURCE = { USER: 'USER', LEARNING: 'LEARNED', LEARNING_ROLLBACK: 'ROLLBACK', USER_ROLLBACK: 'ROLLBACK', AUTO_ROLLBACK: 'ROLLBACK', AUTO_TUNING: 'AUTO_TUNING', MIGRATION: 'MIGRATION', IMPORT: 'IMPORT', TEST: 'TEST' };
 const PARAM_SOURCE_DE = { DEFAULT: 'Standardwert', USER: 'manuell geändert', LEARNED: 'von der Lern-KI übernommen', ROLLBACK: 'Rollback', AUTO_TUNING: 'altes Auto-Tuning (vor 2.7.0, ohne Out-of-Sample-Nachweis)', MIGRATION: 'beim Laden auf harte Grenze angehoben', IMPORT: 'aus Einstellungs-Import', TEST: 'Selbsttest', UNTRACKED: 'geändert vor Beginn des Änderungsprotokolls' };
 const LEARN_CAPS = { records: 200, samplesKeep: 120, patterns: 300, obs: 20, falseSignals: 150, lessons: 80, timeline: 200, experiments: 60, hypotheses: 80, queue: 40, reviews: 20, versions: 30, nearMiss: 200, nearMissOpen: 40 };
-const emptyRules = () => ({ blocks: [], regimeScoreBump: {}, volumeConfirmPct: 0, blockPostPump: false });
+const emptyRules = () => ({ blocks: [], regimeScoreBump: {}, volumeConfirmPct: 0, blockPostPump: false, blockDisc: [] });
 
 /* ---- Statistik-Helfer (deterministisch) ---- */
 const lr2 = v => (isNum(v) ? Math.round(v * 100) / 100 : null);
@@ -2190,10 +2214,30 @@ const liqBucket = v => (!isNum(v) ? 'UNKNOWN' : v < 20000 ? '<20k' : v < 75000 ?
 const volBucket = v => (!isNum(v) ? 'UNKNOWN' : v < 1 ? 'LOW' : v < 3 ? 'MID' : 'HIGH');
 function pumpStateOf(f) { if (f.pump) return 'PUMP'; if (isNum(f.chg1h) && f.chg1h >= 50 && isNum(f.chg5m) && f.chg5m < 0) return 'POST_PUMP'; return isNum(f.chg1h) ? 'NORMAL' : 'UNKNOWN'; }
 const FEATURE_REQ = ['price', 'liquidity', 'vol1h', 'buyerRatio1h', 'chg5m', 'chg1h', 'volPct', 'rsi', 'top10Pct', 'pairAgeMin', 'finalScore', 'confidence'];
+/* Herkunft eines Coins (Discovery-Quelle) als Lernmerkmal (B3). Primär = die Quelle, über die der Coin zuerst gefunden wurde. */
+const DISC_DE = { BOOST: 'DexScreener Boost (bezahlt)', TOP_BOOST: 'DexScreener Top-Boost (bezahlt)', PROFILE: 'DexScreener Profil (bezahlt)', NEW_POOL: 'GeckoTerminal neue Pools', TRENDING: 'GeckoTerminal Trending', WATCHLIST: 'Watchlist (manuell)', POSITION: 'aus offener Position', OTHER: 'sonstige', UNKNOWN: 'unbekannt' };
+const DISC_PAID = new Set(['BOOST', 'TOP_BOOST', 'PROFILE']);
+const DISC_BLOCKABLE = new Set(['BOOST', 'TOP_BOOST', 'PROFILE', 'NEW_POOL', 'TRENDING']); // nur automatische Quellen darf die Lern-KI sperren
+function discCodeOf(via) {
+  const v = String(via || '');
+  if (!v) return 'UNKNOWN';
+  if (/Top-Boost/.test(v)) return 'TOP_BOOST';
+  if (/Boost/.test(v)) return 'BOOST';
+  if (/Profile/.test(v)) return 'PROFILE';
+  if (/GeckoTerminal New/.test(v)) return 'NEW_POOL';
+  if (/Trending/.test(v)) return 'TRENDING';
+  if (/Watchlist/.test(v)) return 'WATCHLIST';
+  if (/Position/.test(v)) return 'POSITION';
+  return 'OTHER';
+}
+function discoveryOf(t) {
+  const meta = (t && t.meta) || {}, via = arr(meta.via), all = [...new Set(via.map(discCodeOf))];
+  return { primary: via.length ? discCodeOf(via[0]) : 'UNKNOWN', all, paid: all.some(c => DISC_PAID.has(c)), boostTotal: isNum(meta.boostTotal) ? meta.boostTotal : null };
+}
 
 /* 1) Trade Feature Builder – ausschließlich Werte zum Entscheidungszeitpunkt (kein Look-Ahead). */
 function buildEntryFeatures(t, A, D, regimeTags, now) {
-  const tx = A.tx || {}, ta = A.ta || null, sec = A.sec || {}, ts = (t && t.sec) || {}, strat = A.strat || { votes: [], weightSum: 0, lead: null }, px = A.core.price;
+  const tx = A.tx || {}, ta = A.ta || null, sec = A.sec || {}, ts = (t && t.sec) || {}, strat = A.strat || { votes: [], weightSum: 0, lead: null }, px = A.core.price, dsc = discoveryOf(t);
   const f = {
     v: FEATURE_VERSION, ts: isNum(A.ts) ? A.ts : now, source: A.core.source || null, label: A.label || null, dataAgeMs: isNum(A.dataAge) ? Math.round(A.dataAge) : null,
     finalScore: A.finalScore, opportunity: A.opportunity, confidence: A.confidence ? A.confidence.total : null, risk: A.risk ? A.risk.total : null, riskLevel: A.risk ? A.risk.level : null,
@@ -2208,7 +2252,8 @@ function buildEntryFeatures(t, A, D, regimeTags, now) {
     pump: !!(A.pump && A.pump.detected), pumpFlags: A.pump ? A.pump.flags.length : 0,
     signals: (A.signals || []).map(s => ({ type: s.type, strength: s.strength })), sigMax: (A.signals || []).length ? Math.max(...A.signals.map(s => s.strength)) : 0,
     lead: strat.lead || null, weightSum: strat.weightSum, votes: (strat.votes || []).filter(v => v.vote === 'BUY').map(v => v.id), stage: D ? D.stageReached : null, blockerCount: D ? D.analysisBlockers.length : null,
-    regime: [...(regimeTags || [])]
+    regime: [...(regimeTags || [])],
+    disc: dsc.primary, discAll: dsc.all, discPaid: dsc.paid, boostTotal: dsc.boostTotal
   };
   f.pumpState = pumpStateOf(f);
   f.missing = FEATURE_REQ.filter(k => !isNum(f[k]));
@@ -2228,7 +2273,8 @@ function featuresFromJournal(j) {
     secStatus: d.security ? d.security.status : 'UNKNOWN', secStale: false, secAgeMs: null, mintAuthority: null, freezeAuthority: null, top10Pct: d.security && isNum(d.security.top10Pct) ? d.security.top10Pct : null,
     conflicts: 0, fallback: false, labels: d.dataQuality || null, pump: !!(d.pump && d.pump.detected), pumpFlags: d.pump && d.pump.flags ? d.pump.flags.length : 0,
     signals: arr(j.signals).map(s => ({ type: s.type, strength: s.strength })), sigMax: arr(j.signals).length ? Math.max(...arr(j.signals).map(s => s.strength || 0)) : 0,
-    lead: j.strategy || null, weightSum: null, votes: [], stage: null, blockerCount: null, regime: [...arr(j.regime)]
+    lead: j.strategy || null, weightSum: null, votes: [], stage: null, blockerCount: null, regime: [...arr(j.regime)],
+    disc: j.discovery || 'UNKNOWN', discAll: j.discovery ? [j.discovery] : [], discPaid: j.discovery ? DISC_PAID.has(j.discovery) : null, boostTotal: null
   };
   f.pumpState = pumpStateOf(f);
   f.missing = FEATURE_REQ.filter(k => !isNum(f[k]));
@@ -2292,6 +2338,7 @@ function attributeLoss(rec, ctx) {
   if (f.secStatus && f.secStatus !== 'VERIFIED') set('SECURITY_RELATED', f.secStatus === 'CRITICAL' ? 95 : f.secStatus === 'PARTIAL' ? 45 : 60, `Security beim Einstieg: ${f.secStatus}`);
   if (f.secStale) set('SECURITY_RELATED', 55, 'Security-Daten beim Einstieg veraltet');
   if (rec.exit && rec.exit.reason === 'RISK_INCREASE') set('SECURITY_RELATED', 70, 'Exit wegen gestiegenem Risiko / Security');
+  if (rec.exit && rec.exit.reason === 'NO_SELL_ROUTE') set('SECURITY_RELATED', 95, 'Kein Verkaufsweg mehr (Honeypot oder Liquidität entzogen) – Totalverlust');
   const cost = (x.feesUsd || 0) + (x.slippageUsd || 0);
   if (isNum(o.pnlUsd) && o.pnlUsd < 0 && cost > 0) { const share = cost / Math.abs(o.pnlUsd); if (share >= 0.3) set('EXECUTION', 40 + Math.min(55, share * 60), `Fees + Slippage (${fmtUsd(cost, 3)}) = ${(share * 100).toFixed(0)} % des Verlusts`); }
   if (isNum(x.estimatedImpactPct) && isNum(S.maxSlippagePct) && x.estimatedImpactPct > S.maxSlippagePct * 0.7) set('EXECUTION', 60, `Price Impact ${x.estimatedImpactPct.toFixed(2)} % nahe am Limit`);
@@ -2410,10 +2457,11 @@ const PATTERN_DIMS = {
   signals: { entry: true, f: r => [arr(r.entry && r.entry.signals).filter(s => s.strength >= 50).map(s => s.type).sort().slice(0, 2).join('+') || 'NONE'] },
   sec: { entry: true, f: r => [(r.entry && r.entry.secStatus) || 'UNKNOWN'] },
   pump: { entry: true, f: r => [(r.entry && r.entry.pumpState) || 'UNKNOWN'] },
+  disc: { entry: true, f: r => [(r.entry && r.entry.disc) || 'UNKNOWN'] },
   exit: { entry: false, f: r => [(r.exit && r.exit.reason) || 'UNKNOWN'] }
 };
 const PATTERN_COMBOS = [['strategy'], ['regime'], ['score'], ['conf'], ['risk'], ['liq'], ['age'], ['vol'], ['signals'], ['sec'], ['pump'], ['exit'],
-  ['strategy', 'regime'], ['strategy', 'score'], ['strategy', 'vol'], ['regime', 'score'], ['vol', 'score'], ['signals', 'vol'], ['signals', 'regime'], ['liq', 'age'], ['sec', 'score'], ['strategy', 'exit']];
+  ['strategy', 'regime'], ['strategy', 'score'], ['strategy', 'vol'], ['regime', 'score'], ['vol', 'score'], ['signals', 'vol'], ['signals', 'regime'], ['liq', 'age'], ['sec', 'score'], ['strategy', 'exit'], ['disc'], ['disc', 'score'], ['disc', 'age']];
 function patternKeysOf(rec) {
   const out = [];
   for (const combo of PATTERN_COMBOS) {
@@ -2465,7 +2513,8 @@ const HYP_DEF = {
   BLOCK_POST_PUMP: { title: () => 'Keine Einstiege direkt im/nach Pump', test: 'Post-Pump vs. Normal Kohorte OOS' },
   MIN_PAIR_AGE: { title: c => `Pairs erst ab ${c.minPairAgeMin} min Alter`, test: 'Token-Alter-Kohorten OOS' },
   TRAIL_TIGHTER: { title: c => `Trailing-Abstand auf ${c.trailPct} % verringern`, test: 'MFE-Giveback-Analyse + Exit-Resimulation OOS' },
-  STOP_WIDER: { title: c => `Stop-Loss auf ${c.stopLossPct} % erweitern`, test: 'Exit-too-early-Analyse + Exit-Resimulation OOS' }
+  STOP_WIDER: { title: c => `Stop-Loss auf ${c.stopLossPct} % erweitern`, test: 'Exit-too-early-Analyse + Exit-Resimulation OOS' },
+  BLOCK_DISC: { title: c => `Coins aus Quelle ${DISC_DE[c.rules.blockDisc[0]] || c.rules.blockDisc[0]} meiden`, test: 'Quellen-Kohorten zeitlich getrennt (OOS) vergleichen' }
 };
 function hypothesisOf(type, change, source, now) {
   const key = type + ':' + JSON.stringify(change);
@@ -2485,6 +2534,7 @@ function generateHypotheses(stats, famStats, base, P, now) {
     if (keys.length === 1 && d.pump && ['PUMP', 'POST_PUMP'].includes(d.pump) && !P.rules.blockPostPump) push('BLOCK_POST_PUMP', { rules: { blockPostPump: true } }, src);
     if (keys.length === 1 && d.age === 'NEW' && P.minPairAgeMin < 60) push('MIN_PAIR_AGE', { minPairAgeMin: 60 }, src);
     if (keys.length === 1 && d.signals && d.signals.includes('VOLUME_EXPANSION') && !(P.rules.volumeConfirmPct > 0)) push('VOLUME_CONFIRM', { rules: { volumeConfirmPct: 2 } }, src);
+    if (keys.length === 1 && d.disc && DISC_BLOCKABLE.has(d.disc) && !arr(P.rules.blockDisc).includes(d.disc)) push('BLOCK_DISC', { rules: { blockDisc: [d.disc] } }, src);
     if (keys.length === 2 && d.strategy && d.regime && d.strategy !== 'manuell' && d.regime !== 'UNKNOWN' && !P.rules.blocks.includes(d.strategy + '|' + d.regime)) push('BLOCK_STRAT_REGIME', { rules: { blocks: [d.strategy + '|' + d.regime] } }, src);
     if (keys.length === 2 && d.regime && d.score && bucketHi[d.score] && d.regime !== 'UNKNOWN') { const bump = clamp(bucketHi[d.score] - P.minScore, 5, LEARN_BOUNDS.regimeScoreBump[1]); if (bump > (P.rules.regimeScoreBump[d.regime] || 0)) push('REGIME_SCORE_BUMP', { rules: { regimeScoreBump: { [d.regime]: bump } } }, src); }
   }
@@ -2498,7 +2548,7 @@ function generateHypotheses(stats, famStats, base, P, now) {
 
 /* 8) Research Runner – Parameter-Wiedergabe auf historischen Records (nur verschärfende Einstiegsfilter, Exit-Resimulation). */
 function mergeParams(base, ch) {
-  const P = { ...base, rules: { blocks: [...base.rules.blocks], regimeScoreBump: { ...base.rules.regimeScoreBump }, volumeConfirmPct: base.rules.volumeConfirmPct || 0, blockPostPump: !!base.rules.blockPostPump } };
+  const P = { ...base, rules: { blocks: [...base.rules.blocks], regimeScoreBump: { ...base.rules.regimeScoreBump }, volumeConfirmPct: base.rules.volumeConfirmPct || 0, blockPostPump: !!base.rules.blockPostPump, blockDisc: arr(base.rules.blockDisc).filter(c => DISC_BLOCKABLE.has(c)) } };
   for (const k of LEARN_SETTING_KEYS) if (ch[k] !== undefined) P[k] = k === 'requireVerifiedSecurity' ? !!ch[k] || !!base[k] : clamp(ch[k], ...LEARN_BOUNDS[k]);
   // Einstiegsfilter nur verschärfen (nie lockern)
   for (const k of ['minScore', 'minConfidence', 'minLiq', 'minPairAgeMin']) if (isNum(base[k])) P[k] = Math.max(P[k], base[k]);
@@ -2507,6 +2557,7 @@ function mergeParams(base, ch) {
   for (const [t, v] of Object.entries(r.regimeScoreBump || {})) P.rules.regimeScoreBump[t] = Math.max(P.rules.regimeScoreBump[t] || 0, clamp(v, ...LEARN_BOUNDS.regimeScoreBump));
   if (isNum(r.volumeConfirmPct)) P.rules.volumeConfirmPct = Math.max(P.rules.volumeConfirmPct, clamp(r.volumeConfirmPct, ...LEARN_BOUNDS.volumeConfirmPct));
   if (r.blockPostPump) P.rules.blockPostPump = true;
+  for (const c of arr(r.blockDisc)) if (DISC_BLOCKABLE.has(c) && !P.rules.blockDisc.includes(c)) P.rules.blockDisc.push(c);
   return P;
 }
 const maxBump = (rules, tags) => Math.max(0, ...arr(tags).map(t => (rules && rules.regimeScoreBump && rules.regimeScoreBump[t]) || 0));
@@ -2520,6 +2571,7 @@ function passesParams(rec, P) {
   if (arr(R.blocks).some(b => { const [s, t] = b.split('|'); return s === strat && arr(rec.regimeTags).includes(t); })) return false;
   if (R.volumeConfirmPct > 0 && arr(f.signals).some(s => s.type === 'VOLUME_EXPANSION') && isNum(f.chg5m) && f.chg5m < R.volumeConfirmPct) return false;
   if (R.blockPostPump && ['PUMP', 'POST_PUMP'].includes(f.pumpState)) return false;
+  if (arr(R.blockDisc).includes(f.disc)) return false;
   return true;
 }
 const exitDiffers = (a, b) => a.stopLossPct !== b.stopLossPct || a.trailPct !== b.trailPct;
@@ -2739,11 +2791,28 @@ function errorClassStats(recs) {
   return { n, classes, verdicts };
 }
 
+/* 11b2) Coin-Quellen (B3) – Ergebnis je primärer Discovery-Quelle: abgeschlossene Trades + ausgewertete Near-Misses. */
+const DISC_MIN_N = 8;
+function discoveryStats(recs, nmDone) {
+  const by = {}, grp = c => by[c] || (by[c] = { disc: c, n: 0, wins: 0, sumPct: 0, sumUsd: 0, nm: 0, nmMissed: 0, nmAvoided: 0 });
+  const done = arr(recs).filter(r => r && r.outcome && isNum(r.outcome.pnlPct));
+  for (const r of done) { const x = grp((r.entry && r.entry.disc) || 'UNKNOWN'); x.n++; if (r.outcome.win) x.wins++; x.sumPct += r.outcome.pnlPct; x.sumUsd += isNum(r.outcome.pnlUsd) ? r.outcome.pnlUsd : 0; }
+  for (const m of arr(nmDone)) { if (!m || m.outcome === 'NO_DATA') continue; const x = grp(m.disc || 'UNKNOWN'); x.nm++; if (m.outcome === 'MISSED_GAIN') x.nmMissed++; else if (m.outcome === 'AVOIDED_LOSS') x.nmAvoided++; }
+  const basePct = done.length ? avg(done.map(r => r.outcome.pnlPct)) : null;
+  const rows = Object.values(by).map(x => {
+    const avgPct = x.n ? x.sumPct / x.n : null;
+    const verdict = x.n < DISC_MIN_N || basePct == null ? 'NOT_ENOUGH_DATA' : avgPct < basePct - 2 ? 'WORSE' : avgPct > basePct + 2 ? 'BETTER' : 'AVERAGE';
+    return { disc: x.disc, paid: DISC_PAID.has(x.disc), n: x.n, winRate: x.n ? lr2(x.wins / x.n) : null, avgPct: lr2(avgPct), netUsd: lr2(x.sumUsd), nm: x.nm, nmMissed: x.nmMissed, nmAvoided: x.nmAvoided, verdict };
+  }).sort((a, b) => b.n - a.n || b.nm - a.nm || (a.disc < b.disc ? -1 : 1));
+  return { n: done.length, basePct: lr2(basePct), rows };
+}
+
 /* 11c) Near-Misses – knapp nicht gehandelte Kandidaten 15 min beobachten: Opportunity Cost vs. vermiedener Verlust je Filter.
    Reine Messung: Filter werden daraus nie automatisch gelockert (die Lern-KI darf ausschließlich verschärfen). */
 const NEAR_MISS_WINDOW = 15 * MIN, NEAR_MISS_MIN_N = 10;
 const NM_SKIP = new Set(['NO_SIGNAL', 'PRICE_MISSING', 'DATA_STALE', 'DATA_CONFLICT', 'DATA_FALLBACK', 'MCAP_RANGE', 'SECURITY_CRITICAL', 'SECURITY_UNKNOWN', 'SECURITY_STALE', 'SECURITY_UNVERIFIED']);
-const NM_SYSTEM = new Set(['AUTO_TRADING_OFF', 'PAPER_MANUAL', 'RECOVERING', 'BOT_NOT_RUNNING', 'MODE_READ_ONLY', 'LIVE_UNAVAILABLE', 'OFFLINE', 'SYSTEM_UNHEALTHY', 'FEE_UNKNOWN', 'EMERGENCY_STOP', 'SAFE_MODE', 'RECONCILIATION_REQUIRED', 'SECURITY_SOURCES_DOWN', 'TRADE_LOCKED', 'MAX_ACTIVE_ORDERS']);
+const NM_SYSTEM = new Set(['AUTO_TRADING_OFF', 'PAPER_MANUAL', 'RECOVERING', 'BOT_NOT_RUNNING', 'MODE_READ_ONLY', 'LIVE_UNAVAILABLE', 'OFFLINE', 'SYSTEM_UNHEALTHY', 'FEE_UNKNOWN', 'EMERGENCY_STOP', 'SAFE_MODE', 'RECONCILIATION_REQUIRED', 'SECURITY_SOURCES_DOWN', 'TRADE_LOCKED', 'MAX_ACTIVE_ORDERS',
+  'NO_SELL_ROUTE', 'ROUND_TRIP_COST', 'NO_ROUTE']); // Honeypot/Rundreise: der Preispfad zeigt keinen erzielbaren Gewinn (Verkauf unmöglich bzw. Kosten ignoriert)
 const NM_OUTCOME_DE = { MISSED_GAIN: 'verpasster Gewinn', AVOIDED_LOSS: 'vermiedener Verlust', NEUTRAL: 'neutral', NO_DATA: 'keine Daten' };
 function nearMissOf(A, D, S) {
   if (!A || !D || !A.core || !isNum(A.core.price) || !(A.core.price > 0) || D.decision === 'APPROVED') return null;
@@ -2800,6 +2869,7 @@ function sanitizeRules(r) {
   if (r.regimeScoreBump && typeof r.regimeScoreBump === 'object') for (const [t, v] of Object.entries(r.regimeScoreBump)) if (/^[A-Z_]{2,40}$/.test(t) && isNum(v)) o.regimeScoreBump[t] = clamp(Math.round(v), ...LEARN_BOUNDS.regimeScoreBump);
   o.volumeConfirmPct = isNum(r.volumeConfirmPct) ? clamp(r.volumeConfirmPct, ...LEARN_BOUNDS.volumeConfirmPct) : 0;
   o.blockPostPump = r.blockPostPump === true;
+  o.blockDisc = [...new Set(arr(r.blockDisc).filter(c => DISC_BLOCKABLE.has(c)))];
   return o;
 }
 const objs = (a, max, ok = () => true) => arr(a).filter(x => x && typeof x === 'object' && ok(x)).slice(0, max);
@@ -2861,7 +2931,7 @@ const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'REJECTED']);
 const POSITION_TRANSITIONS = { PLANNED: ['PENDING', 'FAILED'], PENDING: ['OPEN', 'FAILED'], OPEN: ['CLOSING', 'UNKNOWN'], PARTIAL: ['CLOSING', 'UNKNOWN'], CLOSING: ['OPEN', 'PARTIAL', 'CLOSED', 'UNKNOWN'], CLOSED: ['RECONCILED', 'UNKNOWN'], RECONCILED: [], UNKNOWN: ['OPEN', 'PARTIAL', 'CLOSED'], FAILED: [] };
 const POS_LC_DE = { PLANNED: 'geplant', PENDING: 'Order läuft', OPEN: 'offen', PARTIAL: 'teilverkauft', CLOSING: 'wird verkauft', CLOSED: 'geschlossen', RECONCILED: 'abgeglichen', UNKNOWN: 'unklar – Abgleich nötig', FAILED: 'fehlgeschlagen' };
 /* Fehlercodes der Ausführung (auditierbar in jeder Order) */
-const EXEC_FAIL = { PRE_TRADE_BLOCKED: 'Pre-Trade-Prüfung hat blockiert', NO_ROUTER: 'Kein Swap-/Routing-Provider (LIVE nicht verfügbar)', QUOTE_FAILED: 'Kein gültiges Angebot (Preis/Liquidität/Gebühren)', PREFLIGHT_FAILED: 'Preflight fehlgeschlagen', SIGNATURE_DISABLED: 'Signieren deaktiviert', SEND_FAILED: 'Senden fehlgeschlagen', CONFIRM_FAILED: 'Bestätigung fehlgeschlagen', EMERGENCY_STOP: 'Emergency Stop während der Ausführung', INTERNAL: 'Interner Fehler' };
+const EXEC_FAIL = { PRE_TRADE_BLOCKED: 'Pre-Trade-Prüfung hat blockiert', NO_ROUTER: 'Kein Swap-/Routing-Provider (LIVE nicht verfügbar)', QUOTE_FAILED: 'Kein gültiges Angebot (Preis/Liquidität/Gebühren)', PREFLIGHT_FAILED: 'Preflight fehlgeschlagen', SIGNATURE_DISABLED: 'Signieren deaktiviert', SEND_FAILED: 'Senden fehlgeschlagen', CONFIRM_FAILED: 'Bestätigung fehlgeschlagen', EMERGENCY_STOP: 'Emergency Stop während der Ausführung', INTERNAL: 'Interner Fehler', NO_ROUTE: 'Kein Handelsweg über Jupiter', SLIPPAGE_EXCEEDED: 'Preis lief während der Ausführung weg – Slippage-Grenze überschritten', TX_FAILED: 'Transaktion nicht bestätigt (simuliert: Netzwerk/Blockhash)', WRITTEN_OFF: 'Kein Verkaufsweg – als Totalverlust abgeschrieben' };
 const BOT_TRANSITIONS = {
   STOPPED: ['STARTING', 'EMERGENCY_STOP'],
   STARTING: ['RECOVERING', 'RUNNING', 'PAUSED', 'ERROR', 'STOPPED', 'EMERGENCY_STOP'],
@@ -2923,13 +2993,14 @@ function createCore(opts) {
   http.define('dexSol', { label: 'DexScreener SOL-Preis', limitPerMin: 10, staleMs: 3 * MIN });
   http.define('gecko', { label: 'GeckoTerminal', limitPerMin: 25, staleMs: 3 * MIN });
   http.define('rugcheck', { label: 'RugCheck', limitPerMin: 20, staleMs: 20 * MIN, timeoutMs: 10000 });
+  http.define('jupiter', { label: 'Jupiter Quote', limitPerMin: 50, staleMs: 10 * MIN, timeoutMs: 6000 });
 
   const freshPortfolio = cap => ({ startCapital: cap, cash: cap, realized: 0, fees: 0, peakEquity: cap, maxDD: 0 });
   const state = {
     settings: defaultSettings(), strategies: defaultStrategies(), mode: 'SIMULATION',
     bot: { state: 'STOPPED', desired: 'RUNNING', autoTrading: false, safeMode: false, safeAuto: false, emergency: false, emergencyReason: '', lastError: null, errorStreak: 0, errorAt: 0, startedAt: 0, readyAt: 0 },
     scanner: { id: 0, lock: false, running: false, lastAt: 0, lastDuration: 0, skipped: 0, errors: 0, lateIgnored: 0, nextAt: 0, lastDisc: 0, lastGtDisc: 0, gtKind: 0, lastCross: 0, lastRpc: 0, lastRpcAll: 0, lastOhlcv: 0, scansWindow: [] },
-    markets: new Map(), selected: null, sol: null,
+    markets: new Map(), selected: null, sol: null, feeMarket: null,
     positions: [], orders: [], journal: [], feed: [], queue: [], locks: new Set(), usedKeys: new Map(),
     portfolio: freshPortfolio(1000),
     risk: { buyCount: {}, coinCooldown: {}, stratCooldown: {}, lossCooldownUntil: 0, globalPauseUntil: 0, lossStreak: 0, dayKey: '', dailyPnl: 0, dailyStartEquity: null, dailyTrades: 0, dailyLimitHit: false, reviewRequired: false, buyTimes: [] },
@@ -3088,7 +3159,7 @@ function createCore(opts) {
           const t = ensureToken(x.tokenAddress, 'DexScreener ' + eps[i][1]);
           if (!t) continue;
           if (!had) added++;
-          if (i > 0) t.meta.boostedAt = now;
+          if (i > 0) { t.meta.boostedAt = now; if (isNum(x.totalAmount)) t.meta.boostTotal = Math.max(t.meta.boostTotal || 0, x.totalAmount); }
           mergeLinks(t, normLinks(x.links, 'type'));
         }
       });
@@ -3144,8 +3215,8 @@ function createCore(opts) {
     const res = await Promise.allSettled(chunks.map(ch => fetchChunk(ch)));
     res.forEach(r => { if (r.status === 'rejected') noteApiError('dexPairs', r.reason); });
   }
-  async function refreshToken(t) {
-    if (t.snap && env.now() - t.snap.fetchedAt < 1500) return;
+  async function refreshToken(t, force) {
+    if (!force && t.snap && env.now() - t.snap.fetchedAt < 1500) return;
     try { await fetchChunk([t.mint], true); }
     catch (e) { noteApiError('dexPairs', e); log.warn('TRADE', `Pre-Trade-Refresh für ${t.symbol} fehlgeschlagen: ${e.message}`); }
   }
@@ -3289,11 +3360,32 @@ function createCore(opts) {
 
   /* ---------- Portfolio, Gebühren, Price Impact ---------- */
   function estImpact(size, liq) { return isNum(liq) && liq > 0 && isNum(size) && size >= 0 ? size / (liq / 2 + size) : null; }
-  function estFees(sizeUsd) {
+  /* Priority Fee: fester Wert oder (Standard) automatisch aus den aktuellen Netzwerkgebühren – der feste Wert gilt dann als Minimum. */
+  function prioLamportsNow() {
+    const s = S(), fm = state.feeMarket;
+    return s.priorityFeeMode === 'auto' && fm && env.now() - fm.at < 2 * MIN ? Math.max(s.priorityFeeLamports, fm.lamports) : s.priorityFeeLamports;
+  }
+  /* dexInRoute: bei einem echten Jupiter-Angebot steckt die DEX-Gebühr bereits im Kurs → nicht doppelt rechnen. */
+  function estFees(sizeUsd, o = {}) {
     const sol = state.sol && state.sol.usd; if (!isNum(sol) || !isNum(sizeUsd)) return null;
-    const s = S();
-    const network = BASE_FEE_LAMPORTS / 1e9 * sol, priority = s.priorityFeeLamports / 1e9 * sol, dex = sizeUsd * s.dexFeePct / 100;
-    return { network: m6(network), priority: m6(priority), dex: m6(dex), total: m6(network + priority + dex), solUsd: sol, lamports: BASE_FEE_LAMPORTS + s.priorityFeeLamports };
+    const s = S(), prio = isNum(o.prioLamports) ? o.prioLamports : prioLamportsNow();
+    const network = BASE_FEE_LAMPORTS / 1e9 * sol, priority = prio / 1e9 * sol, dex = o.dexInRoute ? 0 : sizeUsd * s.dexFeePct / 100;
+    return { network: m6(network), priority: m6(priority), dex: m6(dex), total: m6(network + priority + dex), solUsd: sol, lamports: BASE_FEE_LAMPORTS + prio, prioLamports: prio, dexInRoute: !!o.dexInRoute };
+  }
+  /* Aktuelle Priority Fees (Solana RPC getRecentPrioritizationFees, 75. Perzentil für den Pool des Coins) – max. alle 30 s je Pool. */
+  async function updatePriorityFee(t) {
+    if (S().priorityFeeMode !== 'auto') return null;
+    const acct = (t && ((t.snap && t.snap.pairAddress) || (t.alt && t.alt.pairAddress))) || null, fm = state.feeMarket;
+    if (fm && fm.acct === acct && env.now() - fm.at < 30 * SEC) return fm;
+    if (state.feeMarketErrAt && env.now() - state.feeMarketErrAt < 10 * MIN) return fm; // RPC kann es nicht → 10 min Pause, fester Wert gilt
+    try {
+      const res = await rpcCall('getRecentPrioritizationFees', acct && isMint(acct) ? [[acct]] : [], { single: true });
+      const vals = arr(res).map(x => x && x.prioritizationFee).filter(isNum);
+      if (!vals.length) return fm;
+      const micro = quantile(vals, 0.75);
+      state.feeMarket = { at: env.now(), acct, microPerCu: Math.round(micro), lamports: Math.round(clamp(micro * SWAP_CU / 1e6, 0, PRIO_FEE_MAX_LAMPORTS)), n: vals.length };
+      return state.feeMarket;
+    } catch (e) { state.feeMarketErrAt = env.now(); log.warn('TRADE', 'Priority Fee nicht aus dem Netzwerk ermittelbar – fester Wert gilt (neuer Versuch in 10 min): ' + e.message); return fm; }
   }
   function equityInfo() {
     let exposure = 0, value = 0, unknown = 0;
@@ -3302,6 +3394,7 @@ function createCore(opts) {
     return { equity, cash: state.portfolio.cash, exposure, value, unknown, exposurePct: equity > 0 ? exposure / equity * 100 : 0, estimated: unknown > 0 };
   }
   function valuePosition(pos, p, liq) {
+    if (pos.noRouteSince) return { net: 0, impactPct: 100, noRoute: true }; // kein Verkaufsweg → aktuell nichts wert
     const gross = pos.qty * p; const imp = estImpact(gross, liq); const fees = estFees(gross);
     if (imp == null || !fees) return { net: null, impactPct: imp != null ? imp * 100 : null };
     return { net: gross * (1 - imp) - fees.total, impactPct: imp * 100, fees };
@@ -3476,6 +3569,12 @@ function createCore(opts) {
     }
     if (!pos && state.positions.length && s.correlationLimit > 0) { const c = maxCorrelation(t); if (c && c.r >= s.correlationLimit) add('CONCENTRATION', `Korrelation ${c.r.toFixed(2)} mit offener Position ${c.sym}`); }
     const sizing = sizePosition(t, A, lead, sizeUsd);
+    // Befund des letzten echten Angebots (Stufe B) – verhindert wiederholte Abfragen; Preisabweichung nur bei ähnlicher oder größerer Ordergröße
+    const qc = t.quoteCheck;
+    if (qc && now - qc.at < QUOTE_CHECK_TTL) {
+      if (qc.noBuyRoute) add('NO_ROUTE', `Kein Handelsweg über Jupiter (${str(qc.msg || '—', 80)})`);
+      for (const b of quoteBlockers({ ...qc, impactPct: isNum(qc.sizeUsd) && sizing.size >= qc.sizeUsd * 0.9 ? qc.impactPct : null }, s)) B.push(b);
+    }
     if (!(sizing.size > 0)) add('SIZE_ZERO', sizing.reason || 'Positionsgröße 0');
     else {
       const eq = equityInfo();
@@ -3532,31 +3631,128 @@ function createCore(opts) {
     return true;
   }
   const lcBack = pos => (pos.exits.length ? 'PARTIAL' : 'OPEN');
+  /* ---------- Echte Kursangebote (B1): Jupiter Quote API – reine Abfrage, nie Swap, nie Signatur ---------- */
+  const jupValidator = d => (d && typeof d === 'object' && !Array.isArray(d) ? null : 'unerwartetes Schema');
+  const sleep = ms => new Promise(r => env.setTimeout(r, ms));
+  const lamportsOfUsd = usd => { const sol = state.sol && state.sol.usd; return isNum(sol) && sol > 0 && isNum(usd) && usd > 0 ? Math.floor(usd / sol * 1e9) : 0; };
+  const usdOfLamports = l => { const sol = state.sol && state.sol.usd; return isNum(sol) ? Number(l) / 1e9 * sol : null; };
+  function rawOfQty(qty, dec) { const x = Math.floor(qty * Math.pow(10, dec)); return Number.isFinite(x) && x > 0 ? BigInt(x).toString() : null; }
+  /* Decimals aus dem Angebot ableiten, falls die Mint-Daten (RPC) fehlen: Rohmenge × Preis ÷ Einsatz ≈ 10^Decimals. */
+  function inferDecimals(rawOut, usdIn, priceUsd) {
+    const x = Number(rawOut); if (!(x > 0) || !(usdIn > 0) || !(priceUsd > 0)) return null;
+    const e = Math.log10(x * priceUsd / usdIn), d = Math.round(e);
+    return d >= 0 && d <= 18 && Math.abs(e - d) < 0.3 ? d : null;
+  }
+  const tokenDecimals = (t, pos) => (pos && isNum(pos.decimals) ? pos.decimals : t && t.sec && isNum(t.sec.decimals) ? t.sec.decimals : null);
+  const slipBps = () => Math.round(clamp(S().maxSlippagePct, 0.1, 50) * 100);
+  async function jupQuote(inputMint, outputMint, amountRaw, bps) {
+    const key = String(S().jupApiKey || '').trim();
+    const url = `${key ? JUP_API_KEYED : JUP_API_FREE}/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountRaw}&slippageBps=${bps}`;
+    let r;
+    try { r = await http.request('jupiter', url, { headers: key ? { 'x-api-key': key } : undefined, okStatuses: [400, 422], validate: jupValidator, keepRaw: S().rawApiLog }); }
+    catch (e) { return { ok: false, noRoute: false, code: e.code || 'NETWORK', msg: e.message }; }
+    const d = r.data, code = String(d.errorCode || d.error_code || ''), out = /^\d+$/.test(String(d.outAmount || '')) ? String(d.outAmount) : null;
+    if (r.status !== 200 || !out || out === '0') {
+      const msg = str(String(d.error || d.message || (out === '0' ? 'Angebot ohne Gegenwert' : 'kein Angebot')), 120);
+      return { ok: false, noRoute: out === '0' || (r.status !== 200 && (JUP_NO_ROUTE.has(code) || /route|tradable/i.test(msg))), code: code || 'NO_QUOTE', msg };
+    }
+    const labels = [...new Set(arr(d.routePlan).map(x => x && x.swapInfo && x.swapInfo.label).filter(Boolean).map(x => str(String(x), 24)))].slice(0, 3);
+    return { ok: true, outAmount: out, minOut: /^\d+$/.test(String(d.otherAmountThreshold || '')) ? String(d.otherAmountThreshold) : null, labels, at: r.fetchedAt };
+  }
+  /* Kauf: SOL → Coin. Dazu (optional) die Rundreise: dieselbe Menge sofort zurück in SOL → Honeypot (kein Verkaufsweg) und Rundreise-Kosten. */
+  async function jupBuyQuote(req, price) {
+    const fees = estFees(req.sizeUsd, { dexInRoute: true });
+    if (!fees) return { ok: false, code: 'QUOTE_FAILED', msg: 'Gebühren unbekannt (SOL-Preis fehlt)' };
+    const lam = lamportsOfUsd(req.sizeUsd - fees.total), spent = usdOfLamports(lam), bps = slipBps();
+    if (!(lam > 0)) return { ok: false, code: 'QUOTE_FAILED', msg: 'Betrag nach Gebühren ≤ 0' };
+    const bq = await jupQuote(WSOL, req.mint, lam, bps);
+    if (!bq.ok) return { ok: false, noRoute: bq.noRoute, code: bq.noRoute ? 'NO_ROUTE' : 'QUOTE_FAILED', msg: 'Jupiter (Kauf): ' + bq.msg };
+    const dec = isNum(req.decimals) ? req.decimals : inferDecimals(bq.outAmount, spent, price);
+    const qty = isNum(dec) ? rawToUi(bq.outAmount, dec) : null;
+    if (!(qty > 0)) return { ok: false, code: 'QUOTE_FAILED', msg: 'Jupiter (Kauf): Token-Decimals unbekannt' };
+    const fillPrice = spent / qty;
+    const out = { ok: true, side: 'BUY', source: 'JUPITER', refPrice: price, impact: fillPrice / price - 1, fees, fillPrice, qty, rawOut: bq.outAmount, decimals: dec, bps, route: 'Jupiter: ' + (bq.labels.join(' → ') || 'Route'), quotedAt: bq.at, roundTripPct: null, noSellRoute: false, sellErr: null };
+    if (req.roundTrip) {
+      const sq = await jupQuote(req.mint, WSOL, bq.outAmount, bps);
+      if (sq.ok) { const back = usdOfLamports(sq.outAmount); out.roundTripPct = lr2((1 - (back - fees.network - fees.priority) / req.sizeUsd) * 100); }
+      else if (sq.noRoute) { out.noSellRoute = true; out.sellErr = sq.msg; }
+      else out.sellErr = sq.msg; // Netzwerk/Rate-Limit: kein Urteil (weder Honeypot noch unbedenklich)
+    }
+    return out;
+  }
+  async function jupSellQuote(req, price) {
+    const raw = isNum(req.decimals) ? rawOfQty(req.qty, req.decimals) : null;
+    if (!raw) return { ok: false, code: 'QUOTE_FAILED', msg: 'Jupiter (Verkauf): Token-Decimals unbekannt' };
+    const bps = slipBps(), sq = await jupQuote(req.mint, WSOL, raw, bps);
+    if (!sq.ok) return { ok: false, noRoute: sq.noRoute, code: sq.noRoute ? 'NO_ROUTE' : 'QUOTE_FAILED', msg: 'Jupiter (Verkauf): ' + sq.msg };
+    const proceeds = usdOfLamports(sq.outAmount), fees = estFees(proceeds, { dexInRoute: true });
+    if (!fees || !isNum(proceeds)) return { ok: false, code: 'QUOTE_FAILED', msg: 'Gebühren unbekannt (SOL-Preis fehlt)' };
+    const fillPrice = proceeds / req.qty;
+    return { ok: true, side: 'SELL', source: 'JUPITER', refPrice: price, impact: 1 - fillPrice / price, impactEstimated: false, fees, fillPrice, qty: req.qty, proceeds, net: proceeds - fees.total, decimals: req.decimals, bps, route: 'Jupiter: ' + (sq.labels.join(' → ') || 'Route'), quotedAt: sq.at };
+  }
+  /* Rückfall ohne Jupiter: Live-Preis + geschätzter Price Impact (AMM-Formel) + Gebühren – als geschätzt markiert. */
+  function ammQuote(req, price, liq) {
+    if (req.side === 'BUY') {
+      const impact = estImpact(req.sizeUsd, liq), fees = estFees(req.sizeUsd);
+      if (impact == null || !fees) return { ok: false, code: 'QUOTE_FAILED', msg: impact == null ? 'Price Impact nicht schätzbar' : 'Gebühren unbekannt' };
+      const fillPrice = price * (1 + impact);
+      return { ok: true, side: 'BUY', source: 'AMM', refPrice: price, impact, fees, fillPrice, qty: (req.sizeUsd - fees.total) / fillPrice, bps: slipBps(), route: 'SIMULIERT (AMM-Schätzung)', fallbackReason: req.fallbackReason || null };
+    }
+    let imp = estImpact(req.qty * price, liq); const impEst = imp == null;
+    if (imp == null) imp = S().maxSlippagePct / 100;
+    const fillPrice = price * (1 - imp), proceeds = req.qty * fillPrice, fees = estFees(proceeds);
+    if (!fees) return { ok: false, code: 'QUOTE_FAILED', msg: 'Gebühren unbekannt' };
+    return { ok: true, side: 'SELL', source: 'AMM', refPrice: price, impact: imp, impactEstimated: impEst, fees, fillPrice, qty: req.qty, proceeds, net: proceeds - fees.total, bps: slipBps(), route: 'SIMULIERT (AMM-Schätzung)', fallbackReason: req.fallbackReason || null };
+  }
+  /* Befund aus dem Kaufangebot → Blocker (gilt QUOTE_CHECK_TTL lang auch für Analyse/Auto-Käufe dieses Coins). */
+  function quoteBlockers(qc, s) {
+    const out = []; if (!qc) return out;
+    if (qc.noSellRoute && s.honeypotBlock) out.push(mkBlocker('NO_SELL_ROUTE', `Kein Verkaufsweg über Jupiter (${str(qc.sellErr || '—', 80)}) – Honeypot-Verdacht`));
+    if (s.maxRoundTripLossPct > 0 && isNum(qc.roundTripPct) && qc.roundTripPct > s.maxRoundTripLossPct) out.push(mkBlocker('ROUND_TRIP_COST', `Kauf + sofortiger Verkauf kostet ${qc.roundTripPct.toFixed(1)} % > ${s.maxRoundTripLossPct} %`));
+    if (qc.source === 'JUPITER' && isNum(qc.impactPct) && qc.impactPct > s.maxSlippagePct) out.push(mkBlocker('SLIPPAGE_TOO_HIGH', `Echtes Angebot: Kurs ${qc.impactPct.toFixed(2)} % über Marktpreis > ${s.maxSlippagePct} %`));
+    return out;
+  }
+  /* Ausführungsbedingungen wie on-chain: Wartezeit bis zur Bestätigung, Füllung zum dann gültigen Angebot,
+     Slippage-Grenze (sonst scheitert die Transaktion) und ein Anteil gescheiterter Transaktionen. Gebühren fallen auch beim Scheitern an. */
+  async function simConfirm(q, ctx) {
+    const s = S(), t0 = env.now();
+    let q2 = q, latencyApplied = false;
+    if (s.simLatencyMs > 0) {
+      await sleep(s.simLatencyMs);
+      if (ctx && ctx.requote) {
+        const r = await ctx.requote(q.source);
+        if (r && r.ok) { q2 = r; latencyApplied = true; }
+        else if (r && r.noRoute) return { ok: false, code: 'NO_ROUTE', msg: 'Nach der Wartezeit kein Handelsweg mehr: ' + str(r.msg || '', 80), feeLoss: true };
+      }
+    }
+    const tol = q.bps / 1e4;
+    if (q.side === 'BUY' ? q2.qty < q.qty * (1 - tol) : q2.proceeds < q.proceeds * (1 - tol)) {
+      const dev = q.side === 'BUY' ? (1 - q2.qty / q.qty) * 100 : (1 - q2.proceeds / q.proceeds) * 100;
+      return { ok: false, code: 'SLIPPAGE_EXCEEDED', msg: `${EXEC_FAIL.SLIPPAGE_EXCEEDED} (${dev.toFixed(2)} % > ${(tol * 100).toFixed(2)} %)`, feeLoss: true };
+    }
+    if (s.simTxFailPct > 0 && env.random() * 100 < s.simTxFailPct) return { ok: false, code: 'TX_FAILED', msg: EXEC_FAIL.TX_FAILED, feeLoss: true };
+    return { ok: true, fillPrice: q2.fillPrice, q: q2, latencyApplied, waitMs: env.now() - t0 };
+  }
   /* ---------- Execution-Provider: Quote → Build → Preflight → Sign → Send → Confirm ----------
-     SIMULATION ist vollständig (Live-Preis + geschätzter Price Impact + Gebühren, keine Transaktion).
+     SIMULATION: echtes Jupiter-Angebot (sonst AMM-Schätzung), Wartezeit, Slippage-Grenze, gescheiterte Transaktionen – keine Transaktion.
      LIVE ist nicht angebunden: jeder Schritt liefert NO_ROUTER / SIGNATURE_DISABLED – es wird nie etwas signiert oder gesendet. */
   const simProvider = {
     id: 'SIMULATION', available: true,
-    quote(req) {
-      const snap = req.snap, price = snap && snap.priceUsd, liq = snap && snap.liquidityUsd;
+    async quote(req) {
+      const s = S(), snap = req.snap, price = snap && snap.priceUsd, liq = snap && snap.liquidityUsd;
       if (!isNum(price) || price <= 0) return { ok: false, code: 'QUOTE_FAILED', msg: 'kein gültiger Coin-Preis' };
-      if (req.side === 'BUY') {
-        const impact = estImpact(req.sizeUsd, liq), fees = estFees(req.sizeUsd);
-        if (impact == null || !fees) return { ok: false, code: 'QUOTE_FAILED', msg: impact == null ? 'Price Impact nicht schätzbar' : 'Gebühren unbekannt' };
-        const fillPrice = price * (1 + impact);
-        return { ok: true, side: 'BUY', refPrice: price, impact, fees, fillPrice, qty: (req.sizeUsd - fees.total) / fillPrice, route: 'SIMULIERT (AMM-Schätzung)' };
+      if (s.realQuotes && req.mint && req.source !== 'AMM') {
+        const jq = req.side === 'BUY' ? await jupBuyQuote(req, price) : await jupSellQuote(req, price);
+        if (jq.ok || jq.noRoute || !s.quoteFallback || req.source === 'JUPITER') return jq; // kein Handelsweg: keine Schätzung als Ersatz
+        req.fallbackReason = jq.msg;
       }
-      let imp = estImpact(req.qty * price, liq); const impEst = imp == null;
-      if (imp == null) imp = S().maxSlippagePct / 100;
-      const fillPrice = price * (1 - imp), proceeds = req.qty * fillPrice, fees = estFees(proceeds);
-      if (!fees) return { ok: false, code: 'QUOTE_FAILED', msg: 'Gebühren unbekannt' };
-      return { ok: true, side: 'SELL', refPrice: price, impact: imp, impactEstimated: impEst, fees, fillPrice, qty: req.qty, proceeds, net: proceeds - fees.total, route: 'SIMULIERT (AMM-Schätzung)' };
+      return ammQuote(req, price, liq);
     },
     build: () => ({ ok: true, note: 'keine Transaktion (Simulation)' }),
     preflight: q => (q.qty > 0 && isNum(q.fillPrice) && q.fillPrice > 0 ? { ok: true } : { ok: false, code: 'PREFLIGHT_FAILED', msg: 'Menge nach Gebühren ≤ 0' }),
     sign: () => ({ ok: true, simulated: true }),
     send: () => ({ ok: true, sig: null }),
-    confirm: q => ({ ok: true, fillPrice: q.fillPrice })
+    confirm: simConfirm
   };
   const liveProvider = {
     id: 'LIVE', available: false,
@@ -3566,15 +3762,27 @@ function createCore(opts) {
   };
   const execProvider = mode => ((mode || state.mode) === 'LIVE' ? liveProvider : simProvider);
   /* Führt Build → Preflight → Sign → Send → Confirm aus; bricht beim ersten Fehler mit Fehlercode ab. */
-  function runProviderSteps(P, q, ord, onSubmit) {
+  async function runProviderSteps(P, q, ord, onSubmit, ctx) {
     for (const step of ['build', 'preflight', 'sign', 'send']) {
       const r = P[step](q); if (!r.ok) return { ok: false, code: r.code, msg: r.msg || EXEC_FAIL[r.code] };
       if (step === 'preflight') { transition(ord, 'SUBMITTING', `${P.id}: Preflight ok – keine echte Order`); const stop = onSubmit && onSubmit(); if (stop) return stop; }
     }
     transition(ord, 'SUBMITTED', `${P.id}: ${P.id === 'SIMULATION' ? 'simulierte Übermittlung – keine Transaktion' : 'gesendet'}`);
-    transition(ord, 'CONFIRMING');
-    const c = P.confirm(q); if (!c.ok) return { ok: false, code: c.code, msg: c.msg || EXEC_FAIL[c.code] };
-    return { ok: true, fillPrice: c.fillPrice };
+    transition(ord, 'CONFIRMING', P.id === 'SIMULATION' && S().simLatencyMs > 0 ? `Warte ${S().simLatencyMs} ms auf Bestätigung (simuliert)` : undefined);
+    const c = await P.confirm(q, ctx); if (!c.ok) return { ok: false, code: c.code, msg: c.msg || EXEC_FAIL[c.code], feeLoss: !!c.feeLoss };
+    return { ok: true, fillPrice: c.fillPrice, q: c.q || q, latencyApplied: !!c.latencyApplied };
+  }
+  /* Gescheiterte Transaktion: Netzwerk- und Priority-Gebühr sind trotzdem bezahlt (wie on-chain), der Swap fand nicht statt. */
+  function chargeFailedTx(ord, fees, pos) {
+    const usd = m6(Math.min(Math.max(0, state.portfolio.cash), (fees && (fees.network || 0) + (fees.priority || 0)) || 0));
+    ord.fees = { network: fees ? fees.network : 0, priority: fees ? fees.priority : 0, dex: 0, total: usd, failedTx: true };
+    if (!(usd > 0)) return 0;
+    const pf = state.portfolio;
+    pf.cash = m6(pf.cash - usd); pf.fees = m6(pf.fees + usd); pf.realized = m6(pf.realized - usd); pf.failedTxFees = m6((pf.failedTxFees || 0) + usd);
+    state.risk.dailyPnl = m6(state.risk.dailyPnl - usd);
+    state.metrics.counters.txFailed = (state.metrics.counters.txFailed || 0) + 1;
+    if (pos) { pos.feesUsd += usd; pos.realizedUsd += -usd; pos.failedTx = (pos.failedTx || 0) + 1; journalUpdate(pos); }
+    return usd;
   }
   function failOrder(ord, key, code, msg) {
     ord.failureCode = code;
@@ -3617,21 +3825,43 @@ function createCore(opts) {
         persistNow();
         return { ok: false, order: ord, blockers };
       }
-      const size = ex.sizing.size, snap = t.snap, P = execProvider();
+      const size = ex.sizing.size, P = execProvider();
       ord.provider = P.id;
-      const q = P.quote({ side: 'BUY', sizeUsd: size, snap });
-      if (!q.ok) return failOrder(ord, key, q.code, q.msg);
-      const price = q.refPrice, impact = q.impact, fees = q.fees;
-      ord.sizeUsd = size; ord.estPrice = price; ord.expSlipPct = impact * 100; ord.estFees = fees; ord.route = q.route;
-      transition(ord, 'APPROVED', `Alle Pre-Trade-Checks bestanden · Quote ${P.id}: ${q.route}`);
-      const run = runProviderSteps(P, q, ord, () => (state.bot.emergency ? { ok: false, code: 'EMERGENCY_STOP', msg: EXEC_FAIL.EMERGENCY_STOP } : null));
-      if (!run.ok) { const r = failOrder(ord, key, run.code, run.msg); if (run.code === 'EMERGENCY_STOP') r.blockers = [mkBlocker('EMERGENCY_STOP')]; return r; }
-      const fillPrice = run.fillPrice, qty = q.qty;
+      await updatePriorityFee(t);
+      const q = await P.quote({ side: 'BUY', sizeUsd: size, snap: t.snap, mint: t.mint, decimals: tokenDecimals(t, openPos(t.id)), roundTrip: true });
+      if (!q.ok) {
+        if (q.noRoute) t.quoteCheck = { at: env.now(), source: 'JUPITER', noBuyRoute: true, msg: q.msg };
+        return failOrder(ord, key, q.code, q.msg);
+      }
+      // Befund des echten Angebots: Honeypot (kein Verkaufsweg), Rundreise-Kosten, echte Preisabweichung
+      t.quoteCheck = { at: env.now(), source: q.source, noSellRoute: !!q.noSellRoute, sellErr: q.sellErr || null, roundTripPct: isNum(q.roundTripPct) ? q.roundTripPct : null, impactPct: lr2(q.impact * 100), sizeUsd: size };
+      ord.quote = { source: q.source, route: q.route, impactPct: lr2(q.impact * 100), roundTripPct: t.quoteCheck.roundTripPct, noSellRoute: !!q.noSellRoute, fallbackReason: q.fallbackReason || null, prioLamports: q.fees.prioLamports };
+      const qb = quoteBlockers(t.quoteCheck, S());
+      if (qb.length) {
+        delete ord.decision.features; ord.decision.decision = 'REJECTED'; ord.decision.blockers = qb;
+        ord.failureCode = 'PRE_TRADE_BLOCKED'; ord.blockers = qb; transition(ord, 'REJECTED', qb[0].code + ': ' + qb[0].msg);
+        state.usedKeys.delete(key); recordRejection(qb); stratStat(lead || D.strategy, 'rejected');
+        log.risk(`Buy ${t.symbol} nach echtem Angebot abgelehnt: ${qb.map(b => b.code).join(', ')}`);
+        if (qb.some(b => b.code === 'NO_SELL_ROUTE')) alert('SECURITY', t, `${t.symbol}: kein Verkaufsweg über Jupiter – Honeypot-Verdacht, Kauf verhindert`, 'WARNING', { cooldownMs: HOUR, key: 'honeypot' });
+        persistNow();
+        return { ok: false, order: ord, blockers: qb };
+      }
+      const price = q.refPrice;
+      ord.sizeUsd = size; ord.estPrice = price; ord.expSlipPct = q.impact * 100; ord.estFees = q.fees; ord.route = q.route;
+      transition(ord, 'APPROVED', `Alle Pre-Trade-Checks bestanden · ${q.source === 'JUPITER' ? 'echtes Angebot' : 'Schätzung'}: ${q.route}`);
+      const requote = async src => { await refreshToken(t, true); return P.quote({ side: 'BUY', sizeUsd: size, snap: t.snap, mint: t.mint, decimals: q.decimals, source: src }); };
+      const run = await runProviderSteps(P, q, ord, () => (state.bot.emergency ? { ok: false, code: 'EMERGENCY_STOP', msg: EXEC_FAIL.EMERGENCY_STOP } : null), { requote });
+      if (!run.ok) {
+        if (run.feeLoss) { const lost = chargeFailedTx(ord, q.fees, null); log.trade(`${state.mode} BUY ${t.symbol} gescheitert (${run.code}) – Netzwerkgebühr ${fmtUsd(lost, 4)} trotzdem bezahlt`, { order: ord.id }); }
+        const r = failOrder(ord, key, run.code, run.msg); if (run.code === 'EMERGENCY_STOP') r.blockers = [mkBlocker('EMERGENCY_STOP')]; return r;
+      }
+      const fq = run.q, fillPrice = run.fillPrice, qty = fq.qty, fees = fq.fees, impact = fillPrice / price - 1;
       if (!(qty > 0)) throw new Error('Menge nach Gebühren ≤ 0');
-      transition(ord, 'CONFIRMED', 'Simulierte Füllung: Live-Preis + geschätzter Price Impact');
-      ord.fillPrice = fillPrice; ord.qty = qty; ord.fees = fees; ord.priceAt = snap.fetchedAt; ord.latencyMs = env.now() - t0;
+      transition(ord, 'CONFIRMED', `Simulierte Füllung: ${fq.source === 'JUPITER' ? 'echtes Jupiter-Angebot' : 'Live-Preis + geschätzter Price Impact'}${run.latencyApplied ? ` nach ${S().simLatencyMs} ms Wartezeit` : ''}`);
+      ord.fillPrice = fillPrice; ord.qty = qty; ord.fees = fees; ord.expSlipPct = impact * 100; ord.priceAt = t.snap ? t.snap.fetchedAt : null; ord.latencyMs = env.now() - t0;
+      if (ord.quote) { ord.quote.fillSource = fq.source; ord.quote.latencyApplied = run.latencyApplied; }
       const leadId = lead || D.strategy;
-      applyBuyFill(t, ord, A, D, { price: fillPrice, refPrice: price, qty, size, fees, impact, lead: leadId });
+      applyBuyFill(t, ord, A, D, { price: fillPrice, refPrice: price, qty, size, fees, impact, lead: leadId, decimals: fq.decimals, source: fq.source });
       state.risk.buyCount[tokenId] = buyNo;
       state.risk.buyTimes = state.risk.buyTimes.filter(x => env.now() - x < DAY); state.risk.buyTimes.push(env.now());
       state.risk.dailyTrades++;
@@ -3641,7 +3871,7 @@ function createCore(opts) {
       state.metrics.counters.executed++; state.metrics.minute.executed++; state.metrics.perf.exec = ord.latencyMs;
       stratStat(leadId, 'executed');
       audit(auto ? 'BOT' : 'USER', 'BUY', `${t.symbol} Buy #${buyNo}: ${fmtUsd(size)} @ ${pxMcTxt(t.A, fillPrice)} (${state.mode})`, reason || D.reason);
-      log.trade(`${state.mode} BUY #${buyNo} ${t.symbol}: ${fmtUsd(size)} @ ${pxMcTxt(t.A, fillPrice)} · Impact ${(impact * 100).toFixed(2)} % · Fees ${fmtUsd(fees.total, 4)}`, { order: ord.id });
+      log.trade(`${state.mode} BUY #${buyNo} ${t.symbol}: ${fmtUsd(size)} @ ${pxMcTxt(t.A, fillPrice)} · ${fq.source === 'JUPITER' ? 'Jupiter' : 'geschätzt'} · Abweichung ${(impact * 100).toFixed(2)} % · Fees ${fmtUsd(fees.total, 4)}`, { order: ord.id });
       alert('TRADE', t, `${state.mode} BUY #${buyNo}: ${fmtUsd(size)} @ ${pxMcTxt(t.A, fillPrice)}`, 'SUCCESS', { cooldownMs: 0, key: ord.id });
       persistNow(); emit('trade', { order: ord });
       return { ok: true, order: ord };
@@ -3672,7 +3902,8 @@ function createCore(opts) {
       journalOpen(pos, t, A, D, o);
     }
     if (pos.entries.length) { pos.lcHistory = pos.lcHistory || []; pos.lcHistory.push({ s: pos.lc || 'OPEN', ts: now, note: `Nachkauf #${pos.entries.length + 1} (Order ${o.id})` }); }
-    pos.entries.push({ orderId: o.id, ts: now, price: f.price, refPrice: f.refPrice, qty: f.qty, usd: f.size, fees: f.fees.total, impactPct: f.impact * 100, latencyMs: o.latencyMs });
+    pos.entries.push({ orderId: o.id, ts: now, price: f.price, refPrice: f.refPrice, qty: f.qty, usd: f.size, fees: f.fees.total, impactPct: f.impact * 100, latencyMs: o.latencyMs, source: f.source || null });
+    if (isNum(f.decimals)) pos.decimals = f.decimals;
     const sq = sum(pos.entries.map(e => e.qty));
     pos.entryPrice = sum(pos.entries.map(e => e.price * e.qty)) / sq;
     pos.qty += f.qty; pos.initialQty += f.qty; pos.costUsd += f.size; pos.investedUsd += f.size; pos.feesUsd += f.fees.total;
@@ -3736,7 +3967,7 @@ function createCore(opts) {
       if (pnlPct >= s.trailActivatePct && !pos.trailing) { pos.trailing = true; log.trade(`${pos.symbol}: Trailing Stop aktiviert (${fmtPct(pnlPct)})`); }
       if (pos.trailing) { const ts = pos.highest * (1 - s.trailPct / 100); if (ts > pos.stop) { pos.stop = ts; pos.stopType = 'TRAILING'; } }
       const ex = exitDecision(pos, t, p, pnlPct, liq, now);
-      if (ex) await executeSell(pos.id, ex.frac, ex.code, { auto: true, detail: ex.detail });
+      if (ex && !(pos.sellRetryAt > now)) await executeSell(pos.id, ex.frac, ex.code, { auto: true, detail: ex.detail });
     }
   }
   async function executeSell(posId, frac, reasonCode, o = {}) {
@@ -3773,14 +4004,36 @@ function createCore(opts) {
       let qty = frac === 'ALL' ? pos.qty : Math.min(pos.qty, pos.initialQty * frac);
       if (pos.qty - qty < pos.initialQty * 0.01) qty = pos.qty;
       ord.provider = P.id;
-      const q = P.quote({ side: 'SELL', qty, snap: es.snap });
-      if (!q.ok) { posTransition(pos, lcBack(pos), 'Quote fehlgeschlagen'); return failOrder(ord, key, q.code, q.msg); }
-      const imp = q.impact, impEst = q.impactEstimated, fillPrice = q.fillPrice, proceeds = q.proceeds, fees = q.fees, net = q.net;
-      ord.route = q.route;
-      transition(ord, 'APPROVED', 'Pre-Exit-Check bestanden' + (impEst ? ' (Impact geschätzt: max. Slippage)' : '') + ` · Quote ${P.id}`);
-      const run = runProviderSteps(P, q, ord, null);
-      if (!run.ok) { posTransition(pos, lcBack(pos), 'Ausführung abgebrochen: ' + run.code); return failOrder(ord, key, run.code, run.msg); }
-      transition(ord, 'CONFIRMED', 'Simulierte Füllung');
+      if (t) await updatePriorityFee(t);
+      const q = await P.quote({ side: 'SELL', qty, snap: es.snap, mint: pos.mint, decimals: tokenDecimals(t, pos) });
+      if (!q.ok) {
+        pos.sellRetryAt = env.now() + SELL_RETRY_MS;
+        if (q.noRoute) {
+          pos.noRouteSince = pos.noRouteSince || env.now();
+          const since = env.now() - pos.noRouteSince;
+          if (auto && since >= NO_ROUTE_WRITEOFF_MIN * MIN) return writeOffPosition(pos, t, ord, key, p, q.msg);
+          pos.exitPending = { code: reasonCode, since: pos.exitPending ? pos.exitPending.since : env.now(), blocker: 'Kein Verkaufsweg über Jupiter' };
+          alert('POSITION_DATA', t, `${pos.symbol}: kein Verkaufsweg über Jupiter seit ${fmtAge(since)} – Position zählt mit 0 $, Abschreibung nach ${NO_ROUTE_WRITEOFF_MIN} min`, 'WARNING', { key: 'noroute' });
+        }
+        posTransition(pos, lcBack(pos), 'Angebot fehlgeschlagen: ' + str(q.msg || q.code, 100)); return failOrder(ord, key, q.code, q.msg);
+      }
+      pos.noRouteSince = 0;
+      ord.route = q.route; ord.quote = { source: q.source, route: q.route, impactPct: lr2(q.impact * 100), fallbackReason: q.fallbackReason || null, prioLamports: q.fees.prioLamports };
+      transition(ord, 'APPROVED', 'Pre-Exit-Check bestanden' + (q.impactEstimated ? ' (Impact geschätzt: max. Slippage)' : '') + ` · ${q.source === 'JUPITER' ? 'echtes Angebot' : 'Schätzung'}: ${q.route}`);
+      const requote = async src => {
+        if (t) await refreshToken(t, true);
+        const es2 = t ? effectiveSnap(t, env.now(), S()) : null, sn = es2 && es2.snap && isNum(es2.snap.priceUsd) && es2.label !== 'STALE' ? es2.snap : es.snap;
+        return P.quote({ side: 'SELL', qty, snap: sn, mint: pos.mint, decimals: q.decimals, source: src });
+      };
+      const run = await runProviderSteps(P, q, ord, null, { requote });
+      if (!run.ok) {
+        if (run.feeLoss) { const lost = chargeFailedTx(ord, q.fees, pos); log.trade(`${pos.mode} SELL ${pos.symbol} gescheitert (${run.code}) – Netzwerkgebühr ${fmtUsd(lost, 4)} trotzdem bezahlt, neuer Versuch folgt`, { order: ord.id }); }
+        if (run.code === 'NO_ROUTE') { pos.noRouteSince = pos.noRouteSince || env.now(); pos.sellRetryAt = env.now() + SELL_RETRY_MS; } else pos.sellRetryAt = env.now() + 2 * SEC;
+        posTransition(pos, lcBack(pos), 'Ausführung abgebrochen: ' + run.code); return failOrder(ord, key, run.code, run.msg);
+      }
+      const fq = run.q, fillPrice = run.fillPrice, proceeds = fq.proceeds, fees = fq.fees, net = fq.net, imp = 1 - fillPrice / p;
+      if (ord.quote) { ord.quote.fillSource = fq.source; ord.quote.latencyApplied = run.latencyApplied; }
+      transition(ord, 'CONFIRMED', `Simulierte Füllung: ${fq.source === 'JUPITER' ? 'echtes Jupiter-Angebot' : 'Schätzung'}${run.latencyApplied ? ` nach ${S().simLatencyMs} ms Wartezeit` : ''}`);
       const costPortion = pos.costUsd * (qty / pos.qty);
       const realized = net - costPortion;
       pos.exits.push({ orderId: ord.id, ts: env.now(), price: fillPrice, refPrice: p, qty, usd: net, fees: fees.total, impactPct: imp * 100, reason: reasonCode, realized });
@@ -3815,6 +4068,22 @@ function createCore(opts) {
       persistNow();
       return { ok: false, order: ord, error: e.message };
     } finally { state.locks.delete(lk); emit('order', ord); }
+  }
+  /* Seit NO_ROUTE_WRITEOFF_MIN min kein Verkaufsweg: Position als Totalverlust abschreiben – so endet ein Honeypot auch im echten Handel. */
+  function writeOffPosition(pos, t, ord, key, refPrice, why) {
+    const qty = pos.qty, realized = -pos.costUsd;
+    ord.failureCode = 'WRITTEN_OFF'; ord.qty = qty; ord.sizeUsd = 0; ord.estPrice = refPrice;
+    transition(ord, 'CANCELLED', `${EXEC_FAIL.WRITTEN_OFF} (${str(why || '', 80)})`);
+    pos.exits.push({ orderId: ord.id, ts: env.now(), price: 0, refPrice, qty, usd: 0, fees: 0, impactPct: 100, reason: 'NO_SELL_ROUTE', realized });
+    pos.qty = 0; pos.costUsd = 0; pos.realizedUsd += realized; pos.exitPending = null; state.tradeSeq++;
+    state.portfolio.realized = m6(state.portfolio.realized + realized); state.risk.dailyPnl = m6(state.risk.dailyPnl + realized);
+    state.usedKeys.set(key, ord.id);
+    log.trade(`${pos.mode} ${pos.symbol}: seit ${NO_ROUTE_WRITEOFF_MIN} min kein Verkaufsweg → als Totalverlust abgeschrieben (${fmtSigned(realized)})`, { order: ord.id });
+    audit('BOT', 'WRITE_OFF', `${pos.symbol}: Totalverlust ${fmtSigned(realized)} (kein Verkaufsweg)`, str(why || '', 120));
+    alert('STOP_HIT', t, `${pos.symbol}: kein Verkaufsweg seit ${NO_ROUTE_WRITEOFF_MIN} min – als Totalverlust abgeschrieben (${fmtSigned(realized)})`, 'CRITICAL', { cooldownMs: 0, key: ord.id });
+    closePosition(pos, 'NO_SELL_ROUTE');
+    checkDailyLimit(); persistNow(); emit('trade', { order: ord });
+    return { ok: true, order: ord, writtenOff: true };
   }
   function closePosition(pos, reason) {
     const now = env.now(), s = S(), r = state.risk;
@@ -3868,7 +4137,7 @@ function createCore(opts) {
       openedAt: pos.openedAt, closedAt: null, entries: [], exits: [], sizeUsd: 0, feesUsd: 0, slippageUsd: 0,
       score: A.finalScore, opportunity: A.opportunity, confidence: A.confidence.total, risk: { total: A.risk.total, level: A.risk.level },
       signals: A.signals.map(x => ({ type: x.type, strength: x.strength, reason: x.reason })), strategy: pos.strategy, auto: o.auto,
-      reason: o.reason || D.reason, sources: sourcesUsed(t), tags: [...A.tags], regime: [...(state.regime.tags || [])],
+      reason: o.reason || D.reason, sources: sourcesUsed(t), discovery: discoveryOf(t).primary, tags: [...A.tags], regime: [...(state.regime.tags || [])],
       decision: o.decision, paramVersion: state.activeParam, result: null, exitReason: null, mae2m: null, holdMs: null
     });
     if (state.journal.length > 800) state.journal = state.journal.filter((j, i) => i < 600 || j.status === 'OPEN');
@@ -4186,6 +4455,7 @@ function createCore(opts) {
       { name: 'Netzwerk mainnet-beta (Genesis-Hash via RPC)', ok: w.network === 'mainnet-beta' && now - w.networkAt < 10 * MIN, detail: w.network ? `${w.network} · ${fmtAge(now - w.networkAt)} alt` : 'nicht verifiziert' },
       { name: 'Balance verifiziert (RPC)', ok: w.balanceLamports != null && now - w.balanceAt < 5 * MIN, detail: w.balanceLamports != null ? lamportsToSol(BigInt(w.balanceLamports)) + ' SOL' : 'unbekannt' },
       { name: 'Risikolimits geprüft (alle aktiv, kein Lernmodus)', ok: hardErr === 0 && s.maxPositionPct <= 5 && s.dailyLossLimitPct > 0 && s.dailyLossLimitPct <= 10 && s.maxExposurePct <= 30 && s.ddStopPct > 0 && s.maxOpenPositions > 0 && s.maxBuysPerCoin > 0 && s.addOnlyInProfit, detail: `Position ≤ 5 % (${s.maxPositionPct}), Tagesverlust 1–10 % (${s.dailyLossLimitPct || 'aus'}), Exposure ≤ 30 % (${s.maxExposurePct}), Drawdown-Grenze an (${s.ddStopPct || 'aus'}), Positionen begrenzt (${s.maxOpenPositions || 'aus'}), Käufe pro Coin begrenzt (${s.maxBuysPerCoin || 'aus'}), Nachkauf nur im Gewinn (${s.addOnlyInProfit ? 'an' : 'aus'})` },
+      { name: 'Ehrliche Ausführung (echte Kursangebote, Honeypot-Schutz, Kostenprüfung)', ok: s.realQuotes && !s.quoteFallback && s.honeypotBlock && s.maxRoundTripLossPct > 0 && s.maxRoundTripLossPct <= 20, detail: `Jupiter-Angebote ${s.realQuotes ? 'an' : 'aus'}, ohne Schätz-Rückfall (${s.quoteFallback ? 'Rückfall an' : 'ok'}), Honeypot-Schutz ${s.honeypotBlock ? 'an' : 'aus'}, Rundreise-Kosten ≤ 20 % (${s.maxRoundTripLossPct || 'aus'})` },
       { name: 'Emergency Stop aus', ok: !state.bot.emergency, detail: state.bot.emergency ? 'aktiv' : 'aus' },
       { name: 'System Health ausreichend', ok: h.score >= s.minSystemHealth, detail: `${h.score} / min. ${s.minSystemHealth}` },
       { name: 'Kein offener Abgleich', ok: !state.reconciliation.required, detail: state.reconciliation.required ? 'RECONCILIATION REQUIRED' : 'ok' },
@@ -4257,7 +4527,8 @@ function createCore(opts) {
     for (const k of Object.keys(settings)) if (settings[k] !== before[k]) changes.push({ key: k, from: before[k], to: settings[k] });
     state.settings = settings; healthCache.at = -1;
     if (changes.length) {
-      state.configLog.unshift({ ts: env.now(), who, kind: 'settings', changes: changes.map(c => ({ ...c, from: c.key === 'rpcUrls' ? maskUrl(String(c.from).split(',')[0]) + '…' : c.from, to: c.key === 'rpcUrls' ? maskUrl(String(c.to).split(',')[0]) + '…' : c.to })) });
+      const mask = (k, v) => (k === 'rpcUrls' ? maskUrl(String(v).split(',')[0]) + '…' : SETTINGS_INDEX[k] && SETTINGS_INDEX[k].secret ? (v ? '••• (gesetzt)' : '(leer)') : v); // Keys nie im Protokoll
+      state.configLog.unshift({ ts: env.now(), who, kind: 'settings', changes: changes.map(c => ({ ...c, from: mask(c.key, c.from), to: mask(c.key, c.to) })) });
       if (state.configLog.length > 200) state.configLog.length = 200;
       log.info('SYSTEM', `Konfiguration geändert (${who}): ${changes.map(c => c.key).join(', ')}`);
       if (!o.noVersion && changes.some(c => c.key in TUNING_BOUNDS)) newParamVersion(pickTunable(), 'STABLE', 'Manuelle Änderung');
@@ -4452,6 +4723,8 @@ function createCore(opts) {
      Jede Anomalie hat einen Reason Code, einen Schweregrad und eine Aktion (WARN / DEGRADE / PAUSE / HARD_STOP).
      Standard „nur warnen“ (anomalyMode 'warn'); erst mit 'act' drosselt, pausiert oder stoppt der Monitor wirklich. */
   const CRIT_INTEGRITY = new Set(['NEGATIVE_CASH', 'QTY_MISMATCH', 'DOUBLE_FILL', 'DUPLICATE_POSITION']);
+  /* Erwartbare Fehlschläge der ehrlichen Simulation (Stufe B) – kein Systemfehler; eigene Quote-Kennzahl statt EXEC_FAILURES. */
+  const MARKET_FAIL = new Set(['TX_FAILED', 'SLIPPAGE_EXCEEDED']), ROUTE_FAIL = new Set(['NO_ROUTE']); // QUOTE_FAILED (z. B. Jupiter weg, kein Rückfall) bleibt ein Systemfehler
   const RISK_CATS = new Set(['LIMITS', 'COOLDOWN', 'PORTFOLIO']);
   function monitorMetrics() {
     const now = env.now(), s = S(), M = state.monitor;
@@ -4462,12 +4735,16 @@ function createCore(opts) {
     const last5 = state.orders.filter(o => o.state === 'COMPLETED' && isNum(o.latencyMs)).slice(0, 5);
     const fills = state.orders.filter(o => o.state === 'COMPLETED' && isNum(o.expSlipPct)).slice(0, 5);
     const codes = {}; for (const o of failed) codes[o.failureCode || 'UNBEKANNT'] = (codes[o.failureCode || 'UNBEKANNT'] || 0) + 1;
+    const sysFailed = failed.filter(o => !MARKET_FAIL.has(o.failureCode) && !ROUTE_FAIL.has(o.failureCode)), mktFailed = failed.filter(o => MARKET_FAIL.has(o.failureCode));
+    const quoted = ords.filter(o => o.quote && o.quote.source), jupN = quoted.filter(o => (o.quote.fillSource || o.quote.source) === 'JUPITER').length, fm = state.feeMarket;
     const L = state.learn, learnErr = log.entries.filter(e => e.category === 'LEARNING' && (e.level === 'ERROR' || e.level === 'CRITICAL') && now - e.ts <= HOUR).length;
     const learnStatus = !s.learnEnabled ? 'AUS' : learnErr || (L.records.length && now - L.lastRunAt > 10 * MIN) ? 'WARN' : 'OK';
     return {
       signals: { perHour: M.sigTimes.length, analyzed: dec.length },
       blocks: { security: share(t => t.D.analysisBlockers.some(b => /^SECURITY_/.test(b.code) && b.code !== 'SECURITY_UNKNOWN')), risk: share(t => [...t.D.analysisBlockers, ...t.D.execBlockers].some(b => b.code === 'RISK_TOO_HIGH' || RISK_CATS.has((BLOCKER_DEFS[b.code] || [])[1]))), approved: share(t => t.D.decision === 'APPROVED') },
-      exec: { orders: ords.length, completed: done.length, failed: failed.length, failed10: failed.filter(o => now - o.createdAt <= 10 * MIN).length, successRate: done.length + failed.length ? lr2(done.length / (done.length + failed.length)) : null, avgLatencyMs: done.filter(o => isNum(o.latencyMs)).length ? Math.round(avg(done.map(o => o.latencyMs).filter(isNum))) : null, recentLatencyMs: last5.length >= 3 ? Math.round(avg(last5.map(o => o.latencyMs))) : null, recentSlipPct: fills.length >= 3 ? lr2(avg(fills.map(o => o.expSlipPct))) : null, failureCodes: codes },
+      exec: { orders: ords.length, completed: done.length, failed: failed.length, failed10: sysFailed.filter(o => now - o.createdAt <= 10 * MIN).length,
+        txAttempts: done.length + mktFailed.length, txFailed: mktFailed.length, txFailRate: done.length + mktFailed.length ? lr2(mktFailed.length / (done.length + mktFailed.length)) : null, failedTxFeesUsd: lr2(state.portfolio.failedTxFees || 0),
+        quotes: quoted.length, jupiterShare: quoted.length ? lr2(jupN / quoted.length) : null, prioLamports: prioLamportsNow(), prioAuto: s.priorityFeeMode === 'auto' && !!fm && now - fm.at < 2 * MIN, successRate: done.length + failed.length ? lr2(done.length / (done.length + failed.length)) : null, avgLatencyMs: done.filter(o => isNum(o.latencyMs)).length ? Math.round(avg(done.map(o => o.latencyMs).filter(isNum))) : null, recentLatencyMs: last5.length >= 3 ? Math.round(avg(last5.map(o => o.latencyMs))) : null, recentSlipPct: fills.length >= 3 ? lr2(avg(fills.map(o => o.expSlipPct))) : null, failureCodes: codes },
       data: { tokens: toks.length, fresh: toks.length ? lr2(toks.filter(t => now - t.snap.fetchedAt <= s.staleAfterSec * SEC).length / toks.length) : null, primary: http.status('dexPairs') },
       learn: { status: learnStatus, enabled: !!s.learnEnabled, lastRunAgeMs: L.lastRunAt ? now - L.lastRunAt : null, records: L.records.length, followUps: L.followUps.length, nearMissOpen: L.nearMiss.open.length, drift: driftStatus(), errorsHour: learnErr }
     };
@@ -4478,6 +4755,8 @@ function createCore(opts) {
     if (mm.data.tokens >= 5 && mm.data.fresh != null && mm.data.fresh < 0.5) add('DATA_STALE_WIDE', 'HIGH', 'PAUSE', `nur ${Math.round(mm.data.fresh * 100)} % der Marktdaten frisch`);
     if (mm.data.primary === 'OFFLINE') add('PRIMARY_API_DOWN', 'HIGH', 'PAUSE', 'DexScreener (Hauptquelle) offline');
     if (mm.exec.failed10 >= 3) add('EXEC_FAILURES', 'HIGH', 'PAUSE', `${mm.exec.failed10} fehlgeschlagene Orders in 10 min`);
+    if (mm.exec.txAttempts >= 8 && mm.exec.txFailRate > Math.max(0.25, 3 * s.simTxFailPct / 100)) add('TX_FAIL_RATE', 'WARN', 'DEGRADE', `${Math.round(mm.exec.txFailRate * 100)} % der Transaktionen gescheitert (Slippage/Netzwerk, letzte Stunde)`);
+    if (mm.exec.quotes >= 5 && s.realQuotes && mm.exec.jupiterShare != null && mm.exec.jupiterShare < 0.5) add('QUOTES_ESTIMATED', 'WARN', 'WARN', `nur ${Math.round(mm.exec.jupiterShare * 100)} % der Füllungen mit echtem Jupiter-Angebot – Rest geschätzt`);
     if (mm.exec.recentLatencyMs != null && mm.exec.recentLatencyMs > 5000) add('EXEC_SLOW', 'WARN', 'DEGRADE', `Ø Ausführungszeit ${mm.exec.recentLatencyMs} ms (letzte Orders)`);
     if (mm.exec.recentSlipPct != null && mm.exec.recentSlipPct > s.maxSlippagePct) add('SLIPPAGE_SPIKE', 'WARN', 'DEGRADE', `Ø Slippage ${mm.exec.recentSlipPct} % > ${s.maxSlippagePct} % (letzte Orders)`);
     if (state.reconciliation.required) add('RECONCILIATION', 'HIGH', 'PAUSE', 'Abgleich nach Neustart offen');
@@ -4664,7 +4943,7 @@ function createCore(opts) {
       const nm = t.A && t.D ? nearMissOf(t.A, t.D, s) : null; if (!nm) continue;
       if (N.open.some(m => m.tokenId === t.id) || N.done.some(m => m.tokenId === t.id && now - m.ts < 2 * NEAR_MISS_WINDOW) || openPos(t.id)) continue;
       if (N.open.length >= LEARN_CAPS.nearMissOpen) { N.skipped++; continue; }
-      N.open.push({ id: 'NM-' + hashStr(t.id + ':' + now).toString(36).toUpperCase(), tokenId: t.id, symbol: t.symbol, ts: now, price: t.A.core.price, mc: t.A.core.mc, score: t.A.finalScore, code: nm.code, kind: nm.kind, gap: nm.gap, msg: str(nm.msg, 160), regime: [...arr(state.regime.tags)], samples: [[0, 0]], n: 1, lastT: 0, lastAt: t.snap ? t.snap.fetchedAt : now, maxPct: 0, minPct: 0, endPct: 0, hit: null, hitT: null });
+      N.open.push({ id: 'NM-' + hashStr(t.id + ':' + now).toString(36).toUpperCase(), tokenId: t.id, symbol: t.symbol, ts: now, price: t.A.core.price, mc: t.A.core.mc, score: t.A.finalScore, code: nm.code, kind: nm.kind, gap: nm.gap, msg: str(nm.msg, 160), disc: discoveryOf(t).primary, regime: [...arr(state.regime.tags)], samples: [[0, 0]], n: 1, lastT: 0, lastAt: t.snap ? t.snap.fetchedAt : now, maxPct: 0, minPct: 0, endPct: 0, hit: null, hitT: null });
       changed = true;
     }
     if (changed) touch('learning'); // Zwischenstände laufender Beobachtungen werden mit dem nächsten Speichern mitgenommen
@@ -4833,6 +5112,7 @@ function createCore(opts) {
     for (const [t, v] of Object.entries(R.regimeScoreBump)) if ((P.regimeScoreBump[t] || 0) !== v) out.push(`Regime ${t}: Score +${v}`);
     if (R.volumeConfirmPct !== (P.volumeConfirmPct || 0)) out.push(`Volume-Bestätigung ≥ +${R.volumeConfirmPct} %`);
     if (R.blockPostPump && !P.blockPostPump) out.push('keine Einstiege nach Pump');
+    for (const c of arr(R.blockDisc)) if (!arr(P.blockDisc).includes(c)) out.push(`Quelle ${DISC_DE[c] || c} meiden`);
     return out;
   }
   function liveBaseline() {
@@ -4927,7 +5207,7 @@ function createCore(opts) {
   }
   function learnView() {
     if (learnCache.at < 0 && state.learn.records.length) { const base = learnBase(state.learn.records); Object.assign(learnCache, { at: env.now(), stats: patternStatsAll(base), base, fam: familyStats(state.learn.records) }); }
-    return { stats: learnCache.stats, base: learnCache.base, fam: learnCache.fam || familyStats(state.learn.records), champion: champion(), challenger: challenger(), rulesText: rulesText(state.models.rules), params: curParams(), errors: errorClassStats(state.learn.records), nearMiss: nearMissStats(state.learn.nearMiss.done), nearMissOpen: state.learn.nearMiss.open.length, nearMissSkipped: state.learn.nearMiss.skipped };
+    return { stats: learnCache.stats, base: learnCache.base, fam: learnCache.fam || familyStats(state.learn.records), champion: champion(), challenger: challenger(), rulesText: rulesText(state.models.rules), params: curParams(), errors: errorClassStats(state.learn.records), nearMiss: nearMissStats(state.learn.nearMiss.done), disc: discoveryStats(state.learn.records, state.learn.nearMiss.done), nearMissOpen: state.learn.nearMiss.open.length, nearMissSkipped: state.learn.nearMiss.skipped };
   }
   /* Aktive Parameter mit Herkunft: letzter Eintrag im Änderungsprotokoll bzw. aktives gelerntes Modell. Unbekanntes bleibt als solches markiert. */
   function activeParams() {
@@ -5008,6 +5288,7 @@ function createCore(opts) {
     const zeroed = [], oldVer = !d.app || verLt(String(d.app), '2.8.0');
     if (oldVer) for (const [k, name] of [['lossCooldownMin', 'Loss-Cooldown'], ['globalPauseMin', 'Globale Pause']])
       if (state.settings[k] !== 0) { zeroed.push({ key: k, from: state.settings[k], to: 0 }); log.info('RISK', `${name}: ${state.settings[k]} min → 0 min (Umstellung 2.8.0)`); state.settings = { ...state.settings, [k]: 0 }; }
+    if (d.app && verLt(String(d.app), '2.11.0')) log.info('TRADE', `Ab 2.11.0 ehrliche Simulation: echte Jupiter-Kursangebote (nur Abfrage), Füllung nach ${state.settings.simLatencyMs} ms Wartezeit, ${state.settings.simTxFailPct} % gescheiterte Transaktionen, Priority Fee aus dem Netzwerk – einstellbar unter Einstellungen → Ausführung`);
     state.strategies = validateStrategies(d.strategies, defaultStrategies()).strategies;
     if (['SIMULATION', 'PAPER', 'READ_ONLY'].includes(d.mode)) state.mode = d.mode;
     if (d.bot && typeof d.bot === 'object') {
@@ -5128,19 +5409,19 @@ function createCore(opts) {
   function exportData(kind) {
     const ts = new Date(env.now()).toISOString().replace(/[:.]/g, '-');
     if (kind === 'journal-csv') {
-      const cols = ['id', 'mode', 'status', 'symbol', 'mint', 'pair', 'openedAt', 'closedAt', 'sizeUsd', 'feesUsd', 'slippageUsd', 'pnlUsd', 'pnlPct', 'score', 'confidence', 'risk', 'strategy', 'signals', 'exitReason', 'holdMin', 'reason'];
-      const rows = state.journal.map(j => [j.id, j.mode, j.status, j.symbol, j.mint, j.pair, isoTime(j.openedAt), isoTime(j.closedAt), j.sizeUsd, j.feesUsd, j.slippageUsd, j.result ? j.result.pnlUsd : '', j.result && isNum(j.result.pnlPct) ? j.result.pnlPct.toFixed(2) : '', j.score, j.confidence, j.risk ? j.risk.total : '', j.strategy, j.signals.map(s => s.type).join('|'), j.exitReason, j.holdMs ? (j.holdMs / MIN).toFixed(1) : '', j.reason]);
+      const cols = ['id', 'mode', 'status', 'symbol', 'mint', 'pair', 'openedAt', 'closedAt', 'sizeUsd', 'feesUsd', 'slippageUsd', 'pnlUsd', 'pnlPct', 'score', 'confidence', 'risk', 'strategy', 'signals', 'exitReason', 'holdMin', 'reason', 'discovery'];
+      const rows = state.journal.map(j => [j.id, j.mode, j.status, j.symbol, j.mint, j.pair, isoTime(j.openedAt), isoTime(j.closedAt), j.sizeUsd, j.feesUsd, j.slippageUsd, j.result ? j.result.pnlUsd : '', j.result && isNum(j.result.pnlPct) ? j.result.pnlPct.toFixed(2) : '', j.score, j.confidence, j.risk ? j.risk.total : '', j.strategy, j.signals.map(s => s.type).join('|'), j.exitReason, j.holdMs ? (j.holdMs / MIN).toFixed(1) : '', j.reason, j.discovery || '']);
       return { name: `smartlab-journal-${ts}.csv`, mime: 'text/csv', data: [cols, ...rows].map(r => r.map(csvCell).join(',')).join('\n') };
     }
     if (kind === 'backup-json') return { name: `smartlab-backup-${ts}.json`, mime: 'application/json', data: JSON.stringify(exportBackup()) };
     if (kind === 'learning-report-csv') {
-      const cols = ['tradeId', 'symbol', 'strategy', 'openedAt', 'closedAt', 'pnlUsd', 'pnlPct', 'win', 'lossFamily', 'secondary', 'evidence', 'avoidable', 'dataCompleteness', 'dataQuality', 'signalQuality', 'exitQuality', 'executionQuality', 'regimeFit', 'score', 'regime', 'mae2m', 'mfe2m', 'maxRunupPct', 'followUpMaxPct', 'exitReason', 'legacy', 'errorClass', 'lossVerdict', 'plannedStopPct'];
-      const rows = state.learn.records.map(r => { const l = r.labels || {}; return [r.tradeId, r.symbol, r.strategy || 'manuell', isoTime(r.openedAt), isoTime(r.closedAt), r.outcome.pnlUsd, r.outcome.pnlPct, r.outcome.win, l.lossFamily || '', arr(l.secondary).join('|'), l.lossFamily ? (l.evidence || {})[l.lossFamily] : '', l.avoidable, l.dataCompleteness, l.dataQuality, l.signalQuality, l.exitQuality, l.executionQuality, l.regimeFit, r.entry ? r.entry.finalScore : '', arr(r.regimeTags).join('|'), r.path.mae2m, r.path.mfe2m, r.path.maxRunupPct, r.followUp ? r.followUp.maxAfterPct : '', r.exit.reason, !!r.legacy, l.errorClass || '', l.lossVerdict || '', l.expectedLoss && isNum(l.expectedLoss.plannedPct) ? l.expectedLoss.plannedPct : '']; });
+      const cols = ['tradeId', 'symbol', 'strategy', 'openedAt', 'closedAt', 'pnlUsd', 'pnlPct', 'win', 'lossFamily', 'secondary', 'evidence', 'avoidable', 'dataCompleteness', 'dataQuality', 'signalQuality', 'exitQuality', 'executionQuality', 'regimeFit', 'score', 'regime', 'mae2m', 'mfe2m', 'maxRunupPct', 'followUpMaxPct', 'exitReason', 'legacy', 'errorClass', 'lossVerdict', 'plannedStopPct', 'discovery'];
+      const rows = state.learn.records.map(r => { const l = r.labels || {}; return [r.tradeId, r.symbol, r.strategy || 'manuell', isoTime(r.openedAt), isoTime(r.closedAt), r.outcome.pnlUsd, r.outcome.pnlPct, r.outcome.win, l.lossFamily || '', arr(l.secondary).join('|'), l.lossFamily ? (l.evidence || {})[l.lossFamily] : '', l.avoidable, l.dataCompleteness, l.dataQuality, l.signalQuality, l.exitQuality, l.executionQuality, l.regimeFit, r.entry ? r.entry.finalScore : '', arr(r.regimeTags).join('|'), r.path.mae2m, r.path.mfe2m, r.path.maxRunupPct, r.followUp ? r.followUp.maxAfterPct : '', r.exit.reason, !!r.legacy, l.errorClass || '', l.lossVerdict || '', l.expectedLoss && isNum(l.expectedLoss.plannedPct) ? l.expectedLoss.plannedPct : '', (r.entry && r.entry.disc) || '']; });
       return { name: `smartlab-learning-report-${ts}.csv`, mime: 'text/csv', data: [cols, ...rows].map(r => r.map(csvCell).join(',')).join('\n') };
     }
     const payloads = {
       'journal-json': () => ({ journal: state.journal }),
-      'settings-json': () => ({ settings: state.settings, strategies: state.strategies, watchlist: state.watchlist }),
+      'settings-json': () => ({ settings: Object.fromEntries(Object.entries(state.settings).filter(([k]) => !(SETTINGS_INDEX[k] && SETTINGS_INDEX[k].secret))), strategies: state.strategies, watchlist: state.watchlist }), // ohne API-Keys (Datei wird oft weitergegeben)
       'analytics-json': () => ({ performance: perfStats(state.journal), stratStats: state.stratStats, falseSignals: state.falseSignals, paramVersions: state.paramVersions, sessions: state.sessions, hist: state.hist }),
       'logs-json': () => ({ logs: log.entries, audit: state.auditLog, config: state.configLog }),
       'learning-json': () => ({ learning: state.learn }),
@@ -5266,7 +5547,7 @@ function createCore(opts) {
     updateSettings, updateStrategies, rollbackTo, addWatch, removeWatch, updateWatch, select, exportData, importSettings, resetSettings, resetPortfolio, freshStart,
     learnView, learnDecision, learnPromote, learnReject, learnRollback, activeParams, monitorMetrics, exportBackup, validateBackup, restoreBackup, recordBacktest, learnRunNow: () => { const r = learnRun(true); persistNow(); return r; },
     newSession, factoryReset, persistNow, enqueueSecurity, clearFeed: () => { state.feed = []; persist(); },
-    _t: { posTransition, runProviderSteps, liveProvider, simProvider, scanOnce, updateSolPrice, applySnapshot, applyAlt, fetchChunk, reconcile, analyzeAll, startScanner, stopScanner, timers, managePositions, closePosition, processQueue, enqueue, checkSecurity, ensureToken, maybeAutoTrade, setBotState, learnRun, learnOnClose, learnFollowUps, finishFollowUp, createChallenger, shadowEval, liveEval, addRecord, nearMissTick, maybeTune, updateSettings, monitorTick }
+    _t: { posTransition, runProviderSteps, liveProvider, simProvider, updatePriorityFee, writeOffPosition, scanOnce, updateSolPrice, applySnapshot, applyAlt, fetchChunk, reconcile, analyzeAll, startScanner, stopScanner, timers, managePositions, closePosition, processQueue, enqueue, checkSecurity, ensureToken, maybeAutoTrade, setBotState, learnRun, learnOnClose, learnFollowUps, finishFollowUp, createChallenger, shadowEval, liveEval, addRecord, nearMissTick, maybeTune, updateSettings, monitorTick }
   };
 }
 
@@ -5300,6 +5581,7 @@ function makeTestHarness() {
       if (url.startsWith(DEX_API)) return mockResponse(200, []);
       if (url.startsWith(GT_API)) return mockResponse(200, url.includes('/ohlcv/') ? { data: { attributes: { ohlcv_list: [] } } } : { data: [] });
       if (url.startsWith(RUG_API)) return H.rugFail ? mockResponse(500, 'err') : mockResponse(200, { score: 120, score_normalised: 4, risks: [], lpLockedPct: 100 });
+      if (url.startsWith(JUP_API_FREE) || url.startsWith(JUP_API_KEYED)) return H.jupiter(url, init);
       if (init && init.method === 'POST') {
         if (H.rpcFail) return mockResponse(503, 'down');
         const body = parseJSON(init.body, {});
@@ -5307,12 +5589,27 @@ function makeTestHarness() {
         if (body.method === 'getTokenLargestAccounts') return mockResponse(200, { jsonrpc: '2.0', id: 1, result: { value: Array.from({ length: 10 }, (_, i) => ({ address: tMint(i + 1), amount: '20000000000', decimals: 6 })) } });
         if (body.method === 'getSlot') return mockResponse(200, { jsonrpc: '2.0', id: 1, result: 300000000 });
         if (body.method === 'getBalance') return mockResponse(200, { jsonrpc: '2.0', id: 1, result: { value: 1000000000 } });
+        if (body.method === 'getRecentPrioritizationFees') return mockResponse(200, { jsonrpc: '2.0', id: 1, result: Array.from({ length: 8 }, (_, i) => ({ slot: 300000000 + i, prioritizationFee: H.prioFee * (i + 1) / 8 })) });
         return mockResponse(200, { jsonrpc: '2.0', id: 1, error: { message: 'unbekannte Methode' } });
       }
       return mockResponse(404, 'not found');
     }
   };
   H.env = env;
+  /* Jupiter-Attrappe: Konstantprodukt-AMM auf Preis/Liquidität des Test-Pairs (6 Decimals, SOL 150 $, 0,25 % Gebühr + optionale Steuer). */
+  H.prioFee = 1000; H.jup = { noRoute: new Set(), noSell: new Set(), taxPct: 0, down: false, calls: 0 };
+  H.jupiter = (url, init) => {
+    H.jup.calls++; H.jup.lastHeaders = (init && init.headers) || null;
+    if (H.jup.down) return mockResponse(503, 'down');
+    const u = new URL(url), inM = u.searchParams.get('inputMint'), outM = u.searchParams.get('outputMint'), amt = Number(u.searchParams.get('amount')), bps = Number(u.searchParams.get('slippageBps'));
+    const buy = inM === WSOL, mint = buy ? outM : inM, pf = H.market[mint];
+    if (!pf || H.jup.noRoute.has(mint) || (!buy && H.jup.noSell.has(mint))) return mockResponse(400, { error: 'Could not find any route', errorCode: 'COULD_NOT_FIND_ANY_ROUTE' });
+    const pr = pf(), price = Number(pr.priceUsd), liq = pr.liquidity.usd, sol = 150, keep = 1 - 0.0025 - H.jup.taxPct / 100;
+    let out;
+    if (buy) { const usd = amt / 1e9 * sol; out = Math.floor(usd * keep / (price * (1 + usd / (liq / 2))) * 1e6); }
+    else { const usd = amt / 1e6 * price; out = Math.floor(usd * keep / (1 + usd / (liq / 2)) / sol * 1e9); }
+    return mockResponse(200, { inputMint: inM, outputMint: outM, inAmount: String(amt), outAmount: String(out), otherAmountThreshold: String(Math.floor(out * (1 - bps / 1e4))), slippageBps: bps, priceImpactPct: '0', routePlan: [{ swapInfo: { label: 'Raydium' }, percent: 100 }], contextSlot: 1 });
+  };
   H.pair = (mint, o = {}) => () => ({
     chainId: 'solana', dexId: 'raydium', url: 'https://dexscreener.com/solana/test', pairAddress: o.pair || ('Pa' + mint.slice(3)),
     baseToken: { address: mint, name: 'Testtoken ' + mint.slice(3, 5), symbol: o.sym || 'TST' + mint.slice(3, 4) }, quoteToken: { address: WSOL, symbol: 'SOL' },
@@ -5327,7 +5624,7 @@ function makeTestHarness() {
 async function testCore(H, settings) {
   const core = createCore({ env: H.env, backend: H.backend || (H.backend = createMemoryBackend()) });
   core.init({ autoStart: false });
-  core.updateSettings({ minPairAgeMin: 0, ...(settings || {}) }, 'TEST');
+  core.updateSettings({ minPairAgeMin: 0, simLatencyMs: 0, ...(settings || {}) }, 'TEST'); // Wartezeit nur in eigenen Tests (Laufzeit)
   await core._t.updateSolPrice(true);
   return core;
 }
@@ -5745,11 +6042,11 @@ const SELF_TESTS = [
     assert(core.execProvider('LIVE') === 'LIVE' && core.execProvider() === 'SIMULATION', 'Provider-Auswahl falsch');
     const t = await prepToken(core, H, 1);
     const r = await core.executeBuy(t.id, { sizeUsd: 20 });
-    assert(r.ok && r.order.provider === 'SIMULATION' && /AMM/.test(r.order.route) && r.order.history.some(h => h.s === 'SUBMITTING' && /Preflight ok/.test(h.note)), 'Provider-Schritte fehlen im Order-Verlauf');
+    assert(r.ok && r.order.provider === 'SIMULATION' && /Jupiter/.test(r.order.route) && r.order.quote.source === 'JUPITER' && r.order.history.some(h => h.s === 'SUBMITTING' && /Preflight ok/.test(h.note)), 'Provider-Schritte fehlen im Order-Verlauf');
     H.rpcFail = true; H.rugFail = true; const t2 = await prepToken(core, H, 2);
     const r2 = await core.executeBuy(t2.id, { sizeUsd: 20 });
     assert(!r2.ok && r2.order.failureCode === 'PRE_TRADE_BLOCKED', 'Fehlercode fehlt: ' + (r2.order && r2.order.failureCode));
-    const sq = T.simProvider.quote({ side: 'BUY', sizeUsd: 10, snap: { priceUsd: null } });
+    const sq = await T.simProvider.quote({ side: 'BUY', sizeUsd: 10, snap: { priceUsd: null } });
     assert(!sq.ok && sq.code === 'QUOTE_FAILED', 'ungültige Quote nicht abgewiesen');
     return 'SIMULATION: Quote→Preflight→Sign→Send→Confirm · LIVE: NO_ROUTER / SIGNATURE_DISABLED · Codes PRE_TRADE_BLOCKED, QUOTE_FAILED';
   }],
@@ -6272,6 +6569,107 @@ const SELF_TESTS = [
     core.updateSettings({ learnEnabled: false }, 'TEST');
     assert(core.monitorMetrics().learn.status === 'AUS', 'Lern-KI aus nicht erkannt');
     return `${m.exec.orders} Order(s), Erfolg ${Math.round(m.exec.successRate * 100)} %, Ø ${m.exec.avgLatencyMs} ms · Daten ${Math.round(m.data.fresh * 100)} % frisch · Lern-KI ${m.learn.status}`;
+  }],
+  ['Ehrliche Simulation', 'Echte Kursangebote (Jupiter): Füllung zum Angebot, Honeypot & Rundreise-Kosten blockieren, Rückfall markiert', async () => {
+    const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1);
+    const r = await core.executeBuy(t.id, { sizeUsd: 20 });
+    assert(r.ok && r.order.quote.source === 'JUPITER' && /Raydium/.test(r.order.route) && isNum(r.order.quote.roundTripPct) && r.order.quote.roundTripPct > 0 && r.order.quote.roundTripPct < 3, 'Kauf nicht über Jupiter-Angebot: ' + JSON.stringify(r.order && r.order.quote));
+    const pos = core.state.positions[0], e = pos.entries[0];
+    assert(pos.decimals === 6 && e.source === 'JUPITER' && e.price > 0.001 && e.price < 0.00101 && r.order.fees.dex === 0, 'Füllpreis/Decimals/Gebühren falsch: ' + e.price);
+    const s1 = await core.executeSell(pos.id, 'ALL', 'MANUAL');
+    assert(s1.ok && s1.order.quote.source === 'JUPITER' && !core.state.positions.length && s1.order.fillPrice < 0.001, 'Verkauf nicht über Jupiter-Angebot');
+    const t2 = await prepToken(core, H, 2); H.jup.noSell.add(t2.mint);
+    const h = await core.executeBuy(t2.id, { sizeUsd: 20 });
+    assert(!h.ok && codes(h).includes('NO_SELL_ROUTE') && core.execCheck(t2, {}).blockers.some(b => b.code === 'NO_SELL_ROUTE') && !core.state.positions.length, 'Honeypot nicht blockiert: ' + codes(h).join(','));
+    const t3 = await prepToken(core, H, 3); H.jup.taxPct = 12.5;
+    const x = await core.executeBuy(t3.id, { sizeUsd: 20 }); H.jup.taxPct = 0;
+    assert(!x.ok && codes(x).includes('ROUND_TRIP_COST'), 'Rundreise-Kosten nicht blockiert: ' + codes(x).join(','));
+    core.updateSettings({ jupApiKey: 'test-key_1' }, 'TEST'); const t4 = await prepToken(core, H, 4);
+    assert((await core.executeBuy(t4.id, { sizeUsd: 20 })).ok && H.calls.some(u => u.startsWith(JUP_API_KEYED)) && H.jup.lastHeaders && H.jup.lastHeaders['x-api-key'] === 'test-key_1', 'API-Key nicht verwendet');
+    assert(validateSettings({ jupApiKey: 'a b<script>' }, core.S()).errors.length === 1, 'ungültiger API-Key angenommen');
+    assert(!core.exportData('settings-json').data.includes('test-key_1') && !core.exportData('logs-json').data.includes('test-key_1'), 'API-Key im Einstellungs-/Log-Export');
+    core.updateSettings({ jupApiKey: '' }, 'TEST');
+    H.jup.down = true; const t5 = await prepToken(core, H, 5);
+    const f = await core.executeBuy(t5.id, { sizeUsd: 20 });
+    assert(f.ok && f.order.quote.source === 'AMM' && /Jupiter/.test(f.order.quote.fallbackReason || '') && /AMM/.test(f.order.route), 'Rückfall nicht als Schätzung markiert');
+    core.updateSettings({ quoteFallback: false }, 'TEST'); const t6 = await prepToken(core, H, 6);
+    const n = await core.executeBuy(t6.id, { sizeUsd: 20 }); H.jup.down = false;
+    assert(!n.ok && n.order.failureCode === 'QUOTE_FAILED', 'ohne Rückfall trotzdem gehandelt');
+    assert(core.liveReadiness().checks.find(c => /^Ehrliche Ausführung/.test(c.name)).ok, 'LIVE-Gate: ehrliche Ausführung nicht erkannt');
+    core.updateSettings({ quoteFallback: true }, 'TEST');
+    assert(!core.liveReadiness().checks.find(c => /^Ehrliche Ausführung/.test(c.name)).ok, 'LIVE-Gate akzeptiert Schätz-Rückfall');
+    assert(H.calls.filter(u => /jup\.ag/.test(u)).every(u => /\/swap\/v1\/quote\?/.test(u)), 'Jupiter-Aufruf außer /quote');
+    return `Kauf/Verkauf zum Jupiter-Angebot (Rundreise ${r.order.quote.roundTripPct} %) · Honeypot → NO_SELL_ROUTE · Steuer → ROUND_TRIP_COST · API-Key per Header · Rückfall AMM markiert · nur /quote`;
+  }],
+  ['Ehrliche Simulation', 'Ausführung wie on-chain: Wartezeit, Füllung zum späteren Angebot, Slippage-Grenze, gescheiterte Transaktion kostet Gebühr', async () => {
+    const H = makeTestHarness(); const core = await testCore(H, { simLatencyMs: 40 });
+    const t = await prepToken(core, H, 1); H.jup.calls = 0;
+    H.market[t.mint] = () => H.pair(t.mint, { price: H.jup.calls >= 3 ? 0.00102 : 0.001 })(); // Preis steigt während der Wartezeit um 2 %
+    const r = await core.executeBuy(t.id, { sizeUsd: 20 });
+    assert(r.ok && r.order.quote.latencyApplied && r.order.fillPrice > 0.00102 && r.order.expSlipPct > 2 && r.order.latencyMs >= 40 && r.order.history.some(x => /Warte 40 ms/.test(x.note || '')), 'Füllung nicht zum späteren Preis: ' + r.order.fillPrice);
+    const t2 = await prepToken(core, H, 2); H.jup.calls = 0;
+    H.market[t2.mint] = () => H.pair(t2.mint, { price: H.jup.calls >= 3 ? 0.00105 : 0.001 })(); // +5 % > 3 % Slippage-Grenze
+    const cash0 = core.state.portfolio.cash, real0 = core.state.portfolio.realized;
+    const r2 = await core.executeBuy(t2.id, { sizeUsd: 20 }), lost = cash0 - core.state.portfolio.cash;
+    assert(!r2.ok && r2.order.failureCode === 'SLIPPAGE_EXCEEDED' && r2.order.fees.failedTx && lost > 0.01 && lost < 0.05 && Math.abs(core.state.portfolio.realized - (real0 - lost)) < 1e-6 && core.state.positions.length === 1, 'Slippage-Fehlschlag falsch verbucht: ' + lost);
+    const pos = core.state.positions[0]; core.updateSettings({ simTxFailPct: 50 }, 'TEST'); H.env.random = () => 0.1;
+    const s1 = await core.executeSell(pos.id, 'ALL', 'MANUAL');
+    assert(!s1.ok && s1.order.failureCode === 'TX_FAILED' && pos.failedTx === 1 && pos.realizedUsd < 0 && core.state.positions.length === 1, 'gescheiterter Verkauf falsch: ' + (s1.order && s1.order.failureCode));
+    H.env.random = () => 0.9; const s2 = await core.executeSell(pos.id, 'ALL', 'MANUAL');
+    const j = core.state.journal.find(x => x.id === pos.id);
+    assert(s2.ok && !core.state.positions.length && j.result && Math.abs(j.result.pnlUsd - pos.realizedUsd) < 1e-6 && pos.lc === 'RECONCILED' && core.portfolioIntegrity().ok, 'Gebühr des Fehlversuchs nicht im Ergebnis/Abgleich');
+    H.prioFee = 2e6; const t3 = await prepToken(core, H, 3);
+    const r3 = await core.executeBuy(t3.id, { sizeUsd: 20 });
+    assert(r3.ok && r3.order.quote.prioLamports === 468750, 'Priority Fee nicht aus Netzwerkgebühren: ' + (r3.order.quote && r3.order.quote.prioLamports));
+    core.updateSettings({ priorityFeeMode: 'fixed' }, 'TEST'); const t4 = await prepToken(core, H, 4);
+    const r4 = await core.executeBuy(t4.id, { sizeUsd: 20 });
+    assert(r4.ok && r4.order.quote.prioLamports === core.S().priorityFeeLamports, 'fester Wert nicht verwendet');
+    return `Füllung nach 40 ms zum +2 %-Preis · +5 % → SLIPPAGE_EXCEEDED, Gebühr ${fmtUsd(lost, 4)} bezahlt · TX_FAILED → neuer Versuch, Ergebnis abgeglichen · Priority Fee automatisch ${r3.order.quote.prioLamports} Lamports`;
+  }],
+  ['Ehrliche Simulation', 'Kein Verkaufsweg: Position zählt 0 $, nach 30 min Totalverlust abgeschrieben und gelernt', async () => {
+    const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1);
+    assert((await core.executeBuy(t.id, { sizeUsd: 20 })).ok, 'Kauf fehlgeschlagen');
+    const pos = core.state.positions[0]; H.jup.noSell.add(t.mint);
+    const s1 = await core.executeSell(pos.id, 'ALL', 'STOP_LOSS', { auto: true });
+    assert(!s1.ok && s1.order.failureCode === 'NO_ROUTE' && pos.noRouteSince > 0 && pos.sellRetryAt > H.env.now() && core.state.positions.length === 1, 'fehlender Verkaufsweg nicht erkannt');
+    await core._t.managePositions();
+    assert(pos.value === 0 && core.equityInfo().equity < core.S().simCapitalUsd - 19, 'Position ohne Verkaufsweg nicht mit 0 bewertet: ' + pos.value);
+    H.env.advance(31 * MIN); await core._t.fetchChunk([t.mint], true);
+    const s2 = await core.executeSell(pos.id, 'ALL', 'STOP_LOSS', { auto: true });
+    const j = core.state.journal.find(x => x.id === pos.id), rec = core.state.learn.records.find(x => x.tradeId === pos.id);
+    assert(s2.ok && s2.writtenOff && !core.state.positions.length && s2.order.state === 'CANCELLED' && s2.order.failureCode === 'WRITTEN_OFF', 'nicht abgeschrieben');
+    assert(j.exitReason === 'NO_SELL_ROUTE' && Math.abs(j.result.pnlUsd + 20) < 1e-6 && pos.lc === 'RECONCILED' && rec && rec.labels && rec.labels.lossFamily === 'SECURITY_RELATED', 'Totalverlust falsch verbucht/gelernt: ' + JSON.stringify(j.result) + ' ' + (rec && rec.labels && rec.labels.lossFamily));
+    return `NO_ROUTE → Wert 0 $ · nach ${NO_ROUTE_WRITEOFF_MIN} min abgeschrieben (${fmtSigned(j.result.pnlUsd)}) · Lern-KI: ${rec.labels.lossFamily}`;
+  }],
+  ['Ehrliche Simulation', 'Monitor: simulierte Fehlschläge sind kein Systemfehler, auffällige Fehlquote wird gemeldet', async () => {
+    const H = makeTestHarness(); const core = await testCore(H), st = core.state, now = H.env.now();
+    for (let i = 0; i < 4; i++) st.orders.unshift({ id: 'TX' + i, side: 'BUY', symbol: 'X', state: 'FAILED', createdAt: now - i * SEC, failureCode: i < 2 ? 'TX_FAILED' : 'SLIPPAGE_EXCEEDED', history: [] });
+    for (let i = 0; i < 6; i++) st.orders.unshift({ id: 'OK' + i, side: 'BUY', symbol: 'X', state: 'COMPLETED', createdAt: now - i * SEC, latencyMs: 1600, expSlipPct: 0.5, quote: { source: 'JUPITER' }, history: [] });
+    const r = core._t.monitorTick(H.env.now()), m = core.monitorMetrics();
+    assert(!r.active.some(a => a.code === 'EXEC_FAILURES') && r.active.some(a => a.code === 'TX_FAIL_RATE' && a.action === 'DEGRADE') && m.exec.txFailRate === 0.4 && m.exec.jupiterShare === 1, 'Fehlquote falsch: ' + JSON.stringify([r.active.map(a => a.code), m.exec.txFailRate, m.exec.jupiterShare]));
+    return 'TX_FAILED / SLIPPAGE_EXCEEDED zählen nicht als EXEC_FAILURES · 40 % Fehlquote → TX_FAIL_RATE (Größe ×0,5 nur im Modus „handeln“)';
+  }],
+  ['Ehrliche Simulation', 'Coin-Quelle als Lernmerkmal: gespeichert, ausgewertet, „Quelle meiden“ nur als getestete Hypothese', async () => {
+    const map = { 'DexScreener Top-Boost': 'TOP_BOOST', 'DexScreener Boost': 'BOOST', 'DexScreener Profile': 'PROFILE', 'GeckoTerminal New': 'NEW_POOL', 'GeckoTerminal Trending': 'TRENDING', Watchlist: 'WATCHLIST', Position: 'POSITION', Test: 'OTHER', '': 'UNKNOWN' };
+    assert(Object.entries(map).every(([v, c]) => discCodeOf(v) === c), 'Quellen falsch zugeordnet');
+    const H = makeTestHarness(); const core = await testCore(H);
+    const m = tMint(1); H.market[m] = H.pair(m); core._t.ensureToken(m, 'DexScreener Boost'); core._t.ensureToken(m, 'GeckoTerminal Trending');
+    const { rec, pos } = await learnTrade(H, core, 1, 0.0011);
+    const j = core.state.journal.find(x => x.id === pos.id);
+    assert(rec && rec.entry.disc === 'BOOST' && rec.entry.discPaid === true && rec.entry.discAll.includes('TRENDING') && j.discovery === 'BOOST', 'Quelle nicht im Lern-Record/Journal: ' + JSON.stringify(rec && rec.entry && [rec.entry.disc, rec.entry.discAll]));
+    assert(patternKeysOf(rec).some(k => k.key === 'disc=BOOST'), 'Quelle fehlt in der Musterauswertung');
+    const recs = Array.from({ length: 30 }, (_, i) => { const r = mkLearnRec(i, { pnlPct: i % 3 === 0 ? -12 : 6 }); r.entry.disc = i % 3 === 0 ? 'PROFILE' : 'NEW_POOL'; return r; });
+    const ds = discoveryStats(recs, [{ disc: 'PROFILE', outcome: 'AVOIDED_LOSS' }, { disc: 'NEW_POOL', outcome: 'NO_DATA' }]), pr = ds.rows.find(x => x.disc === 'PROFILE');
+    assert(pr && pr.n === 10 && pr.verdict === 'WORSE' && pr.nmAvoided === 1 && ds.rows.find(x => x.disc === 'NEW_POOL').verdict === 'BETTER', 'Quellen-Auswertung falsch: ' + JSON.stringify(ds.rows));
+    const base = learnTestBase(), st = (disc, expPct) => ({ key: 'disc=' + disc, dims: { disc }, entry: true, status: 'HYPOTHESIS', direction: 'WORSE', n: 10, expPct });
+    const hy = generateHypotheses([st('PROFILE', -12), st('WATCHLIST', -12)], null, { expPct: 0 }, base, H.env.now());
+    assert(hy.length === 1 && hy[0].type === 'BLOCK_DISC' && hy[0].change.rules.blockDisc[0] === 'PROFILE' && hy[0].status === 'IDEA', 'Hypothese „Quelle meiden“ falsch: ' + JSON.stringify(hy.map(h => h.change)));
+    const P = mergeParams(base, { rules: { blockDisc: ['PROFILE', 'WATCHLIST'] } });
+    assert(P.rules.blockDisc.join() === 'PROFILE' && !passesParams(recs[0], P) && passesParams(recs[1], P) && sanitizeRules({ blockDisc: ['BOOST', '<x>', 'BOOST', 'POSITION'] }).blockDisc.join() === 'BOOST', 'Regel nicht korrekt begrenzt');
+    const t2 = await prepToken(core, H, 2); core._t.ensureToken(t2.mint, 'X'); t2.meta.via = ['DexScreener Profile'];
+    core.state.models.rules = sanitizeRules({ blockDisc: ['PROFILE'] }); core._t.analyzeAll();
+    assert(t2.D.analysisBlockers.some(b => b.code === 'LEARNED_RULE' && /Profil/.test(b.msg)), 'gelernte Quellen-Regel greift nicht');
+    return 'Quelle in Features, Journal & Mustern · PROFILE schlechter als Ø → Hypothese BLOCK_DISC (nur automatische Quellen) · Regel greift erst nach Übernahme';
   }],
   ['System', 'Backtest ohne Look-Ahead', async () => {
     const c = []; let p = 1;
@@ -6838,10 +7236,12 @@ function positionCard(p) {
       ${kv('Größe (Kosten)', fmtUsd(p.costUsd))}${kv('Anteil', eq.equity > 0 ? (p.costUsd / eq.equity * 100).toFixed(1) + '%' : '—')}
       ${kv('Stop (' + p.stopType + ')', pxMc(p.stop, r))}${kv('Trailing', p.trailing ? 'aktiv' : 'ab +' + S.trailActivatePct + '%')}
       ${kv('TP1', tpTxt(0))}${kv('TP2', tpTxt(1))}${kv('TP3', pxMc(p.tps[2], r))}${kvA('Risk', t && t.A ? t.A.risk.level + ' ' + t.A.risk.total : '—')}
-      ${kv('Realisiert', fmtSigned(p.realizedUsd), 'SIMULATED')}${kv('Fees', fmtUsd(p.feesUsd, 4))}${kvA('Exit-Impact (voll)', isNum(p.exitImpactPct) ? p.exitImpactPct.toFixed(2) + '%' : '—', 'ESTIMATED')}${kv('Buys', p.entries.length + '/' + Math.min(S.maxBuysPerCoin, 2))}
+      ${kv('Realisiert', fmtSigned(p.realizedUsd), 'SIMULATED')}${kv('Fees', fmtUsd(p.feesUsd, 4))}${kvA('Exit-Impact (voll)', isNum(p.exitImpactPct) ? p.exitImpactPct.toFixed(2) + '%' : '—', 'ESTIMATED')}${kv('Buys', p.entries.length + '/' + (S.maxBuysPerCoin > 0 ? S.maxBuysPerCoin : '∞'))}
     </div>
     ${p.timeExitFlag ? html`<p class="note warn">⏱ Time Exit Candidate – erwartete Bewegung blieb aus.</p>` : ''}
     ${p.exitPending ? html`<p class="note bad">Exit ausgesetzt (${p.exitPending.code}): ${p.exitPending.blocker}</p>` : ''}
+    ${p.noRouteSince ? html`<p class="note bad">Kein Verkaufsweg über Jupiter seit ${fmtAge(now - p.noRouteSince)} – zählt mit 0 $; ohne neuen Verkaufsweg wird die Position nach ${NO_ROUTE_WRITEOFF_MIN} min als Totalverlust abgeschrieben.</p>` : ''}
+    ${p.failedTx ? html`<p class="note warn">${p.failedTx} gescheiterte Verkaufs-Transaktion(en) – Netzwerkgebühren sind im Ergebnis enthalten.</p>` : ''}
     ${arr(p.lcHistory).length ? html`<details class="an"><summary class="mut">Lebenszyklus (${p.lcHistory.length} Schritte)</summary><ul class="trace">${p.lcHistory.map(h => html`<li><b>${fmtTime(h.ts)}</b><span>${POS_LC_DE[h.s] || h.s}${h.note ? ' – ' + h.note : ''}</span></li>`)}</ul></details>` : ''}
     <div class="row" style="margin-top:8px"><button class="btn sm" data-act="select" data-id="${p.tokenId}">Details</button><button class="btn sm warn" data-act="sell" data-id="${p.id}" data-frac="0.25">Verkaufen 25 %</button><button class="btn sm warn" data-act="sell" data-id="${p.id}" data-frac="0.5">50 %</button><button class="btn sm bad" data-act="sell" data-id="${p.id}" data-frac="ALL">100 %</button></div></div>`;
 }
@@ -6868,9 +7268,10 @@ function orderModal(id) {
   const o = core.state.orders.find(x => x.id === id); if (!o) return;
   const r = orderMcRatio(o);
   openModal({ title: 'Order Receipt · ' + o.id, body: html`
-    <div class="grid2">${kv('Token', o.symbol)}${kv('Seite', o.side + (o.buyNo ? ' #' + o.buyNo : ''))}${kv('Status', o.state)}${kv('Modus', o.mode)}${kv('Größe', o.sizeUsd != null ? fmtUsd(o.sizeUsd) : '—')}${kv('Menge', o.qty != null ? fmtNum(o.qty, 2) : '—')}${kv('Referenz', pxMc(o.estPrice, r))}${kv('Füllung', pxMc(o.fillPrice, r), o.fillPrice ? 'SIMULATED' : null)}${kvA('Price Impact', isNum(o.expSlipPct) ? o.expSlipPct.toFixed(3) + '%' : '—', 'ESTIMATED')}${kv('Fees', o.fees ? fmtUsd(o.fees.total, 4) : '—', 'ESTIMATED')}${kvA('Latenz', o.latencyMs != null ? o.latencyMs + ' ms' : '—')}${kv('Transaktion', 'keine (Simulation)')}</div>
+    <div class="grid2">${kv('Token', o.symbol)}${kv('Seite', o.side + (o.buyNo ? ' #' + o.buyNo : ''))}${kv('Status', o.state)}${kv('Modus', o.mode)}${kv('Größe', o.sizeUsd != null ? fmtUsd(o.sizeUsd) : '—')}${kv('Menge', o.qty != null ? fmtNum(o.qty, 2) : '—')}${kv('Referenz', pxMc(o.estPrice, r))}${kv('Füllung', pxMc(o.fillPrice, r), o.fillPrice ? 'SIMULATED' : null)}${kvA('Abweichung zum Signalpreis', isNum(o.expSlipPct) ? o.expSlipPct.toFixed(3) + '%' : '—', o.quote && o.quote.source === 'JUPITER' ? 'SIMULATED' : 'ESTIMATED')}${kv('Fees', o.fees ? fmtUsd(o.fees.total, 4) : '—', 'ESTIMATED')}${kvA('Latenz', o.latencyMs != null ? o.latencyMs + ' ms' : '—')}${kv('Transaktion', 'keine (Simulation)')}</div>
     ${o.reason ? html`<p class="note">${o.reason}</p>` : ''}
     <p class="note">Provider: ${o.provider || 'SIMULATION'}${o.route ? ' · ' + o.route : ''}${o.failureCode ? html` · <span class="chip bad">${o.failureCode}</span> ${EXEC_FAIL[o.failureCode] || ''}` : ''}</p>
+    ${o.quote ? html`<p class="note">Angebot: ${o.quote.source === 'JUPITER' ? 'echtes Jupiter-Angebot (nur abgefragt, nie ausgeführt)' : 'AMM-Schätzung' + (o.quote.fallbackReason ? ' – ' + o.quote.fallbackReason : '')}${isNum(o.quote.roundTripPct) ? ' · Kauf + sofortiger Verkauf kostet ' + o.quote.roundTripPct.toFixed(2) + ' %' : ''}${o.quote.noSellRoute ? ' · kein Verkaufsweg' : ''}${o.quote.latencyApplied ? ' · Füllung zum Angebot nach der Wartezeit' : ''}${isNum(o.quote.prioLamports) ? ' · Priority Fee ' + fmtNum(o.quote.prioLamports) + ' Lamports' : ''}${o.fees && o.fees.failedTx ? ' · Transaktion gescheitert, Gebühr ' + fmtUsd(o.fees.total, 4) + ' bezahlt' : ''}</p>` : ''}
     <p class="note mono">Mint: ${o.mint}<span class="an"> · Key: ${o.key || '—'}</span></p>
     ${o.blockers ? html`<div class="an"><h3>Blocker</h3>${o.blockers.map(b => html`<div class="check"><span class="ic fail">P${b.prio}</span><div><b>${b.code}</b><small>${b.msg}</small></div></div>`)}</div>` : ''}
     <div class="an"><h3>State Machine</h3><ul class="trace">${o.history.map(h => html`<li><b>${fmtTime(h.ts)}</b><span>${h.s}${h.note ? ' – ' + h.note : ''}</span></li>`)}</ul></div>
@@ -7041,8 +7442,9 @@ function renderLearning(sec) {
   const cell = (s, r) => stats.find(x => x.key === `strategy=${s}&regime=${r}`);
   const lessons = L.lessons.filter(l => l.status !== 'EXPIRED');
   const recent = [...recs].reverse().slice(0, 15);
-  const ec = lv.errors, nm = lv.nearMiss, ap = core.activeParams();
+  const ec = lv.errors, nm = lv.nearMiss, ds = lv.disc, ap = core.activeParams();
   const NMV = { FILTER_COSTLY: ['warn', 'kostet eher Chancen'], FILTER_HELPS: ['ok', 'schützt eher'], NOT_ENOUGH_DATA: ['', 'zu wenig Daten'] };
+  const DSV = { WORSE: ['bad', 'schlechter als Ø'], BETTER: ['ok', 'besser als Ø'], AVERAGE: ['', 'im Schnitt'], NOT_ENOUGH_DATA: ['', 'zu wenig Daten'] };
   const openD = new Set([...sec.querySelectorAll('details[data-k][open]')].map(d => d.dataset.k));
   const changed = patch(sec, html`<h2>🧠 Learning KI <span class="lbl SIMULATED">SIMULATED</span></h2>
     <p class="note">Lernt aus jedem abgeschlossenen (simulierten) Trade – vor allem aus Verlusten: Was war beim Einstieg messbar, wie verlief der Coin-Preis danach, welche Ursache ist belegt? Regeln entstehen nur aus zeitlich getrennt validierten Experimenten (Train → Validation → Test, Walk-Forward), laufen danach im Shadow-Modus (keine Orders) und werden nur in SIMULATION übernommen – ausschließlich verschärfend und mit automatischem Rollback. Risiko-Limits, Security-Blocker, Emergency Stop und LIVE-Gating werden von der KI nie verändert. Keine Gewinn-Garantie.</p>
@@ -7079,6 +7481,9 @@ function renderLearning(sec) {
     <div class="panel"><h3 style="margin-top:0">Was die KI gelernt hat (Lektionen)</h3>
       ${lessons.length ? lessons.slice(0, 12).map(l => html`<div class="check"><span class="ic ${l.kind === 'AVOID' ? 'fail' : 'pass'}">${l.kind === 'AVOID' ? 'MEIDEN' : 'GUT'}</span><div><b>${l.text}</b><small>${lchip(l.status)} ${l.stable ? 'stabil, Out-of-Sample bestätigt' : 'Beobachtung – noch keine Regel'} · Evidenz ${l.evidence} · ${l.confirmed}× bestätigt · gültig bis ${fmtDateTime(l.expiresAt)}</small></div></div>`) : html`<div class="empty">Noch keine belastbaren Lektionen – es braucht mindestens 8 Trades in einem Muster mit deutlich abweichendem Ergebnis.</div>`}
       <p class="note">Lektionen sind Wissen, keine Handelsregeln. Sie laufen nach 7 Tagen ohne Bestätigung ab; bei Drift werden sie zur Überprüfung markiert.</p></div>
+    <div class="panel" id="discPanel"><h3 style="margin-top:0">Coin-Quellen – woher kommen gute und schlechte Trades?</h3>
+      ${ds.rows.length ? html`<div class="tw"><table class="tbl"><thead><tr><th>Quelle (zuerst gefunden über)</th><th class="r">Trades</th><th class="r">Trefferquote</th><th class="r">Ø je Trade</th><th class="r an">Netto</th><th class="r an">Near-Misses (verpasst / vermieden)</th><th>Einordnung</th></tr></thead><tbody>${ds.rows.map(r => html`<tr><td>${DISC_DE[r.disc] || r.disc}${r.paid ? html` <span class="chip warn">bezahlt</span>` : ''}</td><td class="r num">${r.n}</td><td class="r num">${r.winRate != null ? (r.winRate * 100).toFixed(0) + ' %' : '—'}</td><td class="r num ${cls(r.avgPct)}">${fmtPct(r.avgPct)}</td><td class="r num an ${cls(r.netUsd)}">${r.n ? fmtSigned(r.netUsd) : '—'}</td><td class="r num an">${r.nm ? `${r.nm} (${r.nmMissed} / ${r.nmAvoided})` : '—'}</td><td><span class="chip ${DSV[r.verdict][0]}">${DSV[r.verdict][1]}</span></td></tr>`)}</tbody></table></div>` : html`<div class="empty">Noch keine abgeschlossenen Trades mit gespeicherter Quelle.</div>`}
+      <p class="note">Jeder Coin merkt sich, über welche Quelle er zuerst gefunden wurde. Boosts und Profile sind bezahlte Werbung auf DexScreener. Verglichen wird ab ${DISC_MIN_N} Trades je Quelle mit dem Gesamtschnitt (${ds.n ? fmtPct(ds.basePct) : '—'} je Trade). Liegt eine Quelle deutlich darunter, schlägt die Lern-KI „Quelle meiden“ als Hypothese vor – übernommen wird das erst nach Out-of-Sample-Test und Shadow-Phase. Trades von vor Version 2.11.0 erscheinen als „unbekannt“.</p></div>
     <div class="panel"><h3 style="margin-top:0">Knapp verpasst (Near-Misses) – was kosten oder sparen die Filter?</h3>
       <div class="grid4">${kv('In Beobachtung', lv.nearMissOpen + (lv.nearMissSkipped ? ` (${lv.nearMissSkipped} übersprungen)` : ''))}${kv('Ausgewertet', nm.n + (nm.noData ? ` (+${nm.noData} ohne Daten)` : ''))}${kv('Verpasste Gewinne (TP1 vor Stop)', nm.missed)}${kv('Vermiedene Verluste (Stop vor TP1)', nm.avoided)}${kv('Σ verpasste Gewinne (sim.)', nm.n ? fmtPct(nm.gainPct) : '—', 'SIMULATED')}${kv('Σ vermiedene Verluste (sim.)', nm.n ? fmtPct(-nm.lossPct) : '—', 'SIMULATED')}${kv('Neutral nach 15 min', nm.neutral)}${kv('Fenster', '15 min')}</div>
       ${nm.rows.length ? html`<div class="tw" style="margin-top:8px"><table class="tbl"><thead><tr><th>Filter / Blocker</th><th class="r">n</th><th class="r">verpasst</th><th class="r">vermieden</th><th class="r">neutral</th><th class="r">Ø Ergebnis (sim.)</th><th>Einordnung</th></tr></thead><tbody>${nm.rows.map(r => html`<tr><td>${r.code}${r.kind === 'RISK' ? html` <span class="chip">Risiko/Portfolio</span>` : ''}</td><td class="r num">${r.n}</td><td class="r num">${r.missed}</td><td class="r num">${r.avoided}</td><td class="r num">${r.neutral}</td><td class="r num ${cls(r.avgSimPct)}">${fmtPct(r.avgSimPct)}</td><td><span class="chip ${NMV[r.verdict][0]}">${NMV[r.verdict][1]}</span></td></tr>`)}</tbody></table></div>` : html`<div class="empty">Noch keine ausgewerteten Near-Misses. Erfasst werden Kandidaten, denen genau ein Filter fehlte (z. B. Score bis 10 Punkte unter Minimum) oder die nur an Risiko-/Portfolio-Limits scheiterten.</div>`}
@@ -7185,16 +7590,17 @@ function renderSystem(sec) {
   const closed = st.journal.filter(j => j.status === 'CLOSED' && j.result);
   const wr = closed.length ? closed.filter(j => j.result.win).length / closed.length : null;
   const selT = selTok();
-  const optional = new Set(['gecko', 'rugcheck', 'dexDisc', 'dexSol']);
+  const optional = new Set(['gecko', 'rugcheck', 'dexDisc', 'dexSol', 'jupiter']);
   const mm = core.monitorMetrics(), anoms = Object.values(st.monitor.active), act = core.S().anomalyMode === 'act';
   const ACT_DE = { WARN: 'warnen', DEGRADE: 'Größe ×0,5', PAUSE: 'Auto-Käufe pausieren', HARD_STOP: 'Not-Stopp' }, SEV_CLS = { WARN: 'warn', HIGH: 'bad', CRITICAL: 'bad' };
   const pct = v => (v == null ? '—' : Math.round(v * 100) + ' %');
   patch(sec, html`<h2>🖥 System & API Health</h2>
     <div class="panel" id="monitorPanel"><h3 style="margin-top:0">Monitoring – letzte 60 Minuten</h3>
       <div class="grid4">${kv('Signale / Stunde', mm.signals.perHour)}${kv('Security-Blockquote', pct(mm.blocks.security))}${kv('Risiko-Blockquote', pct(mm.blocks.risk))}${kv('Freigegeben (aktueller Scan)', pct(mm.blocks.approved))}${kv('Orders (60 min)', mm.exec.orders + (mm.exec.failed ? ` · ${mm.exec.failed} fehlgeschlagen` : ''))}${kv('Erfolgsquote Orders', pct(mm.exec.successRate))}${kv('Ø Ausführungszeit', mm.exec.avgLatencyMs == null ? '—' : mm.exec.avgLatencyMs + ' ms')}${kv('Frische Marktdaten', pct(mm.data.fresh))}${kv('Lern-KI', mm.learn.status)}${kv('Letzter Lernlauf', mm.learn.lastRunAgeMs == null ? '—' : 'vor ' + fmtAge(mm.learn.lastRunAgeMs))}${kv('Lern-Fehler (60 min)', mm.learn.errorsHour)}${kv('Drift', mm.learn.drift)}</div>
+      <h3>Ausführung (ehrliche Simulation)</h3><div class="grid4">${kv('Echte Angebote (Jupiter)', mm.exec.quotes ? `${pct(mm.exec.jupiterShare)} von ${mm.exec.quotes}` : '—')}${kv('Gescheiterte Transaktionen', mm.exec.txAttempts ? `${mm.exec.txFailed} von ${mm.exec.txAttempts} (${pct(mm.exec.txFailRate)})` : '—', 'SIMULATED')}${kv('Bezahlte Gebühren gescheiterter Tx', fmtUsd(mm.exec.failedTxFeesUsd || 0, 4), 'SIMULATED')}${kv('Priority Fee', `${fmtNum(mm.exec.prioLamports)} Lamports · ${mm.exec.prioAuto ? 'aus Netzwerkgebühren' : core.S().priorityFeeMode === 'auto' ? 'Mindestwert (noch keine Netzdaten)' : 'fest'}`)}</div>
       ${Object.keys(mm.exec.failureCodes).length ? html`<p class="mut">Fehlercodes: ${Object.entries(mm.exec.failureCodes).map(([k, n]) => k + ' ' + n).join(' · ')}</p>` : ''}
       <h3>Anomalien ${anoms.length ? html`<span class="chip ${anoms.some(a => a.sev !== 'WARN') ? 'bad' : 'warn'}">${anoms.length} aktiv</span>` : html`<span class="chip ok">keine</span>`} <span class="chip ${act ? 'warn' : ''}">Modus: ${act ? 'handeln' : 'nur warnen'}</span></h3>
-      ${anoms.length ? anoms.map(a => html`<div class="check"><span class="ic ${SEV_CLS[a.sev] === 'warn' ? 'warn' : 'fail'}">${a.sev}</span><div><b>${a.code}</b> – ${a.msg}<small>seit ${fmtAge(now - a.since)} · Aktion: ${ACT_DE[a.action]}${act || a.action === 'WARN' ? '' : ' (nicht ausgeführt, Modus „nur warnen“)'}</small></div></div>`) : html`<p class="mut">Keine Auffälligkeiten: Datenfrische, Hauptquelle, Orders, Slippage, Abgleich, Portfolio-Integrität, Verlusthäufung, Kapitalverlauf, Lern-KI und Speicher werden bei jedem Scan geprüft.</p>`}
+      ${anoms.length ? anoms.map(a => html`<div class="check"><span class="ic ${SEV_CLS[a.sev] === 'warn' ? 'warn' : 'fail'}">${a.sev}</span><div><b>${a.code}</b> – ${a.msg}<small>seit ${fmtAge(now - a.since)} · Aktion: ${ACT_DE[a.action]}${act || a.action === 'WARN' ? '' : ' (nicht ausgeführt, Modus „nur warnen“)'}</small></div></div>`) : html`<p class="mut">Keine Auffälligkeiten: Datenfrische, Hauptquelle, Orders, Transaktions-Fehlquote, echte Angebote, Slippage, Abgleich, Portfolio-Integrität, Verlusthäufung, Kapitalverlauf, Lern-KI und Speicher werden bei jedem Scan geprüft.</p>`}
       ${st.monitor.history.length ? html`<details class="an" data-k="mon-hist"><summary>Verlauf (${st.monitor.history.length})</summary><div class="tw"><table class="tbl">${st.monitor.history.slice(0, 20).map(e => html`<tr><td class="num">${fmtDateTime(e.ts)}</td><td>${e.event === 'START' ? 'Beginn' : 'Ende'}</td><td>${e.code}</td><td class="mut">${e.msg}</td></tr>`)}</table></div></details>` : ''}
       <p class="note">Reaktion einstellbar unter Einstellungen → System → „Anomalie-Monitor: Reaktion“. Standard ist „nur warnen“; mit „handeln“ werden Positionen gedrosselt, neue Auto-Käufe pausiert und bei kritischen Portfolio-Fehlern der Not-Stopp ausgelöst.</p></div>
     <div class="grid2"><div class="panel"><h3 style="margin-top:0">Bot Health</h3>${core.botHealth().map(x => html`<div class="check"><span class="ic ${x.status === 'OK' ? 'pass' : x.status === 'DEGRADED' ? 'warn' : 'fail'}">${x.status}</span><div><b>${x.name}</b><small>${x.detail}</small></div></div>`)}</div>
@@ -7240,7 +7646,7 @@ function settingField(d, S) {
   const v = S[d.k];
   if (d.t === 'bool') return html`<label class="fld inl">${d.l}<input type="checkbox" data-set="${d.k}" ${v ? raw('checked') : ''}></label>`;
   if (d.t === 'select') return html`<label class="fld">${d.l}<select data-set="${d.k}">${d.opts.map(o => html`<option value="${o[0]}" ${o[0] === v ? raw('selected') : ''}>${o[1]}</option>`)}</select></label>`;
-  if (d.t === 'text') return html`<label class="fld" style="grid-column:1/-1">${d.l}<input data-set="${d.k}" value="${v}" autocomplete="off" spellcheck="false"><small class="dim">Keine API-Keys in öffentliche Geräte eingeben; Keys werden nur lokal gespeichert und in Logs maskiert.</small></label>`;
+  if (d.t === 'text') return html`<label class="fld" style="grid-column:1/-1">${d.l}<input data-set="${d.k}" value="${v}"${d.secret ? raw(' type="password"') : ''} autocomplete="off" spellcheck="false"><small class="dim">Keine API-Keys in öffentliche Geräte eingeben; Keys werden nur lokal gespeichert und in Logs maskiert.</small></label>`;
   return html`<label class="fld">${d.l}${d.u ? ' (' + d.u + ')' : ''}<input type="number" data-set="${d.k}" value="${v}" min="${d.min}" max="${d.max}" step="${d.step || (d.t === 'int' ? 1 : 'any')}"></label>`;
 }
 function renderSettings(sec) {

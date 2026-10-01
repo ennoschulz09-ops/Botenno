@@ -1,6 +1,6 @@
 # Abschlussbericht – Master-Prompt „Ganzheitliche Optimierung“
 
-Stand: 2026-10-01 · App-Version 2.10.1 · Phasen 0–8 und Roadmap A1–A3 abgeschlossen.
+Stand: 2026-10-01 · App-Version 2.11.0 · Phasen 0–8 und Roadmap A1–A3 sowie B1–B3 abgeschlossen.
 
 Der Bot ist ein stabiler, getesteter **Simulator mit Lern-KI**. Er handelt kein echtes Geld: LIVE-Handel und Signieren sind technisch gesperrt. Ob er nach realistischen Kosten profitabel wäre, ist **nicht nachgewiesen** (siehe „Verbleibende Einschränkungen“).
 
@@ -19,19 +19,20 @@ Der Bot ist ein stabiler, getesteter **Simulator mit Lern-KI**. Er handelt kein 
 | A1 Tests & CI | – | 9 Browser-Test-Suiten im Repo, GitHub Actions bei jedem PR, ohne Passwort im Repo |
 | 7 / A2 Monitoring | 2.10.0 | Kennzahlen der letzten 60 min, Anomalie-Monitor (12 Reason Codes, Aktionen), Statusleiste |
 | 8 / A3 Hardening | 2.10.1 | Sicherheitsprüfung, Performance-Messung, Regression, Release-Checkliste, dieser Bericht; LIVE-Gate verlangt jetzt aktive Risiko-Limits (der Lernmodus kann nie live gehen) |
+| B1–B3 Ehrliche Simulation | 2.11.0 | echte Jupiter-Kursangebote (nur Abfrage) mit Honeypot- und Rundreise-Prüfung, Füllung nach Wartezeit, Slippage-Grenze, gescheiterte Transaktionen mit Gebühr, Priority Fee aus dem Netzwerk, Abschreibung ohne Verkaufsweg; Coin-Quelle als Lernmerkmal |
 
 ## 2. Dateien und Module
 
 | Datei | Inhalt |
 | --- | --- |
-| `index.html` | die ganze App (UI, Kern `createCore`, Lern-KI, 73 Selbsttests) |
+| `index.html` | die ganze App (UI, Kern `createCore`, Lern-KI, 78 Selbsttests) |
 | `docs/ARCHITEKTUR.md` | Architektur, Bewertung je Bereich, Entscheidungen, Änderungsprotokoll |
 | `docs/ABSCHLUSSBERICHT.md` | dieser Bericht inkl. Release-Checkliste |
 | `tests/e2e/*.js` | Browser-Tests, Runner `run-all.js`, Syntax-Prüfung, Performance-Messung `perf.js` |
 | `.github/workflows/tests.yml` | CI: Syntax + alle Suiten bei jedem Push auf `main` und jedem PR |
 | `package.json`, `package-lock.json` | Test-Abhängigkeit Playwright 1.56.1 (die App selbst hat keine Abhängigkeiten) |
 
-Neue Kern-Module in `index.html`: Datenvalidierung (`normDexPair`, `dqField`), Backup (`exportBackup`, `validateBackup`, `restoreBackup`), Stufen-Scores und Security-Bericht (`stageScores`, `securityReport`), Signal-Analyse (`scoreAttribution`, `signalConflicts`, `mtfAlignment`), Lebenszyklus und Provider (`posTransition`, `simProvider`, `liveProvider`), Backtest-Forschung (`btRunMeta`, `btStress`, `mcDrawdown`, `btByRegime`), Adaptive KI (`errorClassify`, `nearMissTick`, `activeParams`), Monitoring (`monitorMetrics`, `monitorTick`).
+Neue Kern-Module in `index.html`: Datenvalidierung (`normDexPair`, `dqField`), Backup (`exportBackup`, `validateBackup`, `restoreBackup`), Stufen-Scores und Security-Bericht (`stageScores`, `securityReport`), Signal-Analyse (`scoreAttribution`, `signalConflicts`, `mtfAlignment`), Lebenszyklus und Provider (`posTransition`, `simProvider`, `liveProvider`), Backtest-Forschung (`btRunMeta`, `btStress`, `mcDrawdown`, `btByRegime`), Adaptive KI (`errorClassify`, `nearMissTick`, `activeParams`), Monitoring (`monitorMetrics`, `monitorTick`), ehrliche Simulation (`jupQuote`, `jupBuyQuote`, `jupSellQuote`, `simConfirm`, `quoteBlockers`, `chargeFailedTx`, `writeOffPosition`, `updatePriorityFee`), Coin-Quelle (`discoveryOf`, `discoveryStats`).
 
 ## 3. Sicherheitsbarrieren (aktiv)
 
@@ -55,6 +56,7 @@ Neue Kern-Module in `index.html`: Datenvalidierung (`normDexPair`, `dqField`), B
   - Signale pro Stunde
   - Security-, Risiko- und Freigabequote
   - Orders, Erfolgsquote, Ø Ausführungszeit, Fehlercodes
+  - Ausführung: Anteil echter Jupiter-Angebote, Fehlquote der Transaktionen, bezahlte Gebühren gescheiterter Transaktionen, aktuelle Priority Fee
   - Datenfrische, Zustand der Lern-KI
   - aktive Anomalien mit Verlauf
 - **System & API Health:** Health-Score, Latenz und Fehlerrate je Quelle, Datenvalidierung je Quelle.
@@ -63,13 +65,14 @@ Neue Kern-Module in `index.html`: Datenvalidierung (`normDexPair`, `dqField`), B
   - Verlustursachen mit Evidenz, Fehlerklassen, „erwartbar?“
   - Near-Misses je Filter, Muster, Experimente, Drift, Kalibrierung
   - aktive Parameter mit Herkunft
+  - Ergebnis je Coin-Quelle (Trades, Trefferquote, Ø je Trade, Near-Misses)
 - **Backtest:** Run-Protokoll, Walk-Forward Validierung/Test, Stress-Szenarien, Monte-Carlo-Drawdown, Regime.
 
 ## 5. Tests und Ergebnisse
 
 | Prüfung | Ergebnis |
 | --- | --- |
-| Selbsttests in der App | 73 von 73 bestanden, 0 Konsolenfehler |
+| Selbsttests in der App | 78 von 78 bestanden, 0 Konsolenfehler (Jupiter in Tests nachgebildet; die echte API ist aus der Cloud-Testumgebung nicht erreichbar) |
 | Browser-Suiten (`tests/e2e`) | 9 von 9 bestanden: Selbsttest, Login, UI inkl. Mobil, Lern-KI, Backup, Migration, Backtest, Lernmodus-Profil, XSS |
 | CI (GitHub Actions) | grün bei jedem PR seit A1, Laufzeit etwa 4 min |
 | Performance (400 Tokens, Chromium) | Scan 17–41 ms, Analyse 11–20 ms, Render 4–22 ms, etwa 1 Scan/s, JS-Heap 25 MB; unverändert gegenüber Phase 0 |
@@ -82,6 +85,7 @@ Neue Kern-Module in `index.html`: Datenvalidierung (`normDexPair`, `dqField`), B
 - Positionen ohne Lebenszyklus → Zustand ergänzt, unterbrochene Verkäufe → Abgleich (2.5.0).
 - Fehlerklasse für ältere Verluste ergänzt (2.7.0).
 - Loss-Cooldown und Pause aus Versionen vor 2.8.0 → 0 min, laufende Pause beendet (2.8.0).
+- Stufe B (2.11.0): keine Datenumstellung; neue Einstellungen erhalten Standardwerte, der Wechsel auf die ehrliche Simulation wird beim ersten Start im Log vermerkt. Trades von vorher haben keine Coin-Quelle („unbekannt“).
 
 Jede Migration wird im Log bzw. Konfigurations-Protokoll vermerkt. Beschädigte Bereiche werden durch sichere Standardwerte ersetzt.
 
@@ -94,7 +98,9 @@ Jede Migration wird im Log bzw. Konfigurations-Protokoll vermerkt. Beschädigte 
 | RugCheck | **echt** (öffentliche API) |
 | Solana RPC (Mint-Daten, Holder, Slot, Balance) | **echt** (öffentliche Endpunkte, einstellbar) |
 | Phantom-Wallet | **echt, nur lesend** (Adresse, Balance, Netzwerk) |
-| Orders, Fills, Portfolio | **simuliert** (letzter Preis + geschätzter Preis-Einfluss + Gebühren) |
+| Kursangebote für Kauf und Verkauf | **echt** (Jupiter Quote API, nur `GET /quote`; ohne Verbindung Rückfall auf AMM-Schätzung, als „geschätzt“ markiert) |
+| Priority Fee | **echt** (Solana RPC `getRecentPrioritizationFees`, fester Wert als Minimum) |
+| Orders, Fills, Portfolio | **simuliert** (Füllung zum echten Angebot nach Wartezeit, Slippage-Grenze, Anteil gescheiterter Transaktionen; keine Transaktion) |
 | LIVE-Swap-Provider | **Platzhalter** (`NO_ROUTER`) |
 | Signieren | **bewusst deaktiviert** |
 | Creator-/Wallet-Historie | **keine Datenquelle** (bleibt NO_DATA) |
@@ -109,25 +115,26 @@ Jede Migration wird im Log bzw. Konfigurations-Protokoll vermerkt. Beschädigte 
 
 ## 9. Verbleibende Einschränkungen
 
-1. **Die Simulation ist optimistisch.**
-   - Sofortige Fills zum letzten Preis.
-   - Verkäufe gelingen immer.
-   - Nicht berücksichtigt: Honeypots, Verkaufsgebühren, gescheiterte Transaktionen, Latenz, Sandwich-Angriffe.
+1. **Die Simulation ist ehrlicher, aber nicht perfekt** (seit 2.11.0).
+   - Berücksichtigt: echte Kursangebote mit Preis-Einfluss und Gebühren, Honeypots (kein Verkaufsweg), Verkaufssteuern, Wartezeit bis zur Füllung, Slippage-Grenze, gescheiterte Transaktionen, Priority Fees.
+   - Nicht berücksichtigt: Sandwich-/MEV-Angriffe, Jito-Tips, ob die eigene Order den Kurs für spätere Angebote verändert hätte.
+   - Der Anteil gescheiterter Transaktionen ist eine Annahme (Standard 5 %), keine Messung.
+   - Ohne Jupiter-Verbindung (Kontingent, Netzwerk) wird wieder geschätzt. Der Anteil steht im Monitoring; ab 50 % geschätzter Füllungen warnt der Monitor.
 2. **Der Backtest prüft vereinfachte Kerzen-Strategien,** nicht die echte Entscheidungslogik.
 3. **Das Lern-Gedächtnis ist begrenzt** auf die letzten 200 Trades und 200 Near-Misses (Browser-Speicher).
-4. **Die Datenquellen sind langsam und einseitig.** Discovery läuft über bezahlte DexScreener-Boosts/-Profile und GeckoTerminal, und Kerzendaten gibt es nur für offene Positionen.
+4. **Die Datenquellen sind langsam und einseitig.** Discovery läuft über bezahlte DexScreener-Boosts/-Profile und GeckoTerminal, und Kerzendaten gibt es nur für offene Positionen. Seit 2.11.0 wird die Quelle je Coin gespeichert, sodass die Lern-KI schlechte Quellen erkennen kann.
 5. **Nur im Browser:** Der Bot stoppt, wenn der Tab geschlossen wird. Der Login schützt nicht auf einem Server.
 6. **Risiko-Limits sind abschaltbar:** Mit dem Profil „Lernmodus“ gibt es keine automatische Handelspause mehr. Das ist so gewollt, gilt aber nur für die Simulation.
 7. **Kein Gewinn-Nachweis:** Positive Simulationsergebnisse sind wegen Punkt 1 und 2 kein Beleg für echte Gewinne.
+8. **Jupiter-Zugang:** Der kostenlose Zugang (`lite-api.jup.ag`) hat ein Kontingent; die App begrenzt sich lokal auf 50 Abfragen pro Minute. Mit eigenem API-Key wird `api.jup.ag` genutzt. Ob ein Browser-Zugriff mit API-Key-Header (CORS) überall erlaubt ist, ließ sich aus der Testumgebung nicht prüfen; scheitert er, greift der markierte Rückfall.
 
 ## 10. Nächste Prioritäten
 
 Die Details stehen in der Roadmap (Dokument „Roadmap Smart Lab Bot“).
 
-1. **B1–B3: ehrliche Simulation.** Echte Jupiter-Kursangebote für Kauf und Verkauf, Latenz und Fehlschläge, Quelle als Lernmerkmal.
-2. **C1–C3, C6: Server und echter Nachweis.** Node.js mit Datenbank, Datensammler mit Aufzeichnung, Replay-Backtest der echten Logik.
-3. **D1–D6: Profitabilität.** Erst danach, gemessen im Replay.
-4. **E: Echtes Geld.** Erst nach allen Gates, mit eigenem Live-Profil und Limits.
+1. **C1–C3, C6: Server und echter Nachweis.** Node.js mit Datenbank, Datensammler mit Aufzeichnung, Replay-Backtest der echten Logik.
+2. **D1–D6: Profitabilität.** Erst danach, gemessen im Replay.
+3. **E: Echtes Geld.** Erst nach allen Gates, mit eigenem Live-Profil und Limits.
 
 ## Release-Checkliste
 

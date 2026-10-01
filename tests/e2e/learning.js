@@ -1,5 +1,5 @@
 // E2E: Lern-KI (Migration aus Journal, Ansicht einfach/Analyse, echter Trade → Record, Export, Logs, Reload, Mobil)
-const { chromium, APP_URL, USER, PASS, OUT } = require('./env.js');
+const { chromium, APP_URL, USER, PASS, OUT, seedDeterministic } = require('./env.js');
 const { route } = require('./mock.js');
 const fs = require('fs');
 let failures = 0;
@@ -42,7 +42,7 @@ function seedJournal(mints) {
       if (data == null) return r.fulfill({ status: 404, body: 'nf' });
       r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(data) });
     });
-    await page.goto(APP_URL);
+    await page.goto(APP_URL); await seedDeterministic(page);
     return { ctx, page };
   }
   const login = async (page, wait = 6000) => { await page.fill('#loginUser', USER); await page.fill('#loginPass', PASS); await page.click('#loginForm button[type=submit]'); await page.waitForTimeout(wait); };
@@ -62,6 +62,7 @@ function seedJournal(mints) {
   ok(/Datenbasis/i.test(txt) && /30 \/ 24/.test(txt), 'Datenbasis-Fortschritt sichtbar (Experiment 30/24)');
   ok(/Fehlerklassen/i.test(txt) && /(Normaler statistischer Verlust|Execution-Fehler|Modell-|Datenfehler|Unklar)/.test(txt) && /Erwartbar\?/i.test(txt), 'Fehlerklassen + Spalte „Erwartbar?“ sichtbar (einfache Ansicht)');
   ok(/Knapp verpasst \(Near-Misses\)/i.test(txt) && /In Beobachtung/i.test(txt) && /nie automatisch gelockert/.test(txt), 'Near-Miss-Panel mit Transparenzhinweis sichtbar');
+  ok(/Coin-Quellen – woher kommen/i.test(txt) && /unbekannt/i.test(txt) && /Quelle meiden/.test(txt), 'Coin-Quellen-Panel sichtbar (ältere Trades als „unbekannt“)');
   ok(/Aktive Parameter – Wert, Herkunft, Grund/i.test(txt) && (await page.evaluate(() => { const t = [...document.querySelectorAll('#v-learning table')].find(x => /Herkunft/.test(x.querySelector('thead') ? x.querySelector('thead').textContent : '')); return t ? t.querySelectorAll('tbody tr').length : 0; })) >= 15, 'Tabelle „Aktive Parameter“ mit ≥ 15 Zeilen');
   ok(/Standardwert/.test(txt), 'Herkunft „Standardwert“ angezeigt');
   await page.screenshot({ path: OUT + '/l-learning-simple.png', fullPage: true });
@@ -101,6 +102,13 @@ function seedJournal(mints) {
   await page.click('#detail [data-act="buy"]'); await page.waitForTimeout(500); await page.click('#mb-ok'); await page.waitForTimeout(2500);
   await page.keyboard.press('Escape');
   await page.click('#nv-positions'); await page.waitForTimeout(700);
+  if (!(await page.locator('#v-positions [data-act="sell"][data-frac="ALL"]').first().isVisible({ timeout: 8000 }).catch(() => false))) {
+    try { // Diagnose: warum ist keine Position entstanden?
+      await page.click('#nv-orders', { timeout: 3000 }); await page.waitForTimeout(500);
+      console.log('  Orders nach dem Kauf:', (await page.locator('#v-orders').innerText()).split('\n').slice(0, 8).join(' | '));
+      await page.click('#nv-positions'); await page.waitForTimeout(500);
+    } catch (e) { console.log('  Diagnose nicht möglich:', e.message.split('\n')[0]); }
+  }
   await page.locator('#v-positions [data-act="sell"][data-frac="ALL"]').first().click(); await page.waitForTimeout(500);
   await page.click('#mb-ok'); await page.waitForTimeout(2500); await page.keyboard.press('Escape');
   await goLearn(page);
@@ -113,6 +121,9 @@ function seedJournal(mints) {
   await page.click('#logCats [data-k="LEARNING"]'); await page.waitForTimeout(500);
   const logs = await page.locator('#logList').innerText();
   ok(/Migration: 30/.test(logs) && /MOCK12/.test(logs), 'Log-Kategorie „Learning“ zeigt Migration und neuen Trade');
+  await page.click('#logCats [data-k="TRADE"]'); await page.waitForTimeout(400);
+  const tlogs = await page.locator('#logList').innerText();
+  ok(/BUY #1 MOCK12.*Jupiter/.test(tlogs) && /SELL MOCK12/.test(tlogs), 'Kauf und Verkauf zum (nachgebildeten) Jupiter-Angebot, nach Wartezeit');
 
   // Persistenz über Reload
   await page.reload(); await login(page, 3000); await goLearn(page);
