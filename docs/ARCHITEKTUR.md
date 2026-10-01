@@ -1,6 +1,6 @@
 # Smart Lab – Architektur & technischer Audit
 
-Stand: Phase 6 des Master-Prompts „Ganzheitliche Optimierung“ (App-Version 2.8.0).
+Stand: Phase 6 des Master-Prompts „Ganzheitliche Optimierung“ (App-Version 2.9.0).
 Dieses Dokument wird in jeder Phase fortgeschrieben (siehe „Änderungsprotokoll“ am Ende).
 
 ## 1. Überblick
@@ -29,7 +29,7 @@ createCore(env)  ── DOM-frei, alle Seiteneffekte über env (Uhr, fetch, Time
    ├─ Strategien & Konsens (evalStrategies) → gewichtete Stimmen, Lead-Strategie
    ├─ Decision Engine (decideToken): Pipeline mit Blockern (Priorität EMERGENCY → … → SIGNAL)
    │     + gelernte Regeln (nur verschärfend)
-   ├─ Execution Check (globalBlockers, execCheck, sizePosition) – harte Limits, Cooldowns, Exposure, Impact
+   ├─ Execution Check (globalBlockers, execCheck, sizePosition) – Risiko-Limits (alle einstellbar), Cooldowns, Exposure, Impact
    ├─ Orders (State Machine DETECTED → … → COMPLETED/FAILED/CANCELLED/REJECTED, Idempotenz-Keys, Locks)
    ├─ Positionen & Portfolio (applyBuyFill, managePositions, executeSell, closePosition, Journal)
    ├─ Risk State (Buy-Zähler, Cooldowns, Verlustserie, Tageslimit, Overtrading)
@@ -48,7 +48,7 @@ UI-Schicht (DOM): Views, Detail-Panel, Modals, Charts (Canvas), Toasts, Alarm-Fe
 | Bereich | Zeilen | Verantwortung |
 |---|---|---|
 | Login-Gate, CSS, HTML-Grundgerüst | 1–457 | Zugangssperre, Layout, Views als `<section>` |
-| Konstanten, HARD_LIMITS, TUNING_BOUNDS | 466–505 | Sicherheitsgrenzen (eingefroren) |
+| Konstanten, TUNING_BOUNDS | Skriptanfang | Grenzen für Lern-/Tuning-Parameter (feste harte Grenzen seit 2.9.0 entfernt) |
 | Utils, Formatierung | 506–692 | `num/nonNeg/int` (NaN/Infinity/negativ → null), Formatter, TA-Funktionen |
 | Logger | 693–726 | Ringpuffer 1500 Einträge, Kategorien |
 | Settings | 727–909 | Schema mit Min/Max, `hard`-Grenzen, Profile, Validierung |
@@ -63,7 +63,7 @@ UI-Schicht (DOM): Views, Detail-Panel, Modals, Charts (Canvas), Toasts, Alarm-Fe
 | Analytics / Backtest | 1771–1864 | perfStats, Backtest ohne Look-Ahead, Walk-Forward |
 | Lern-KI (reine Funktionen) | 1865–2468 | Features, Records, Attribution, Muster, Experimente, Drift, Modell |
 | Core (createCore) | 2469–4605 | Scanner, Execution, Positionen, Risk, Lern-Orchestrierung, Persistenz |
-| Testsystem | (Ende des Skripts) | Mock-Harness, 69 Selbsttests |
+| Testsystem | (Ende des Skripts) | Mock-Harness, 70 Selbsttests |
 | UI-Schicht | 5205–Ende | Views, Detail, Aktionen, Rendering |
 
 ## 4. State & Persistenz
@@ -98,7 +98,7 @@ UI-Schicht (DOM): Views, Detail-Panel, Modals, Charts (Canvas), Toasts, Alarm-Fe
 | Scanner | Schnellfilter, Security-Queue, Priorisierung, Entscheidungskette je Token, Stufen-Scores Discovery → Datenqualität → Security → Markt → Handelsbereitschaft mit Teilbegründungen (`stageScores`) | – |
 | Security | eigene Engine, CRITICAL blockiert immer (auch manuell), Stale-Security blockiert, Prüfbericht mit 14 Checks (Ergebnis, Schweregrad, Quelle, Zeitpunkt, Aktion aus den echten Blockern, `securityReport`), NO_DATA getrennt von PASS | Creator-/Wallet-Historie ohne Datenquelle (bleibt NO_DATA) |
 | Signale | 12 Signaltypen, 7 Strategien, Konsens, Confidence getrennt vom Score, Score-Attribution (pro/contra/Abzüge = Final Score) mit Kipp-Punkten, Signal-Konflikt-Detektor (8 Muster, Gewicht ≥ 3 blockiert Auto-Käufe, abschaltbar), Multi-Timeframe-Abgleich 5m/1h/6h/24h, Signal-Decay für Ereignis-Signale | Kontextgewichtung nach Regime nur über gelernte Regeln |
-| Risk | harte Limits, Cooldowns, Exposure, Korrelation, Tageslimit, Overtrading, Impact-Grenze, Drawdown-Modus (×0,5 ab 10 %) & Drawdown-Grenze (keine Auto-Käufe ab 20 %), Abschläge mit Reason Codes (Datenalter, Execution-Unsicherheit, unbestätigte Daten, Cluster-Exposure), marktweite No-Trade-Zone bei schlechter Datenlage | – |
+| Risk | Limits (alle per Einstellung bis 0 = aus, Profil „Lernmodus (ohne Limits)“), Cooldowns, Exposure, Korrelation, Tageslimit, Overtrading, Impact-Grenze, Drawdown-Modus (×0,5 ab 10 %) & Drawdown-Grenze (keine Auto-Käufe ab 20 %), Abschläge mit Reason Codes (Datenalter, Execution-Unsicherheit, unbestätigte Daten, Cluster-Exposure), marktweite No-Trade-Zone bei schlechter Datenlage | – |
 | Portfolio | Journal, realisiert/unrealisiert, Fees/Slippage, Reconciliation nach Neustart, Positions-Lebenszyklus PLANNED → PENDING → OPEN → CLOSING ↔ PARTIAL → CLOSED → RECONCILED (UNKNOWN = Abgleich), Integritätsprüfung (Mengen, Doppelbuchungen, Journal, hängende Orders, verwaiste Positionen) | Cash-Abgleich über mehrere „Frische Starts“ hinweg nicht rekonstruierbar |
 | Execution | Order-State-Machine, Idempotenz-Keys, Locks, Pre-Trade-Check mit frischen Daten, Provider-Abstraktion Quote → Build → Preflight → Sign → Send → Confirm (SIMULATION vollständig, LIVE liefert NO_ROUTER / SIGNATURE_DISABLED), Fehlercodes je Order | echter Swap-/Routing-Provider fehlt (bewusst) |
 | Wallet | nur lesend, Phantom (`window.phantom.solana`), Balance per RPC, Signieren deaktiviert, stille Wiederverbindung nur mit `onlyIfTrusted` (kein Popup) | – |
@@ -110,7 +110,7 @@ UI-Schicht (DOM): Views, Detail-Panel, Modals, Charts (Canvas), Toasts, Alarm-Fe
 
 ## 7. Sicherheitskritische Stellen
 
-- `HARD_LIMITS` (eingefroren) + `SETTINGS_SCHEMA` mit `hard`-Grenzen: nur verschärfbar.
+- Risiko-Limits: seit 2.9.0 keine festen Grenzen mehr – alle über `SETTINGS_SCHEMA` einstellbar (0 = aus), validiert auf gültige Bereiche. Die Lern-KI verändert sie nie. Nicht abschaltbar bleiben: Security-Blocker (CRITICAL, Prüfung ausstehend), Datenprüfungen (kein Preis, veraltete Daten, Gebühren unbekannt), Doppel-Order-Schutz, Abgleich nach Neustart, LIVE-Gating.
 - `globalBlockers` / `execCheck` / `MANUAL_HARD`: letzte Prüfung vor jeder Order.
 - `setMode('LIVE')` / `liveReadiness`: LIVE nie aktivierbar ohne Provider.
 - `requestSignature`: deaktiviert.
@@ -135,7 +135,7 @@ Kein Hotspot gefunden, der eine Optimierung rechtfertigt. Render ist bereits ged
 
 ## 9. Tests (Ist)
 
-- **69 Selbsttests** in der App (System → Selbsttest): Grundlagen, Trading-Limits, Daten/Stale, Security, Chaos (API-/RPC-Ausfall, 429, falsches JSON, Scanner-Lock, verspätete Antworten, Reload-Recovery), Status-Logik, LIVE-Gating, Storage, Backtest (Look-Ahead, Reproduzierbarkeit, Stress/Einstiegsverzögerung, Monte-Carlo/Regime), Portfolio & Execution, Signal & Risk, 11 Lern-KI-Tests, 4 Adaptive-KI-Tests (Fehlerklassen, Near-Misses, aktive Parameter, kein naives Tuning).
+- **70 Selbsttests** in der App (System → Selbsttest): Grundlagen, Trading-Limits, Daten/Stale, Security, Chaos (API-/RPC-Ausfall, 429, falsches JSON, Scanner-Lock, verspätete Antworten, Reload-Recovery), Status-Logik, LIVE-Gating, Storage, Backtest (Look-Ahead, Reproduzierbarkeit, Stress/Einstiegsverzögerung, Monte-Carlo/Regime), Portfolio & Execution, Signal & Risk, 11 Lern-KI-Tests, 4 Adaptive-KI-Tests (Fehlerklassen, Near-Misses, aktive Parameter, kein naives Tuning).
 - **Browser-E2E** (Playwright, außerhalb des Repos): Login, Cooldown-Migration, UI einfach/Analyse inkl. Mobil, Lern-KI, Backup/Restore, Backtest-Bericht, XSS-Smoke.
 - **Lücken:** Monitoring-Aktionen (Phase 7), UI-Smoke für LIVE-Gate/Wallet.
 
@@ -145,6 +145,7 @@ Kein Hotspot gefunden, der eine Optimierung rechtfertigt. Render ist bereits ged
 
 ## 11. Bewusste Abweichungen / Entscheidungen
 
+- Feste (harte) Grenzen: ab 2.9.0 auf Wunsch des Nutzers aufgehoben. Alle Risiko-Limits sind Einstellungen und können auf 0 = aus gestellt werden; Standardwerte unverändert. Gedacht für durchgehendes Lernen in SIMULATION; LIVE bleibt gesperrt.
 - Loss-Cooldown / globale Pause: in Phase 1 auf harte Untergrenze 10 / 5 min gesetzt; ab 2.8.0 auf Wunsch des Nutzers wieder 0 min (Standard und Untergrenze, weiterhin einstellbar). Folge: nach Verlusten bzw. einer Verlustserie gibt es keine automatische Handelspause mehr – Verlustserien lösen nur noch einen Review-Hinweis aus. Tageslimit, Drawdown-Grenze, Overtrading-Schutz und Coin-Cooldown (15 min) bleiben unverändert.
 - Einzeldatei bleibt; `app.js` wird gelöscht (Entscheidung Nutzer).
 - Umsetzung phasenweise, jede Phase einzeln getestet und gemergt.
@@ -152,6 +153,7 @@ Kein Hotspot gefunden, der eine Optimierung rechtfertigt. Render ist bereits ged
 ## Änderungsprotokoll
 
 - Phase 0: Audit erstellt.
+- 2.9.0 (Nutzerwunsch): feste Grenzen (`HARD_LIMITS`) entfernt – Max. Käufe pro Coin, Coin-Cooldown, Verlustserie, Exposure, Positionsgröße, Min. Trades für Optimierung frei einstellbar; 0 = aus für Tageslimit, Drawdown-Modus/-Grenze, Overtrading (inkl. Bremse), max. Positionen, Korrelation, System-Health; neue Schalter: Nachkauf nur im Gewinn, Strategie-Cooldowns, marktweite Handelspause, automatischer Safe Mode; Profil „Lernmodus (ohne Limits)“ (nur Limits, Kauf-Filter unverändert); Risiko-Ansicht zeigt Limits als einstellbar. Standardwerte unverändert. Selbsttests angepasst + 1 neuer (Lernmodus), neuer E2E-Test für das Profil.
 - 2.8.0 (Nutzerwunsch): Loss-Cooldown und globale Pause wieder 0 min (Standard und Untergrenze), einmalige Umstellung gespeicherter Werte inkl. Beenden laufender Pausen, protokolliert. **Verhaltensänderung:** nach Verlusten keine automatische Handelspause mehr. Selbsttest und Migrations-E2E angepasst.
 - Phase 6 (2.7.0): Fehlerklassen & „erwartbarer Verlust?“ (geplanter Stop wird ab jetzt je Position gespeichert; ältere Verluste werden beim Laden ergänzt, Stop aus den aktuellen Einstellungen als gekennzeichnete Näherung), Near-Miss-Tracking mit Opportunity-Cost-Auswertung je Filter (ohne automatische Lockerung), Tabelle „Aktive Parameter“ mit Herkunft und Grund, naive Parameter-Suche des alten Auto-Tunings entfernt (Einstellung überwacht nur noch Versionen und rollt schlechtere zurück), Lern-Report-CSV um Fehlerklasse ergänzt. Login: Eingaben während der PBKDF2-Prüfung gesperrt (verhinderte, dass eine neue Eingabe beim Fehlschlag des vorherigen Versuchs gelöscht wurde). 4 neue Selbsttests.
 - Phase 5 (2.6.0): Backtest reproduzierbar und versioniert (Run-ID aus Datensatz-Hash + Parametern + Code-Version), Walk-Forward immer aktiv, Stress-Tests inkl. Einstiegsverzögerung ohne Look-Ahead, Monte-Carlo-Drawdown, Auswertung je Regime, Trade-CSV-Export, Lauf-Historie (gespeichert, max. 20). 3 neue Selbsttests, neuer E2E-Test für den Backtest-Bericht.
