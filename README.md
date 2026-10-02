@@ -33,9 +33,9 @@ Schritt-für-Schritt-Anleitung für Windows (Installation, Übernahme der Daten 
 
 Bei jedem Push auf `main` und bei jedem PR laufen automatisch (GitHub Actions, `.github/workflows/tests.yml`):
 
-- eine Syntax-Prüfung von `index.html` und allen Modulen (inkl. Reihenfolge und Version der Einbindung),
-- die Selbsttests der App (System → Selbsttest),
-- 8 Browser-Test-Suiten (Login, Oberfläche inkl. Mobil, Lern-KI, Backup, Migration, Backtest, Lernmodus-Profil, XSS-Schutz).
+1. eine Syntax-Prüfung von `index.html` und allen Modulen (inkl. Reihenfolge und Version der Einbindung),
+2. die Selbsttests unter Node.js (`node server/selftest.js`, ohne Browser),
+3. 10 Test-Suiten über `node tests/e2e/run-all.js`: die Selbsttests der App im Browser (System → Selbsttest), Login, Oberfläche inkl. Mobil, Lern-KI, Backup, Migration, Backtest, Lernmodus-Profil, XSS-Schutz und der PC-Bot (`pcbot`: startet `server/bot.js --mock` und prüft Oberfläche, Auto-Trading, Einstellungen-Import, Backup mit Neustart, Schutz der lokalen API, Sperre gegen einen zweiten Bot, Speichern beim Beenden).
 
 Lokal (Node.js 22 oder neuer):
 
@@ -44,11 +44,11 @@ node tests/e2e/check-syntax.js    # Syntax, ohne Browser
 node server/selftest.js           # Selbsttests unter Node.js, ohne Browser
 npm ci
 npx playwright install chromium
-npm test                          # alles: Syntax, Selbsttests unter Node.js, alle Browser-Suiten
-node tests/e2e/run-all.js login   # nur einzelne Browser-Suiten
+npm test                          # alles: Syntax, Selbsttests unter Node.js, alle Suiten
+node tests/e2e/run-all.js login pcbot   # nur einzelne Suiten
 node server/bot.js --mock --data <temporärer Ordner> --port 8790   # PC-Bot mit Testdaten, ohne Internet
 ```
 
-Für die Syntax-Prüfung, die Selbsttests unter Node.js und den PC-Bot wird kein `npm ci` gebraucht; Playwright ist nur für die Browser-Tests nötig.
+Für die Syntax-Prüfung, die Selbsttests unter Node.js und den PC-Bot wird kein `npm ci` gebraucht; Playwright ist nur für die Suiten von `run-all.js` nötig (auch `pcbot` prüft die Oberfläche im Browser).
 
 Das echte Login-Passwort wird dafür nicht gebraucht und steht nirgends im Repo. Ohne `E2E_USER`/`E2E_PASS` erzeugen die Tests eine Testkopie der App mit einem zufälligen Wegwerf-Passwort (`.e2e-app-*.html` neben `index.html`, ignoriert und nach dem Test gelöscht). Mit gesetzten Variablen laufen sie gegen die echte `index.html`. Screenshots landen in `tests/e2e/out/` (ignoriert, wird nie veröffentlicht).
