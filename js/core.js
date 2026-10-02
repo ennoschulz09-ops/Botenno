@@ -802,6 +802,7 @@ function createCore(opts) {
   /* Befund aus dem Kaufangebot → Blocker (gilt QUOTE_CHECK_TTL lang auch für Analyse/Auto-Käufe dieses Coins). */
   function quoteBlockers(qc, s) {
     const out = []; if (!qc) return out;
+    if (qc.priceConflict) out.push(mkBlocker('PRICE_CONFLICT', `Jupiter-Kurs ${isNum(qc.impactPct) ? Math.abs(qc.impactPct).toFixed(0) + ' % ' : ''}unter DexScreener – Kursquellen widersprechen sich (Rug oder veralteter Kurs)`));
     if (qc.noSellRoute && s.honeypotBlock) out.push(mkBlocker('NO_SELL_ROUTE', `Kein Verkaufsweg über Jupiter (${str(qc.sellErr || '—', 80)}) – Honeypot-Verdacht`));
     if (s.maxRoundTripLossPct > 0 && isNum(qc.roundTripPct) && qc.roundTripPct > s.maxRoundTripLossPct) out.push(mkBlocker('ROUND_TRIP_COST', `Kauf + sofortiger Verkauf kostet ${qc.roundTripPct.toFixed(1)} % > ${s.maxRoundTripLossPct} %`));
     if (qc.source === 'JUPITER' && isNum(qc.impactPct) && qc.impactPct > s.maxSlippagePct) out.push(mkBlocker('SLIPPAGE_TOO_HIGH', `Echtes Angebot: Kurs ${qc.impactPct.toFixed(2)} % über Marktpreis > ${s.maxSlippagePct} %`));
@@ -929,7 +930,8 @@ function createCore(opts) {
         return failOrder(ord, key, q.code, q.msg);
       }
       // Befund des echten Angebots: Honeypot (kein Verkaufsweg), Rundreise-Kosten, echte Preisabweichung
-      t.quoteCheck = { at: env.now(), source: q.source, noSellRoute: !!q.noSellRoute, sellErr: q.sellErr || null, roundTripPct: isNum(q.roundTripPct) ? q.roundTripPct : null, impactPct: lr2(q.impact * 100), sizeUsd: size };
+      t.quoteCheck = { at: env.now(), source: q.source, noSellRoute: !!q.noSellRoute, sellErr: q.sellErr || null, roundTripPct: isNum(q.roundTripPct) ? q.roundTripPct : null, impactPct: lr2(q.impact * 100), sizeUsd: size,
+        priceConflict: q.source === 'JUPITER' && q.impact * 100 < -PRICE_CONFLICT_PCT }; // Angebot weit UNTER dem Marktkurs: Rug im Gange oder veralteter Kurs
       ord.quote = { source: q.source, route: q.route, impactPct: lr2(q.impact * 100), roundTripPct: t.quoteCheck.roundTripPct, noSellRoute: !!q.noSellRoute, fallbackReason: q.fallbackReason || null, prioLamports: q.fees.prioLamports };
       const qb = quoteBlockers(t.quoteCheck, S());
       if (qb.length) {
@@ -1002,7 +1004,7 @@ function createCore(opts) {
     const sq = sum(pos.entries.map(e => e.qty));
     pos.entryPrice = sum(pos.entries.map(e => e.price * e.qty)) / sq;
     pos.qty += f.qty; pos.initialQty += f.qty; pos.costUsd += f.size; pos.investedUsd += f.size; pos.feesUsd += f.fees.total;
-    pos.slippageUsd += (f.size - f.fees.total) * (1 - f.refPrice / f.price);
+    pos.slippageUsd += (f.size - f.fees.total) * (f.price / f.refPrice - 1); // Mehrkosten gegenüber dem Referenzkurs (begrenzt, siehe slippageOf)
     state.tradeSeq++;
     state.portfolio.cash = m6(state.portfolio.cash - f.size);
     state.portfolio.fees = m6(state.portfolio.fees + f.fees.total);
@@ -1144,7 +1146,7 @@ function createCore(opts) {
       transition(ord, 'CONFIRMED', `Simulierte Füllung: ${fq.source === 'JUPITER' ? 'echtes Jupiter-Angebot' : 'Schätzung'}${run.latencyApplied ? ` nach ${S().simLatencyMs} ms Wartezeit` : ''}`);
       const costPortion = pos.costUsd * (qty / pos.qty);
       const realized = net - costPortion;
-      pos.exits.push({ orderId: ord.id, ts: env.now(), price: fillPrice, refPrice: p, qty, usd: net, fees: fees.total, impactPct: imp * 100, reason: reasonCode, realized });
+      pos.exits.push({ orderId: ord.id, ts: env.now(), price: fillPrice, refPrice: p, qty, usd: net, fees: fees.total, impactPct: imp * 100, reason: reasonCode, realized, source: fq.source || null });
       pos.qty -= qty; pos.costUsd -= costPortion;
       if (pos.qty <= pos.initialQty * 1e-9) { pos.qty = 0; pos.costUsd = 0; }
       pos.realizedUsd += realized; pos.feesUsd += fees.total; pos.slippageUsd += qty * (p - fillPrice); pos.exitPending = null;
@@ -1182,7 +1184,7 @@ function createCore(opts) {
     const qty = pos.qty, realized = -pos.costUsd;
     ord.failureCode = 'WRITTEN_OFF'; ord.qty = qty; ord.sizeUsd = 0; ord.estPrice = refPrice;
     transition(ord, 'CANCELLED', `${EXEC_FAIL.WRITTEN_OFF} (${str(why || '', 80)})`);
-    pos.exits.push({ orderId: ord.id, ts: env.now(), price: 0, refPrice, qty, usd: 0, fees: 0, impactPct: 100, reason: 'NO_SELL_ROUTE', realized });
+    pos.exits.push({ orderId: ord.id, ts: env.now(), price: 0, refPrice, qty, usd: 0, fees: 0, impactPct: 100, reason: 'NO_SELL_ROUTE', realized, source: 'WRITE_OFF' });
     pos.qty = 0; pos.costUsd = 0; pos.realizedUsd += realized; pos.exitPending = null; state.tradeSeq++;
     state.portfolio.realized = m6(state.portfolio.realized + realized); state.risk.dailyPnl = m6(state.risk.dailyPnl + realized);
     state.usedKeys.set(key, ord.id);
@@ -1924,6 +1926,7 @@ function createCore(opts) {
   const champion = () => state.models.versions.find(v => v.id === state.models.champion) || null;
   const challenger = () => (state.models.challenger ? state.models.versions.find(v => v.id === state.models.challenger) || null : null);
   const hypOf = id => state.research.hypotheses.find(h => h.id === id) || null;
+  const learnRecs = () => state.learn.records.filter(learnable); // nur saubere Records lernen (recordQuality)
   const driftStatus = () => (state.learn.drift ? state.learn.drift.status : 'NOT_ENOUGH_DATA');
   /* Immer nur ein Challenger gleichzeitig; kein neuer, solange ein übernommenes Modell noch überwacht wird oder Drift vorliegt. */
   const slotFree = () => !challenger() && driftStatus() !== 'DRIFT' && !(champion() && champion().status === 'LIVE');
@@ -1935,7 +1938,7 @@ function createCore(opts) {
 
   /* Kohorten-Kontext für Labels – nur Trades, die VOR diesem Trade geschlossen wurden (kein Look-Ahead). */
   function labelCtx(rec) {
-    const prior = state.learn.records.filter(r => r.tradeId !== rec.tradeId && r.closedAt <= rec.closedAt && r.outcome && isNum(r.outcome.pnlPct));
+    const prior = state.learn.records.filter(r => learnable(r) && r.tradeId !== rec.tradeId && r.closedAt <= rec.closedAt && r.outcome && isNum(r.outcome.pnlPct));
     const losses = prior.filter(r => !r.outcome.win && isNum(r.outcome.pnlUsd)).map(r => r.outcome.pnlUsd);
     const cohort = x => {
       const strat = x.strategy || 'manuell', same = prior.filter(r => (r.strategy || 'manuell') === strat); let worst = null;
@@ -1959,6 +1962,7 @@ function createCore(opts) {
     const L = state.learn;
     L.records.push(rec); L.records.sort(byClose);
     if (L.records.length > LEARN_CAPS.records) L.records.splice(0, L.records.length - LEARN_CAPS.records);
+    if (!learnable(rec)) { touch('learning'); return; } // verzerrter Trade: gespeichert, aber nicht in Muster/Fehlsignale
     const fs = falseSignalRecord(rec);
     if (fs) { L.falseSignals.unshift(fs); if (L.falseSignals.length > LEARN_CAPS.falseSignals) L.falseSignals.length = LEARN_CAPS.falseSignals; }
     for (const k of patternKeysOf(rec)) state.patterns[k.key] = updatePatternAgg(state.patterns[k.key], rec, k.dims, k.entry);
@@ -1979,7 +1983,9 @@ function createCore(opts) {
     if (!pos.path) { legacyPath(rec, pos.mae2m); rec.legacy = true; }
     rec.labels = labelTrade(rec, labelCtx(rec));
     rec.cf = compactCf(counterfactuals(rec, S()));
+    rec.quality = recordQuality(rec);
     addRecord(rec);
+    if (!rec.quality.ok) log.warn('LEARNING', `${rec.symbol}: gespeichert, zählt aber nicht fürs Lernen – ${rec.quality.flags.map(f => RECORD_FLAGS_DE[f] || f).join(', ')}`);
     if (d.features) delete d.features; // liegt jetzt im Learning Record – nicht doppelt in Journal/Order speichern
     if (last && isNum(last.refPrice) && last.refPrice > 0) {
       state.learn.followUps = state.learn.followUps.filter(f => f.tradeId !== rec.tradeId).slice(-19);
@@ -1988,10 +1994,10 @@ function createCore(opts) {
     const fam = rec.labels.lossFamily;
     log.info('LEARNING', `${rec.symbol}: ${rec.outcome.win ? 'Gewinn' : 'Verlust'} ${fmtPct(rec.outcome.pnlPct)} ausgewertet${fam ? ` · Ursache: ${LOSS_FAMILY_DE[fam] || fam} (Evidenz ${rec.labels.evidence[fam] || '—'})` : ''}${rec.legacy ? ' · eingeschränkte Features (legacy)' : ''}`);
     learnTimeline(rec.outcome.win ? 'WIN' : 'LOSS', `${rec.symbol} ${fmtPct(rec.outcome.pnlPct)}${fam ? ' · ' + (LOSS_FAMILY_DE[fam] || fam) : ''}`, rec.tradeId);
-    shadowEval(rec); liveEval(rec);
+    if (learnable(rec)) { shadowEval(rec); liveEval(rec); }
     const r = state.risk;
     if (!rec.outcome.win && S().lossStreakLimit > 0 && r.lossStreak >= S().lossStreakLimit) {
-      const rv = lossStreakReview(state.learn.records, Math.min(r.lossStreak, 10), state.learn.drift, state.research.hypotheses, env.now());
+      const rv = lossStreakReview(learnRecs(), Math.min(r.lossStreak, 10), state.learn.drift, state.research.hypotheses, env.now());
       if (!state.learn.reviews.some(x => x.id === rv.id)) {
         state.learn.reviews.unshift(rv); if (state.learn.reviews.length > LEARN_CAPS.reviews) state.learn.reviews.length = LEARN_CAPS.reviews;
         const top = Object.entries(rv.shares).sort((a, b) => b[1] - a[1])[0];
@@ -2083,7 +2089,7 @@ function createCore(opts) {
     if (L.lessons.length > LEARN_CAPS.lessons) L.lessons.length = LEARN_CAPS.lessons;
   }
   function mergeHypotheses(hyps, now) {
-    const R = state.research, n = state.learn.records.length, freeSlot = slotFree();
+    const R = state.research, n = learnRecs().length, freeSlot = slotFree();
     for (const h of hyps) {
       const ex = hypOf(h.id);
       if (!ex) { R.hypotheses.unshift(h); log.info('RESEARCH', `Neue Hypothese ${h.id}: ${h.title} – ${h.statement}`); learnTimeline('HYPOTHESIS', `${h.id}: ${h.title}`, h.id); continue; }
@@ -2116,9 +2122,9 @@ function createCore(opts) {
     const R = state.research, L = state.learn, s = S(), item = R.queue[0]; if (!item) return null;
     const h = hypOf(item.id); R.queue.shift(); if (!h) return null;
     h.status = 'TESTING';
-    const e = runExperiment(h, L.records, P, { minTest: s.learnMinTest, championId: state.models.champion, drift: driftStatus() });
+    const recs = learnRecs(), e = runExperiment(h, recs, P, { minTest: s.learnMinTest, championId: state.models.champion, drift: driftStatus() });
     e.ts = now;
-    h.lastTestN = L.records.length; h.experimentIds = [e.id, ...h.experimentIds.filter(x => x !== e.id)].slice(0, 10); h.updatedAt = now;
+    h.lastTestN = recs.length; h.experimentIds = [e.id, ...h.experimentIds.filter(x => x !== e.id)].slice(0, 10); h.updatedAt = now;
     h.result = { decision: e.decision, reason: e.reason, at: now };
     h.status = e.decision === 'VALIDATED' ? 'VALIDATED' : e.decision === 'REJECTED' ? 'REJECTED' : 'INSUFFICIENT_DATA';
     R.experiments = [e, ...R.experiments.filter(x => x.id !== e.id)].slice(0, LEARN_CAPS.experiments);
@@ -2183,7 +2189,7 @@ function createCore(opts) {
   }
   function rejectChallenger(v, why, who = 'LEARNING') {
     const M = state.models; v.status = 'REJECTED'; v.reason = why; v.rejectedAt = env.now(); if (M.challenger === v.id) M.challenger = null;
-    const h = hypOf(v.hypothesisId); if (h) { h.status = 'REJECTED'; h.result = { decision: 'REJECTED', reason: why, at: env.now() }; h.lastTestN = state.learn.records.length; }
+    const h = hypOf(v.hypothesisId); if (h) { h.status = 'REJECTED'; h.result = { decision: 'REJECTED', reason: why, at: env.now() }; h.lastTestN = learnRecs().length; }
     log.info('MODEL', `${v.id} verworfen: ${why}`); learnTimeline('MODEL', `${v.id} verworfen: ${why}`, v.id);
     if (who === 'USER') audit('USER', 'MODEL_REJECT', v.id, why);
     touch('models', 'experiments');
@@ -2226,7 +2232,7 @@ function createCore(opts) {
     return out;
   }
   function liveBaseline() {
-    const rs = state.learn.records.filter(r => !r.legacy && isNum(r.outcome.pnlUsd)).slice(-30);
+    const rs = learnRecs().filter(r => !r.legacy && isNum(r.outcome.pnlUsd)).slice(-30);
     if (rs.length < 5) return null;
     let eq = 0, pk = 0, dd = 0; for (const r of rs) { eq += r.outcome.pnlUsd; pk = Math.max(pk, eq); dd = Math.max(dd, pk - eq); }
     return { n: rs.length, expectancy: lr2(avg(rs.map(r => r.outcome.pnlUsd))), dd: lr2(dd) };
@@ -2256,7 +2262,7 @@ function createCore(opts) {
     M.rules = sanitizeRules(v.prevRules || prev.rules);
     v.status = 'ROLLED_BACK'; v.rolledBackAt = env.now(); v.rollbackReason = why || 'manuell'; v.rolledBackBy = who;
     prev.status = prev.retiredStatus || (prev.id === 'M-1' ? 'BASELINE' : 'STABLE'); M.champion = prev.id;
-    const h = hypOf(v.hypothesisId); if (h) { h.status = 'ROLLED_BACK'; h.lastTestN = state.learn.records.length; }
+    const h = hypOf(v.hypothesisId); if (h) { h.status = 'ROLLED_BACK'; h.lastTestN = learnRecs().length; }
     newParamVersion(pickTunable(), 'STABLE', `Rollback ${v.id} → ${prev.id}`);
     audit(who === 'AUTO' ? 'BOT' : 'USER', 'MODEL_ROLLBACK', `${v.id} → ${prev.id}: ${Object.keys(patch).join(', ') || 'nur Regeln'}${skipped.length ? ' · manuell geändert, nicht überschrieben: ' + skipped.join(', ') : ''}`, why);
     log.warn('MODEL', `Rollback ${v.id} → ${prev.id} (${who === 'AUTO' ? 'automatisch' : 'manuell'}): ${why || 'manuell'}`);
@@ -2270,7 +2276,7 @@ function createCore(opts) {
     if (!s.learnEnabled) return null;
     if (!force && (now - L.lastRunAt < 20 * SEC || (!learnDue && now - L.lastRunAt < 5 * MIN))) return null;
     learnDue = false; L.lastRunAt = now; touch('learning');
-    const recs = L.records; if (!recs.length) return { n: 0 };
+    const recs = learnRecs(); if (!recs.length) return { n: 0, excluded: L.records.length }; // nur saubere Records (siehe recordQuality)
     const t0 = env.now(), base = learnBase(recs);
     const prev = driftStatus();
     L.drift = { ...detectDrift(recs), at: now };
@@ -2291,6 +2297,71 @@ function createCore(opts) {
     touch('learning', 'experiments');
     return { n: recs.length, ms: env.now() - t0 };
   }
+  /* Muster und Fehlsignal-Liste vollständig aus den sauberen Records neu aufbauen (nach Datenbereinigung). */
+  function rebuildFromRecords() {
+    const L = state.learn, recs = L.records.filter(learnable);
+    state.patterns = {}; L.falseSignals = [];
+    for (const r of recs) {
+      for (const k of patternKeysOf(r)) state.patterns[k.key] = updatePatternAgg(state.patterns[k.key], r, k.dims, k.entry);
+      const fs = falseSignalRecord(r); if (fs) L.falseSignals.unshift(fs);
+    }
+    if (L.falseSignals.length > LEARN_CAPS.falseSignals) L.falseSignals.length = LEARN_CAPS.falseSignals;
+    const keys = Object.keys(state.patterns);
+    if (keys.length > LEARN_CAPS.patterns) {
+      keys.sort((a, b) => state.patterns[a].n - state.patterns[b].n || state.patterns[a].lastSeen - state.patterns[b].lastSeen);
+      for (const k of keys.slice(0, keys.length - LEARN_CAPS.patterns)) delete state.patterns[k];
+    }
+    learnCache.at = -1; learnDue = true;
+    touch('learning', 'patterns');
+  }
+  /* Migration 2.12.0: Slippage mit der begrenzten Formel neu berechnen (die alte Kauf-Formel ergab bei Rug-Kursen
+     Fantasiewerte, z. B. −23.000 $ bei 509 $ Einsatz). Ergebnisse (PnL) ändern sich dadurch nicht. */
+  function slippageMigrate() {
+    let n = 0;
+    for (const j of state.journal) if (j.slipV !== 2 && arr(j.entries).length) { j.slippageUsd = slippageOf(j.entries, j.exits); j.slipV = 2; n++; }
+    for (const p of state.positions) if (p.slipV !== 2 && arr(p.entries).length) { p.slippageUsd = slippageOf(p.entries, p.exits); p.slipV = 2; n++; }
+    if (n) log.info('LEARNING', `Migration: Slippage für ${n} Trades mit der korrigierten Formel neu berechnet (Ergebnisse unverändert)`);
+    return n;
+  }
+  /* Migration 2.12.0: Datenqualität der vorhandenen Learning Records prüfen. Fehlende Angaben (Ausführungsmodell, Quelle des
+     Verkaufs, Kursabweichung beim Kauf) werden aus dem Journal ergänzt. Verzerrte Trades zählen danach nicht mehr fürs Lernen;
+     alles daraus Abgeleitete (Muster, Lektionen, Fehlsignale, Verlustmodell, Kalibrierung, Drift) wird aus den sauberen Records
+     neu berechnet und bisherige Hypothesen werden mit sauberen Daten neu getestet. Die Rohdaten selbst bleiben unverändert. */
+  function learnQualityMigrate() {
+    const L = state.learn; if (L.qualityV >= 1) return null;
+    const byId = new Map(state.journal.map(j => [j.id, j]));
+    for (const r of L.records) {
+      const x = r.execution || (r.execution = {}), j = byId.get(r.tradeId);
+      if (j) {
+        const en = arr(j.entries), ex = arr(j.exits), last = ex[ex.length - 1];
+        if (!isNum(x.buys)) x.buys = en.length;
+        if (x.execModel === undefined) x.execModel = en.some(e => e.source) ? 2 : 1;
+        // Vor 2.12.0 wurde die Quelle des Verkaufs nicht gespeichert: mit echten Angeboten (Modell 2) war es Jupiter, vorher geschätzt
+        if (x.exitSource === undefined) x.exitSource = last ? last.source || (last.reason === 'NO_SELL_ROUTE' ? 'WRITE_OFF' : x.execModel === 2 ? 'JUPITER' : 'ESTIMATED') : null;
+        if (x.maxDevPct === undefined) { const devs = en.map(e => (isNum(e.price) && isNum(e.refPrice) && e.refPrice > 0 ? (e.price / e.refPrice - 1) * 100 : null)).filter(isNum); x.maxDevPct = devs.length ? lr2(devs.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a))) : null; }
+        x.slippageUsd = lr2(slippageOf(en, ex));
+      } else {
+        if (x.execModel === undefined) x.execModel = 1;
+        if (x.exitSource === undefined) x.exitSource = 'ESTIMATED';
+      }
+      r.quality = recordQuality(r);
+    }
+    const q = learnQuality();
+    rebuildFromRecords();
+    L.lessons = []; L.lossModel = null; L.lastModelN = 0; L.calibration = null; L.drift = null;
+    const R = state.research; let retest = 0;
+    for (const h of R.hypotheses) if (!['SHADOW', 'PROMOTED'].includes(h.status)) { h.status = 'IDEA'; h.lastTestN = 0; h.result = { decision: 'RETEST', reason: 'Datenbasis bereinigt (2.12.0) – wird mit sauberen Trades neu getestet', at: env.now() }; retest++; }
+    for (const e of R.experiments) if (!e.invalidated) e.invalidated = 'Datenbasis bereinigt (2.12.0) – Ergebnis nicht mehr maßgeblich';
+    R.queue = [];
+    L.qualityV = 1;
+    touch('learning', 'patterns', 'experiments');
+    if (q.total) {
+      const why = Object.entries(q.byFlag).map(([f, n]) => `${n}× ${RECORD_FLAGS_DE[f] || f}`).join(', ');
+      log.warn('LEARNING', `Datenbereinigung 2.12.0: ${q.excluded} von ${q.total} Trades zählen nicht mehr fürs Lernen${why ? ' (' + why + ')' : ''} · Muster, Lektionen und Modell neu aus ${q.learnable} sauberen Trades · ${retest} Hypothesen werden neu getestet`);
+      learnTimeline('MIGRATION', `Datenbereinigung: ${q.excluded} von ${q.total} Trades ausgeschlossen, ${retest} Hypothesen neu zu testen`);
+    }
+    return q;
+  }
   /* Migration: bereits abgeschlossene Journal-Trades → Learning Records (legacy, eingeschränkte Features). */
   function learnBackfill() {
     const L = state.learn; if (L.backfilled) return 0;
@@ -2302,6 +2373,7 @@ function createCore(opts) {
       const rec = buildLearningRecord(pos, j, { features: featuresFromJournal(j), path: null, equity: null, mae2m: j.mae2m });
       legacyPath(rec, j.mae2m); rec.legacy = true;
       rec.labels = labelTrade(rec, labelCtx(rec)); rec.cf = compactCf(counterfactuals(rec, S()));
+      rec.quality = recordQuality(rec);
       addRecord(rec);
     }
     L.backfilled = true;
@@ -2315,9 +2387,15 @@ function createCore(opts) {
     const f = buildEntryFeatures(t, t.A, t.D, state.regime.tags, env.now()), L = state.learn;
     return { ...learningDecisionFor(f, L.lossModel && L.lossModel.w ? L.lossModel : null, L.calibration, L.drift), rulesActive: !!S().learnEnabled && rulesText(state.models.rules).length > 0 };
   }
+  function learnQuality() {
+    const all = state.learn.records, byFlag = {}; let excluded = 0;
+    for (const r of all) if (!learnable(r)) { excluded++; for (const f of r.quality.flags) byFlag[f] = (byFlag[f] || 0) + 1; }
+    return { total: all.length, learnable: all.length - excluded, excluded, byFlag };
+  }
   function learnView() {
-    if (learnCache.at < 0 && state.learn.records.length) { const base = learnBase(state.learn.records); Object.assign(learnCache, { at: env.now(), stats: patternStatsAll(base), base, fam: familyStats(state.learn.records) }); }
-    return { stats: learnCache.stats, base: learnCache.base, fam: learnCache.fam || familyStats(state.learn.records), champion: champion(), challenger: challenger(), rulesText: rulesText(state.models.rules), params: curParams(), errors: errorClassStats(state.learn.records), nearMiss: nearMissStats(state.learn.nearMiss.done), disc: discoveryStats(state.learn.records, state.learn.nearMiss.done), nearMissOpen: state.learn.nearMiss.open.length, nearMissSkipped: state.learn.nearMiss.skipped };
+    const recs = learnRecs();
+    if (learnCache.at < 0 && recs.length) { const base = learnBase(recs); Object.assign(learnCache, { at: env.now(), stats: patternStatsAll(base), base, fam: familyStats(recs) }); }
+    return { stats: learnCache.stats, base: learnCache.base, fam: learnCache.fam || familyStats(recs), champion: champion(), challenger: challenger(), rulesText: rulesText(state.models.rules), params: curParams(), errors: errorClassStats(recs), nearMiss: nearMissStats(state.learn.nearMiss.done), disc: discoveryStats(recs, state.learn.nearMiss.done), nearMissOpen: state.learn.nearMiss.open.length, nearMissSkipped: state.learn.nearMiss.skipped, quality: learnQuality() };
   }
   /* Aktive Parameter mit Herkunft: letzter Eintrag im Änderungsprotokoll bzw. aktives gelerntes Modell. Unbekanntes bleibt als solches markiert. */
   function activeParams() {
@@ -2500,6 +2578,7 @@ function createCore(opts) {
     if (!state.models.versions[0].ts) state.models = freshModels(learnParamsNow(), env.now());
     state.learn.corrupted = arr(loaded.corrupted).filter(c => LEARN_STORAGE_KEYS.includes(c));
     try { learnBackfill(); } catch (e) { log.error('LEARNING', 'Migration der Lerndaten fehlgeschlagen: ' + e.message); }
+    try { slippageMigrate(); learnQualityMigrate(); } catch (e) { log.error('LEARNING', 'Datenbereinigung 2.12.0 fehlgeschlagen: ' + e.message); }
     // Ab 2.7.0: Fehlerklasse & „erwartbarer Verlust?“ für bereits ausgewertete Verluste ergänzen (Ursache bleibt unverändert)
     let ecAdded = 0;
     for (const r of state.learn.records) if (r.labels && !r.outcome.win && !('errorClass' in r.labels)) { withErrorClass(r.labels, r, S()); ecAdded++; }
@@ -2655,9 +2734,9 @@ function createCore(opts) {
     executeBuy, executeSell, execCheck: (t, o) => execCheck(t, t.A, o), globalBlockers, buildCtx, estFees, estImpact, equityInfo, portfolioRisk, positionCorrelations,
     systemHealth, diagnostics, botHealth, readiness, drawdownPct, portfolioIntegrity, execProvider: m => execProvider(m).id, candidateChain, liveReadiness, preLiveChecks, ackReconciliation, requestSignature, rpcEndpoints, fetchOhlcv, fetchCandlesForBacktest, walletConnect, walletDisconnect, walletBalance, walletNetwork,
     updateSettings, updateStrategies, rollbackTo, addWatch, removeWatch, updateWatch, select, exportData, importSettings, resetSettings, resetPortfolio, freshStart,
-    learnView, learnDecision, learnPromote, learnReject, learnRollback, activeParams, monitorMetrics, exportBackup, validateBackup, restoreBackup, recordBacktest, learnRunNow: () => { const r = learnRun(true); persistNow(); return r; },
+    learnView, learnQuality, learnDecision, learnPromote, learnReject, learnRollback, activeParams, monitorMetrics, exportBackup, validateBackup, restoreBackup, recordBacktest, learnRunNow: () => { const r = learnRun(true); persistNow(); return r; },
     newSession, factoryReset, persistNow, enqueueSecurity, clearFeed: () => { state.feed = []; persist(); },
     drainTrades,
-    _t: { posTransition, runProviderSteps, liveProvider, simProvider, updatePriorityFee, writeOffPosition, scanOnce, updateSolPrice, applySnapshot, applyAlt, fetchChunk, reconcile, analyzeAll, startScanner, stopScanner, timers, managePositions, closePosition, processQueue, enqueue, checkSecurity, ensureToken, maybeAutoTrade, setBotState, learnRun, learnOnClose, learnFollowUps, finishFollowUp, createChallenger, shadowEval, liveEval, addRecord, nearMissTick, maybeTune, updateSettings, monitorTick }
+    _t: { touch, posTransition, runProviderSteps, liveProvider, simProvider, updatePriorityFee, writeOffPosition, scanOnce, updateSolPrice, applySnapshot, applyAlt, fetchChunk, reconcile, analyzeAll, startScanner, stopScanner, timers, managePositions, closePosition, processQueue, enqueue, checkSecurity, ensureToken, maybeAutoTrade, setBotState, learnRun, learnOnClose, learnFollowUps, finishFollowUp, createChallenger, shadowEval, liveEval, addRecord, nearMissTick, maybeTune, updateSettings, monitorTick }
   };
 }

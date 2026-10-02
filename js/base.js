@@ -944,6 +944,7 @@ const BLOCKER_DEFS = {
   SLIPPAGE_TOO_HIGH: [7, 'EXECUTION', 'Slippage/Price Impact zu hoch'],
   NO_SELL_ROUTE: [3, 'SECURITY', 'Kein Verkaufsweg (Honeypot-Verdacht)'],
   NO_ROUTE: [7, 'EXECUTION', 'Kein Handelsweg (Jupiter)'],
+  PRICE_CONFLICT: [2, 'DATA', 'Kursquellen widersprechen sich (Jupiter vs. DexScreener)'],
   ROUND_TRIP_COST: [7, 'EXECUTION', 'Kauf + sofortiger Verkauf zu teuer (Gebühren/Impact/Steuer)'],
   SIZE_ZERO: [7, 'EXECUTION', 'Positionsgröße 0'],
   INSUFFICIENT_CASH: [7, 'EXECUTION', 'Nicht genug (virtuelles) Kapital'],

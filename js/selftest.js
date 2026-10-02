@@ -51,7 +51,7 @@ function makeTestHarness() {
   };
   H.env = env;
   /* Jupiter-Attrappe: Konstantprodukt-AMM auf Preis/Liquidität des Test-Pairs (6 Decimals, SOL 150 $, 0,25 % Gebühr + optionale Steuer). */
-  H.prioFee = 1000; H.jup = { noRoute: new Set(), noSell: new Set(), taxPct: 0, down: false, calls: 0 };
+  H.prioFee = 1000; H.jup = { noRoute: new Set(), noSell: new Set(), taxPct: 0, down: false, calls: 0, buyOutFactor: 1 };
   H.jupiter = (url, init) => {
     H.jup.calls++; H.jup.lastHeaders = (init && init.headers) || null;
     if (H.jup.down) return mockResponse(503, 'down');
@@ -60,7 +60,7 @@ function makeTestHarness() {
     if (!pf || H.jup.noRoute.has(mint) || (!buy && H.jup.noSell.has(mint))) return mockResponse(400, { error: 'Could not find any route', errorCode: 'COULD_NOT_FIND_ANY_ROUTE' });
     const pr = pf(), price = Number(pr.priceUsd), liq = pr.liquidity.usd, sol = 150, keep = 1 - 0.0025 - H.jup.taxPct / 100;
     let out;
-    if (buy) { const usd = amt / 1e9 * sol; out = Math.floor(usd * keep / (price * (1 + usd / (liq / 2))) * 1e6); }
+    if (buy) { const usd = amt / 1e9 * sol; out = Math.floor(usd * keep / (price * (1 + usd / (liq / 2))) * 1e6 * H.jup.buyOutFactor); } // Faktor ≠ 1: Jupiter-Kurs weicht vom Marktkurs ab
     else { const usd = amt / 1e6 * price; out = Math.floor(usd * keep / (1 + usd / (liq / 2)) / sol * 1e9); }
     return mockResponse(200, { inputMint: inM, outputMint: outM, inAmount: String(amt), outAmount: String(out), otherAmountThreshold: String(Math.floor(out * (1 - bps / 1e4))), slippageBps: bps, priceImpactPct: '0', routePlan: [{ swapInfo: { label: 'Raydium' }, percent: 100 }], contextSlot: 1 });
   };
@@ -834,6 +834,49 @@ const SELF_TESTS = [
     core.state.regime = { tags: ['CHOPPY'] };
     const r = await core.executeBuy(t.id, { sizeUsd: 20 }); assert(r.ok, 'manueller Kauf durch gelernte Regel blockiert: ' + codes(r).join(','));
     return 'Filter nur verschärft · Bounds geklemmt · Regel blockiert Auto, nicht manuell';
+  }],
+  ['Lern-KI', 'Keine falschen Learnings: verzerrte Trades zählen nicht, alte Daten werden bereinigt, Kurskonflikt blockiert', async () => {
+    const ok = mkLearnRec(1), pyr = mkLearnRec(2), conf = mkLearnRec(3), rug = mkLearnRec(4), rugJ = mkLearnRec(5);
+    pyr.execution.buys = 8; conf.execution.maxDevPct = -98.9; rug.exit.reason = 'LIQUIDITY_COLLAPSE'; rug.execution.exitSource = 'ESTIMATED'; rugJ.exit.reason = 'LIQUIDITY_COLLAPSE'; rugJ.execution.exitSource = 'JUPITER';
+    assert(recordQuality(ok).ok && recordQuality(pyr).flags.join() === 'PYRAMIDED' && recordQuality(conf).flags.join() === 'PRICE_CONFLICT' && recordQuality(rug).flags.join() === 'ESTIMATED_RUG_EXIT' && recordQuality(rugJ).ok, 'Qualitätsprüfung falsch');
+    const sl = slippageOf([{ price: 6.15e-6, refPrice: 5.81e-4, usd: 28.82, fees: 0.01 }], []);
+    assert(sl < 0 && sl >= -28.82, 'Slippage nicht auf den Einsatz begrenzt: ' + sl);
+    // Alter Stand (vor 2.12.0): Records ohne Qualitätsprüfung, Journal mit Nachkäufen / Rug-Kauf / geschätztem Rug-Exit, validierte Hypothese
+    const H = makeTestHarness(); const c0 = await testCore(H), L0 = c0.state.learn, t0 = Date.UTC(2026, 0, 1);
+    const recs = Array.from({ length: 12 }, (_, i) => mkLearnRec(10 + i, { pnlPct: i % 2 ? 6 : -8 }));
+    const bad = { pyr: recs[0], conf: recs[1], rug: recs[2] }; bad.pyr.strategy = 'scalp';
+    const jEntry = (r, entries, exits) => ({ id: r.tradeId, tokenId: r.tokenId, symbol: r.symbol, mint: tMint(1), status: 'CLOSED', mode: 'SIMULATION', openedAt: r.openedAt, closedAt: r.closedAt, entries, exits, sizeUsd: 50, feesUsd: 0.1, slippageUsd: -999, result: { pnlUsd: r.outcome.pnlUsd, pnlPct: r.outcome.pnlPct, win: r.outcome.win }, signals: [], exitReason: r.exit.reason });
+    const e1 = (ts, price, ref, src) => ({ orderId: 'o' + ts, ts, price, refPrice: ref, qty: 25 / price, usd: 25, fees: 0.01, impactPct: (price / ref - 1) * 100, source: src });
+    const x1 = (ts, price, ref, reason) => ({ orderId: 'x' + ts, ts, price, refPrice: ref, qty: 1000, usd: 1000 * price, fees: 0.01, reason });
+    c0.state.journal = recs.map((r, i) => r === bad.pyr ? jEntry(r, Array.from({ length: 8 }, (_, k) => e1(t0 + k, 0.001, 0.001)), [x1(t0 + 99, 0.0009, 0.0009, 'STOP_LOSS')])
+      : r === bad.conf ? jEntry(r, [e1(t0 + 1, 0.001, 0.001, 'JUPITER'), e1(t0 + 2, 6.15e-6, 5.81e-4, 'JUPITER')], [x1(t0 + 99, 0, 2e-6, 'NO_SELL_ROUTE')])
+      : r === bad.rug ? jEntry(r, [e1(t0 + 1, 0.001, 0.001)], [x1(t0 + 99, 0.00112, 0.00115, 'LIQUIDITY_COLLAPSE')])
+      : jEntry(r, [e1(t0 + 1, 0.001, 0.001, 'JUPITER')], [x1(t0 + 99, 0.00105, 0.00105, 'TP1')]));
+    bad.rug.exit.reason = 'LIQUIDITY_COLLAPSE';
+    for (const r of recs) { delete r.execution.buys; L0.records.push(r); }
+    L0.qualityV = 0; L0.backfilled = true; L0.lessons = [{ id: 'L-X', key: 'strategy=scalp', kind: 'PREFER', text: 'alt', status: 'WATCH' }];
+    for (const r of recs) for (const k of patternKeysOf(r)) c0.state.patterns[k.key] = updatePatternAgg(c0.state.patterns[k.key], r, k.dims, k.entry);
+    const hyp = hypothesisOf('MIN_SCORE', { minScore: 70 }, { statement: 'alt', n: 12 }, t0); hyp.status = 'VALIDATED_HOLD'; c0.state.research.hypotheses.push(hyp);
+    c0.state.research.experiments.push({ id: 'E-ALT', decision: 'VALIDATED', hypothesisId: hyp.id });
+    c0._t.touch('learning', 'patterns', 'experiments'); c0.persistNow();
+    const c1 = createCore({ env: H.env, backend: H.backend }); c1.init({ autoStart: false });
+    const L = c1.state.learn, q = c1.learnQuality();
+    assert(q.total === 12 && q.excluded === 3 && q.byFlag.PYRAMIDED === 1 && q.byFlag.PRICE_CONFLICT === 1 && q.byFlag.ESTIMATED_RUG_EXIT === 1, 'Bereinigung falsch: ' + JSON.stringify(q));
+    assert(!c1.state.patterns['strategy=scalp'] && Object.values(c1.state.patterns).every(a => a.n <= 9) && !L.lessons.length, 'Muster/Lektionen enthalten verzerrte Trades');
+    const h1 = c1.state.research.hypotheses.find(h => h.id === hyp.id);
+    assert(h1.status === 'IDEA' && h1.result.decision === 'RETEST' && c1.state.research.experiments[0].invalidated, 'Hypothese nicht zum Neutest zurückgesetzt');
+    const jc = c1.state.journal.find(j => j.id === bad.conf.tradeId);
+    assert(jc.slipV === 2 && jc.slippageUsd > -26 && jc.slippageUsd < 0, 'Slippage nicht neu berechnet: ' + jc.slippageUsd);
+    const run = c1._t.learnRun(true);
+    assert(run.n === 9, 'Lernlauf nutzt verzerrte Trades: n=' + run.n);
+    // Laufender Betrieb: Kurskonflikt (Jupiter 99 % unter DexScreener) blockiert den Kauf; Verkaufsquelle wird gespeichert
+    const H2 = makeTestHarness(); const core = await testCore(H2); const t = await prepToken(core, H2, 1);
+    H2.jup.buyOutFactor = 100;
+    const r = await core.executeBuy(t.id, { sizeUsd: 20 });
+    assert(!r.ok && codes(r).includes('PRICE_CONFLICT') && core.execCheck(t, {}).blockers.some(b => b.code === 'PRICE_CONFLICT'), 'Kurskonflikt nicht blockiert: ' + codes(r).join(','));
+    H2.jup.buyOutFactor = 1; const { rec } = await learnTrade(H2, core, 2, 0.0011);
+    assert(rec && rec.execution.execModel === 2 && rec.execution.exitSource === 'JUPITER' && rec.quality && rec.quality.ok && Math.abs(rec.execution.maxDevPct) < 1, 'Ausführungsdaten fehlen im Record: ' + JSON.stringify(rec && rec.execution));
+    return `3 von 12 alten Trades ausgeschlossen (Nachkäufe, Kurskonflikt, geschätzter Rug-Exit) · Muster/Lektionen neu · Hypothese neu zu testen · Lernlauf n=9 · Kurskonflikt → PRICE_CONFLICT`;
   }],
   ['Lern-KI', 'Drift-Erkennung (Feature & Outcome) und NOT_ENOUGH_DATA', async () => {
     assert(detectDrift(oosSet(10)).status === 'NOT_ENOUGH_DATA', 'Drift ohne Daten');

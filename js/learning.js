@@ -135,12 +135,38 @@ function updatePath(p, tRelMs, pnlPct, liqPct) {
   }
 }
 
+/* Datenqualität eines Learning Records (ab 2.12.0). Verzerrte Trades bleiben gespeichert und exportierbar (Rohdaten für
+   spätere Modelle), zählen aber nicht für Muster, Lektionen, Hypothesen, Experimente, Kalibrierung, Drift und Verlustmodell –
+   sonst lernt die KI aus Messfehlern statt aus dem Einstiegssignal. */
+const LEARN_MAX_BUYS = 3;       // mehr Käufe in eine Position: das Ergebnis spiegelt das Nachkaufen, nicht das Einstiegssignal
+const PRICE_CONFLICT_PCT = 25;  // Füllkurs so weit neben dem Referenzkurs: Kursquellen widersprechen sich (Rug oder veralteter Kurs)
+const RECORD_FLAGS_DE = { PYRAMIDED: `mehr als ${LEARN_MAX_BUYS} Käufe in eine Position`, PRICE_CONFLICT: `Füllkurs mehr als ${PRICE_CONFLICT_PCT} % neben dem Marktkurs`, ESTIMATED_RUG_EXIT: 'Verkauf bei Liquiditätsabzug nur geschätzt (Scheinergebnis)' };
+function recordQuality(rec) {
+  const x = (rec && rec.execution) || {}, flags = [];
+  if (isNum(x.buys) && x.buys > LEARN_MAX_BUYS) flags.push('PYRAMIDED');
+  if (isNum(x.maxDevPct) && Math.abs(x.maxDevPct) > PRICE_CONFLICT_PCT) flags.push('PRICE_CONFLICT');
+  const liqDrop = (rec.exit && rec.exit.reason === 'LIQUIDITY_COLLAPSE') || (rec.path && isNum(rec.path.minLiqPct) && rec.path.minLiqPct <= -40);
+  if (liqDrop && x.exitSource !== 'JUPITER' && x.exitSource !== 'WRITE_OFF') flags.push('ESTIMATED_RUG_EXIT');
+  return { v: 1, ok: !flags.length, flags };
+}
+const learnable = r => !(r && r.quality && r.quality.ok === false);
+/* Slippage in USD gegenüber dem Referenzkurs beim Entscheid: Kauf (Füllkurs ÷ Referenz − 1) × Einsatz, Verkauf (Referenz −
+   Füllkurs) × Menge. Begrenzt auf den Einsatz (die alte Kauf-Formel lief bei Rug-Kursen ins Unendliche). Abschreibungen ohne
+   Verkaufsweg sind keine Slippage. */
+function slippageOf(entries, exits) {
+  let s = 0;
+  for (const e of arr(entries)) if (isNum(e.price) && isNum(e.refPrice) && e.refPrice > 0 && isNum(e.usd)) s += (e.usd - (e.fees || 0)) * (e.price / e.refPrice - 1);
+  for (const x of arr(exits)) if (x.reason !== 'NO_SELL_ROUTE' && isNum(x.price) && isNum(x.refPrice) && isNum(x.qty)) s += x.qty * (x.refPrice - x.price);
+  return m6(s);
+}
+
 /* 2) Trade Learning Record – beim Schließen eingefroren. Nachträglich nur Follow-up + Revisionen (protokolliert). */
 function buildLearningRecord(pos, j, o) {
   const f = o.features || null, p = o.path || newPath(), res = (j && j.result) || {};
   const first = pos.entries[0] || null, last = pos.exits.length ? pos.exits[pos.exits.length - 1] : null;
   const pnlPct = isNum(res.pnlPct) ? res.pnlPct : pos.investedUsd > 0 ? pos.realizedUsd / pos.investedUsd * 100 : null;
   const marketPnl = last && isNum(last.refPrice) && isNum(pos.entryPrice) && pos.entryPrice > 0 ? (last.refPrice / pos.entryPrice - 1) * 100 : null;
+  const devs = arr(pos.entries).map(e => (isNum(e.price) && isNum(e.refPrice) && e.refPrice > 0 ? (e.price / e.refPrice - 1) * 100 : null)).filter(isNum);
   return {
     v: LEARN_VERSION, tradeId: pos.id, tokenId: pos.tokenId, symbol: pos.symbol, openedAt: pos.openedAt, closedAt: pos.closedAt, mode: pos.mode,
     strategy: pos.strategy || (j && j.strategy) || null, paramVersion: pos.paramVersion, modelVersion: pos.learnVersion || null,
@@ -149,7 +175,9 @@ function buildLearningRecord(pos, j, o) {
     execution: {
       entryLatencyMs: lr2(avg(pos.entries.map(e => e.latencyMs).filter(isNum))), exitLatencyMs: isNum(o.exitLatencyMs) ? o.exitLatencyMs : null,
       feesUsd: lr2(pos.feesUsd), slippageUsd: lr2(pos.slippageUsd), estimatedImpactPct: first && isNum(first.impactPct) ? lr2(first.impactPct) : null, exitImpactPct: last && isNum(last.impactPct) ? lr2(last.impactPct) : null,
-      dataAgeMs: f ? f.dataAgeMs : null, sizeUsd: lr2(pos.investedUsd), sizePct: isNum(o.equity) && o.equity > 0 ? lr2(pos.investedUsd / o.equity * 100) : null, buys: pos.entries.length
+      dataAgeMs: f ? f.dataAgeMs : null, sizeUsd: lr2(pos.investedUsd), sizePct: isNum(o.equity) && o.equity > 0 ? lr2(pos.investedUsd / o.equity * 100) : null, buys: pos.entries.length,
+      // ab 2.12.0: Ausführungsmodell (1 = geschätzt/sofort, 2 = echtes Angebot + Wartezeit), Quelle des letzten Verkaufs, größte Kursabweichung beim Kauf
+      execModel: arr(pos.entries).some(e => e.source) ? 2 : 1, exitSource: last ? last.source || null : null, maxDevPct: devs.length ? lr2(devs.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a))) : null
     },
     path: {
       mae1m: lr2(p.mae.m1), mae2m: lr2(isNum(o.mae2m) ? Math.min(p.mae.m2, o.mae2m) : p.mae.m2), mae5m: lr2(p.mae.m5), mae15m: lr2(p.mae.m15),
@@ -651,7 +679,7 @@ function discoveryStats(recs, nmDone) {
 const NEAR_MISS_WINDOW = 15 * MIN, NEAR_MISS_MIN_N = 10;
 const NM_SKIP = new Set(['NO_SIGNAL', 'PRICE_MISSING', 'DATA_STALE', 'DATA_CONFLICT', 'DATA_FALLBACK', 'MCAP_RANGE', 'SECURITY_CRITICAL', 'SECURITY_UNKNOWN', 'SECURITY_STALE', 'SECURITY_UNVERIFIED']);
 const NM_SYSTEM = new Set(['AUTO_TRADING_OFF', 'PAPER_MANUAL', 'RECOVERING', 'BOT_NOT_RUNNING', 'MODE_READ_ONLY', 'LIVE_UNAVAILABLE', 'OFFLINE', 'SYSTEM_UNHEALTHY', 'FEE_UNKNOWN', 'EMERGENCY_STOP', 'SAFE_MODE', 'RECONCILIATION_REQUIRED', 'SECURITY_SOURCES_DOWN', 'TRADE_LOCKED', 'MAX_ACTIVE_ORDERS',
-  'NO_SELL_ROUTE', 'ROUND_TRIP_COST', 'NO_ROUTE']); // Honeypot/Rundreise: der Preispfad zeigt keinen erzielbaren Gewinn (Verkauf unmöglich bzw. Kosten ignoriert)
+  'NO_SELL_ROUTE', 'ROUND_TRIP_COST', 'NO_ROUTE', 'PRICE_CONFLICT']); // Honeypot/Rundreise: der Preispfad zeigt keinen erzielbaren Gewinn (Verkauf unmöglich bzw. Kosten ignoriert)
 const NM_OUTCOME_DE = { MISSED_GAIN: 'verpasster Gewinn', AVOIDED_LOSS: 'vermiedener Verlust', NEUTRAL: 'neutral', NO_DATA: 'keine Daten' };
 function nearMissOf(A, D, S) {
   if (!A || !D || !A.core || !isNum(A.core.price) || !(A.core.price > 0) || D.decision === 'APPROVED') return null;
@@ -696,7 +724,7 @@ function nearMissStats(done) {
 function researchPriority(f) { const w = { impact: 0.25, evidence: 0.2, recency: 0.15, breadth: 0.1, certainty: 0.1, cheap: 0.1, safety: 0.1 }; return Math.round(100 * sum(Object.entries(w).map(([k, x]) => x * clamp(f[k] || 0, 0, 1)))); }
 
 /* 13) Lern-Zustand: Defaults & Validierung beim Laden (beschädigte Teile → leere Defaults, kein Einfluss auf den Handel) */
-const freshLearn = () => ({ v: LEARN_VERSION, records: [], followUps: [], falseSignals: [], lessons: [], timeline: [], reviews: [], calibration: null, drift: null, lossModel: null, lastRunAt: 0, lastModelN: 0, backfilled: false, corrupted: [], nearMiss: freshNearMiss() });
+const freshLearn = () => ({ v: LEARN_VERSION, records: [], followUps: [], falseSignals: [], lessons: [], timeline: [], reviews: [], calibration: null, drift: null, lossModel: null, lastRunAt: 0, lastModelN: 0, backfilled: false, corrupted: [], nearMiss: freshNearMiss(), qualityV: 1 });
 const freshNearMiss = () => ({ open: [], done: [], skipped: 0 });
 const freshResearch = () => ({ hypotheses: [], experiments: [], queue: [] });
 const pickLearn = P => Object.fromEntries(LEARN_SETTING_KEYS.map(k => [k, P[k]]));
@@ -727,6 +755,7 @@ function loadLearnParts(d) {
     for (const k of ['calibration', 'drift', 'lossModel']) ol[k] = L[k] && typeof L[k] === 'object' ? L[k] : null;
     if (ol.lossModel && ol.lossModel.w && !(Array.isArray(ol.lossModel.w) && ol.lossModel.w.length === LM_FEATS.length + 2 && ol.lossModel.w.every(isNum))) ol.lossModel = null;
     ol.lastRunAt = isNum(L.lastRunAt) ? L.lastRunAt : 0; ol.lastModelN = isNum(L.lastModelN) ? L.lastModelN : 0; ol.backfilled = L.backfilled === true;
+    ol.qualityV = isNum(L.qualityV) ? L.qualityV : 0; // < 1: Datenqualität der vorhandenen Records noch nicht geprüft (Migration 2.12.0)
     const NM = L.nearMiss && typeof L.nearMiss === 'object' ? L.nearMiss : {}; // ab 2.7.0 – ältere Stände starten leer
     ol.nearMiss = {
       open: objs(NM.open, LEARN_CAPS.nearMissOpen, m => typeof m.tokenId === 'string' && typeof m.code === 'string' && isNum(m.ts) && isNum(m.price) && m.price > 0).map(m => ({ ...m, samples: arr(m.samples).filter(s => Array.isArray(s) && isNum(s[0]) && isNum(s[1])).slice(-60) })),
