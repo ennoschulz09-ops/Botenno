@@ -1,7 +1,7 @@
 // Führt alle Browser-Tests nacheinander aus und meldet eine Zusammenfassung (Exit-Code 1, sobald einer fehlschlägt).
 const { spawnSync } = require('child_process');
 const path = require('path');
-const SUITES = ['selftest', 'login', 'ui', 'learning', 'backup', 'migration', 'bt', 'profile', 'xss'];
+const SUITES = ['selftest', 'login', 'ui', 'learning', 'backup', 'migration', 'bt', 'profile', 'xss', 'pcbot'];
 const only = process.argv.slice(2);
 const results = [];
 for (const name of SUITES.filter(s => !only.length || only.includes(s))) {
