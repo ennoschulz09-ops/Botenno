@@ -23,9 +23,10 @@ async function post(url, body, type = 'application/json') {
 async function action(a, extra = {}) {
   if (a === 'emergency' && !confirm('Not-Aus auslösen? Neue Käufe werden blockiert.')) return;
   if (a === 'fresh-start' && !confirm('Frischer Start: Kapital zurück auf Startwert, offene Positionen werden verworfen. Lerndaten bleiben. Fortfahren?')) return;
+  if (a === 'ack-reconcile' && !confirm(`Abgleich bestätigen?\n\nDu bestätigst, dass du die ${last ? last.reconcile.issues.length : ''} Punkt(e) geprüft hast und offene Positionen, Kapital und letzte Trades stimmen. Danach sind neue Käufe wieder möglich – alle anderen Regeln gelten weiter.`)) return;
   msg('…');
   const r = await post('/api/action', JSON.stringify({ action: a, ...extra }));
-  msg(r.ok ? 'erledigt' : 'Fehler: ' + (r.error || 'unbekannt'), !r.ok);
+  msg(r.ok ? (a === 'ack-reconcile' ? 'Abgleich bestätigt' : 'erledigt') : 'Fehler: ' + (r.error || 'unbekannt'), !r.ok);
   refresh();
 }
 
@@ -35,6 +36,11 @@ function render(s) {
   const st = $('state'); st.textContent = `${b.state} · ${b.readiness}`; st.className = 'chip ' + (b.emergency ? 'bad' : b.state === 'RUNNING' ? 'ok' : 'warn');
   const au = $('auto'); au.textContent = 'Auto-Trading ' + (b.autoTrading ? 'AN' : 'aus'); au.className = 'chip ' + (b.autoTrading ? 'ok' : '');
   $('reason').textContent = `${b.reason || ''}${s.mock ? ' · TESTDATEN (kein Internet)' : ''} · Modus ${s.mode} – Handel nur simuliert, LIVE gesperrt`;
+  const rc = s.reconcile; $('recon').hidden = !rc.required; // wie in der Browser-App (Banner „Abgleich prüfen“)
+  if (rc.required) {
+    $('reconText').textContent = `Nach dem Neustart wurden ${rc.issues.length} Punkt(e) gefunden, die nicht eindeutig waren. Sie wurden konservativ aufgelöst (keine Füllung ohne Nachweis, Buy-Zähler nie gesenkt). Bitte prüfen und bestätigen – bis dahin sind neue Käufe blockiert, Exits laufen weiter.`;
+    $('reconIssues').innerHTML = rc.issues.map(x => `<li>${esc(x)}</li>`).join('');
+  }
   $('kpis').innerHTML = [
     kpi('Kapital (Equity)', usd(p.equity)), kpi('Startkapital', usd(p.start, 0)), kpi('Cash', usd(p.cash)),
     kpi('Im Markt', `${usd(p.exposure)} · ${isNum(p.exposurePct) ? p.exposurePct.toFixed(1) : '—'} %`),

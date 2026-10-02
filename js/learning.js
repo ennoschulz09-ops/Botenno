@@ -150,8 +150,9 @@ function recordQuality(rec) {
   return { v: 1, ok: !flags.length, flags };
 }
 const learnable = r => !(r && r.quality && r.quality.ok === false);
-/* Slippage in USD gegenüber dem Referenzkurs beim Entscheid: Kauf (Füllkurs ÷ Referenz − 1) × Einsatz, Verkauf (Referenz −
-   Füllkurs) × Menge. Begrenzt auf den Einsatz (die alte Kauf-Formel lief bei Rug-Kursen ins Unendliche). Abschreibungen ohne
+/* Slippage in USD gegenüber dem Referenzkurs beim Entscheid: Kauf (Füllkurs ÷ Referenz − 1) × (Einsatz − Gebühren), Verkauf
+   (Referenz − Füllkurs) × Menge. Beim Kauf ist der Betrag nur für Füllkurse UNTER dem Referenzkurs höchstens so groß wie der Einsatz
+   (die alte Formel lief dort bei Rug-Kursen ins Unendliche); darüber und beim Verkauf gibt es keine Obergrenze. Abschreibungen ohne
    Verkaufsweg sind keine Slippage. */
 function slippageOf(entries, exits) {
   let s = 0;
@@ -176,8 +177,9 @@ function buildLearningRecord(pos, j, o) {
       entryLatencyMs: lr2(avg(pos.entries.map(e => e.latencyMs).filter(isNum))), exitLatencyMs: isNum(o.exitLatencyMs) ? o.exitLatencyMs : null,
       feesUsd: lr2(pos.feesUsd), slippageUsd: lr2(pos.slippageUsd), estimatedImpactPct: first && isNum(first.impactPct) ? lr2(first.impactPct) : null, exitImpactPct: last && isNum(last.impactPct) ? lr2(last.impactPct) : null,
       dataAgeMs: f ? f.dataAgeMs : null, sizeUsd: lr2(pos.investedUsd), sizePct: isNum(o.equity) && o.equity > 0 ? lr2(pos.investedUsd / o.equity * 100) : null, buys: pos.entries.length,
-      // ab 2.12.0: Ausführungsmodell (1 = geschätzt/sofort, 2 = echtes Angebot + Wartezeit), Quelle des letzten Verkaufs, größte Kursabweichung beim Kauf
-      execModel: arr(pos.entries).some(e => e.source) ? 2 : 1, exitSource: last ? last.source || null : null, maxDevPct: devs.length ? lr2(devs.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a))) : null
+      // ab 2.12.0: Ausführungsmodell, Quelle des letzten Verkaufs, größte Kursabweichung beim Kauf. execModel 2 = echtes Jupiter-Angebot
+      // + Wartezeit (mindestens ein Kauf), 1 = nur geschätzt (vor 2.11.0 oder nur AMM-Schätzung, weil Jupiter nicht erreichbar war)
+      execModel: arr(pos.entries).some(e => e.source === 'JUPITER') ? 2 : 1, exitSource: last ? last.source || null : null, maxDevPct: devs.length ? lr2(devs.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a))) : null
     },
     path: {
       mae1m: lr2(p.mae.m1), mae2m: lr2(isNum(o.mae2m) ? Math.min(p.mae.m2, o.mae2m) : p.mae.m2), mae5m: lr2(p.mae.m5), mae15m: lr2(p.mae.m15),

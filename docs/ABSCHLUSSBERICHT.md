@@ -27,7 +27,7 @@ Der Bot ist ein stabiler, getesteter **Simulator mit Lern-KI**. Er handelt kein 
 | Datei | Inhalt |
 | --- | --- |
 | `index.html` | HTML, CSS und Login; lädt die Module unter `js/` (bis 2.11.0 war hier die ganze App) |
-| `js/*.js` | die App in sechs Modulen ohne Build-Schritt: `base` (Grundlagen, Daten, Security), `engine` (Analyse, Entscheidung, Backtest), `learning` (Lern-KI), `core` (Kern `createCore`), `selftest` (80 Selbsttests), `ui` (Oberfläche, nur Browser) |
+| `js/*.js` | die App in sechs Modulen ohne Build-Schritt: `base` (Grundlagen, Daten, Security), `engine` (Analyse, Entscheidung, Backtest), `learning` (Lern-KI), `core` (Kern `createCore`), `selftest` (81 Selbsttests), `ui` (Oberfläche, nur Browser) |
 | `server/` | PC-Bot unter Node.js (seit 2.12.0): Start `bot.js`, Kern-Lader, Datei-Speicher, Oberfläche auf 127.0.0.1, Selbsttests unter Node.js |
 | `start-bot.bat` | Start des PC-Bots unter Windows per Doppelklick |
 | `docs/ARCHITEKTUR.md` | Architektur, Bewertung je Bereich, Entscheidungen, Änderungsprotokoll |
@@ -78,7 +78,7 @@ Neue Kern-Funktionen (bis 2.11.0 in `index.html`, seit 2.12.0 in `js/`): Datenva
 
 | Prüfung | Ergebnis |
 | --- | --- |
-| Selbsttests | 80 Tests, in der App (System → Selbsttest) und seit 2.12.0 auch unter Node.js (`node server/selftest.js`): 80 von 80 bestanden unter Node.js (2.12.0). Bis 2.11.0 im Browser 78 von 78, 0 Konsolenfehler. Jupiter ist in Tests nachgebildet; die echte API ist aus der Cloud-Testumgebung nicht erreichbar |
+| Selbsttests | 81 Tests, in der App (System → Selbsttest) und seit 2.12.0 auch unter Node.js (`node server/selftest.js`): 81 von 81 bestanden unter Node.js (2.12.0). Bis 2.11.0 im Browser 78 von 78, 0 Konsolenfehler. Jupiter ist in Tests nachgebildet; die echte API ist aus der Cloud-Testumgebung nicht erreichbar |
 | E2E-Suiten (`tests/e2e`) | 10 Suiten: Selbsttest, Login, UI inkl. Mobil, Lern-KI, Backup, Migration, Backtest, Lernmodus-Profil, XSS und seit 2.12.0 PC-Bot (`pcbot`: Bot mit Testdaten starten, Oberfläche, Einstellungen-Import, Backup mit Neustart, API-Schutz, Sperre gegen zweiten Bot, Beenden speichert). Bis 2.11.0 9 von 9 bestanden; für 2.12.0 gilt das Ergebnis der CI im PR |
 | CI (GitHub Actions) | Syntax-Prüfung → Selbsttests unter Node.js → alle Suiten; grün bei jedem PR seit A1, Laufzeit bis 2.11.0 etwa 4 min |
 | Performance (400 Tokens, Chromium) | Scan 17–41 ms, Analyse 11–20 ms, Render 4–22 ms, etwa 1 Scan/s, JS-Heap 25 MB; unverändert gegenüber Phase 0 |

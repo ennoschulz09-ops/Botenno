@@ -3,7 +3,7 @@
 //   Start:       node server/bot.js        (unter Windows: Doppelklick auf start-bot.bat)
 //   Oberfläche:  http://localhost:8787      (nur auf diesem PC erreichbar)
 //   Beenden:     Strg+C im Fenster oder „Bot beenden“ in der Oberfläche – speichert vorher alles
-// Optionen: --port 8787 · --data <Ordner> (Standard: data/) · --no-autostart · --no-open · --mock (Testdaten ohne Internet)
+// Optionen: --port 8787 · --data <Ordner> (Standard: data/, mit --mock data-mock/) · --no-autostart · --no-open · --mock (Testdaten ohne Internet)
 // Handel ist ausschließlich simuliert (SIMULATION/PAPER). LIVE und Signieren bleiben gesperrt – wie im Browser.
 'use strict';
 const fs = require('fs');
@@ -26,19 +26,22 @@ function parseArgs(argv) {
   return o;
 }
 const args = parseArgs(process.argv.slice(2));
-const DATA = path.resolve(args.data ? String(args.data) : path.join(ROOT, 'data'));
-const PORT = Number(args.port || process.env.SMARTLAB_PORT || 8787);
 const MOCK = !!args.mock;
+const DATA = path.resolve(args.data ? String(args.data) : path.join(ROOT, MOCK ? 'data-mock' : 'data')); // Testdaten nie in die echten Daten
+const PORT = Number(args.port || process.env.SMARTLAB_PORT || 8787);
 
 /* Größeres Lern-Gedächtnis als im Browser (dort begrenzt der 5-MB-Speicher auf 200 Trades). Die Rohdaten (Learning Records)
    sind das, was später auf einen Server oder in neue Modelle übertragen wird. */
 const PC_LEARN_CAPS = { records: 5000, nearMiss: 2000, falseSignals: 1000, timeline: 1000, patterns: 2000, lessons: 200, hypotheses: 200, experiments: 200, reviews: 100 };
+const PC_JOURNAL_CAPS = { max: 5000, keep: 5000, persist: 5000 }; // Journal passend dazu (Browser: 500 gespeichert)
+const LOG_KEEP_DAYS = 30; // Tages-Logdateien in data/logs
 
 const lock = acquireLock(DATA);
 if (!lock.ok) { console.error(`Es läuft bereits ein Bot mit diesem Datenordner (Prozess ${lock.pid}). Zwei Bots würden sich gegenseitig die Daten überschreiben.`); process.exit(1); }
 
 const K = loadCore();
 Object.assign(K.LEARN_CAPS, PC_LEARN_CAPS);
+Object.assign(K.JOURNAL_CAPS, PC_JOURNAL_CAPS);
 
 // ---------- Netzwerk: echt (Standard) oder Testdaten (--mock, z. B. für CI ohne Internet) ----------
 let fetchImpl = (u, i) => fetch(u, i);
@@ -71,6 +74,14 @@ function onLog(e) {
   try { fs.appendFileSync(path.join(LOGDIR, `bot-${new Date(e.ts).toISOString().slice(0, 10)}.log`), line + '\n'); } catch (x) { /* Log-Fehler nie den Bot stoppen lassen */ }
   if (['WARN', 'ERROR', 'CRITICAL'].includes(e.level) || CONSOLE_CATS.has(e.category)) console.log(`${hhmmss(e.ts)} ${e.level.padEnd(7)} ${e.category.padEnd(9)} ${e.message}`);
 }
+/* Logdateien älter als LOG_KEEP_DAYS löschen (beim Start und einmal am Tag); Datum im Namen ist UTC wie beim Schreiben. */
+function pruneLogs() {
+  const cutoff = new Date(Date.now() - LOG_KEEP_DAYS * 24 * 3600e3).toISOString().slice(0, 10);
+  let n = 0;
+  try { for (const f of fs.readdirSync(LOGDIR)) { const m = /^bot-(\d{4}-\d{2}-\d{2})\.log$/.exec(f); if (m && m[1] < cutoff) { try { fs.unlinkSync(path.join(LOGDIR, f)); n++; } catch (e) { /* gesperrt – nächstes Mal */ } } } } catch (e) { /* Ordner fehlt */ }
+  if (n && holder.core) holder.core.log.info('SYSTEM', `${n} Logdatei(en) älter als ${LOG_KEEP_DAYS} Tage gelöscht`);
+  return n;
+}
 
 // ---------- Kern starten (nach einer Wiederherstellung wird er neu erzeugt – wie ein Neuladen im Browser) ----------
 const backend = createFileBackend(DATA);
@@ -82,14 +93,21 @@ function bootCore() {
   holder.core = core;
   return core;
 }
+/* Keine neuen Scans und Käufe, laufende Trades (Kursangebot, Wartezeit) bis zu 10 s fertig werden lassen, erst dann alle
+   noch offenen Anfragen abbrechen – sonst scheitern Trades mitten im Kursangebot oder fallen auf Schätzungen zurück. */
+async function quiesce(core) {
+  try { core.haltTrading(); } catch (e) { /* schon angehalten */ }
+  await Promise.race([core.drainTrades(), new Promise(r => setTimeout(r, 10000))]);
+  try { core.http.abortAll(); } catch (e) { /* egal */ }
+}
 holder.reload = async () => {
-  const old = holder.core;
-  try { old._t.stopScanner(); } catch (e) { /* schon gestoppt */ }
-  await Promise.race([old.drainTrades(), new Promise(r => setTimeout(r, 10000))]);
+  await quiesce(holder.core); // Wiederherstellen: restoreBackup hat den Scanner schon gestoppt und den Speicher eingefroren
   bootCore();
   holder.core.log.info('SYSTEM', 'Bot nach Wiederherstellung neu gestartet');
 };
 bootCore();
+pruneLogs();
+setInterval(pruneLogs, 24 * 3600e3);
 
 // Tägliche Vollsicherung (gleiches Format wie „Voll-Backup“ im Browser)
 function dailyBackup() {
@@ -119,8 +137,7 @@ async function shutdown(reason) {
   if (stopping) return; stopping = true;
   console.log(`\nBot wird beendet (${reason}) – speichere …`);
   const core = holder.core;
-  try { core._t.stopScanner(); } catch (e) { /* schon gestoppt */ }
-  await Promise.race([core.drainTrades(), new Promise(r => setTimeout(r, 10000))]);
+  await quiesce(core);
   try { core.persistNow(); } catch (e) { console.error('Speichern fehlgeschlagen:', e.message); }
   try { panel.close(); } catch (e) { /* egal */ }
   lock.release();

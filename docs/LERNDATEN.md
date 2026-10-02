@@ -38,8 +38,8 @@ Aufbau eines Learning Records:
 
 Neue Felder in `execution` (2.12.0):
 
-- `execModel`: `1` = Ausführung vor 2.11.0 (geschätzte, sofortige Füllung), `2` = Ausführung ab 2.11.0 (Kursangebot und Wartezeit). Einzelne Füllungen in Modell 2 können trotzdem auf der AMM-Schätzung beruhen, wenn Jupiter nicht erreichbar war; das steht im Journal je Kauf bzw. Verkauf unter `source` (`JUPITER` oder `AMM`).
-- `exitSource`: Quelle des letzten Verkaufs: `JUPITER`, `AMM`, `WRITE_OFF` (Abschreibung ohne Verkaufsweg) oder – bei der Migration für ältere Trades vergeben – `ESTIMATED`.
+- `execModel`: `2` = mindestens ein Kauf zu einem echten Jupiter-Kursangebot mit Wartezeit (ab 2.11.0), `1` = nur geschätzte Füllung (vor 2.11.0 oder ausschließlich AMM-Schätzung, weil Jupiter nicht erreichbar war). Einzelne Füllungen in Modell 2 können trotzdem auf der AMM-Schätzung beruhen; das steht im Journal je Kauf bzw. Verkauf unter `source` (`JUPITER` oder `AMM`).
+- `exitSource`: Quelle des letzten Verkaufs: `JUPITER`, `AMM`, `WRITE_OFF` (Abschreibung ohne Verkaufsweg) oder – bei der Migration für ältere Trades vergeben – `ESTIMATED` (Modell 1) bzw. `UNKNOWN` (Modell 2, Quelle nicht gespeichert).
 - `maxDevPct`: größte Abweichung eines Kauf-Füllkurses vom Referenzkurs beim Entscheid, in Prozent.
 
 **Abgeleitete Daten** werden aus den Rohdaten berechnet und lassen sich jederzeit neu aufbauen:
@@ -99,7 +99,7 @@ Beim Schließen eines solchen Trades erscheint im Log eine Warnung „… gespei
 Läuft genau einmal je Datenbestand beim ersten Start mit 2.12.0 (`learn.qualityV` < 1), im Browser wie auf dem PC:
 
 1. **Slippage neu berechnen** (`slippageMigrate`) für Journal und offene Positionen mit der neuen Formel (markiert mit `slipV: 2`). Ergebnisse und Kapital ändern sich nicht.
-2. **Fehlende Angaben ergänzen** (`learnQualityMigrate`): Für jeden Record werden `buys`, `execModel`, `exitSource`, `maxDevPct` und die Slippage aus dem Journal ergänzt. Die Verkaufsquelle wurde vor 2.12.0 nicht gespeichert und wird deshalb abgeleitet: Abschreibung → `WRITE_OFF`, Modell 2 → `JUPITER`, Modell 1 → `ESTIMATED`. Records, deren Trade nicht mehr im Journal steht, gelten als Modell 1 mit Quelle `ESTIMATED`.
+2. **Fehlende Angaben ergänzen** (`learnQualityMigrate`): Für jeden Record werden `buys`, `execModel`, `exitSource`, `maxDevPct` und die Slippage aus dem Journal ergänzt. Die Verkaufsquelle wurde vor 2.12.0 nicht gespeichert und wird deshalb abgeleitet: Abschreibung → `WRITE_OFF`, Modell 2 → `UNKNOWN` (der Verkauf kann auch auf die AMM-Schätzung zurückgefallen sein), Modell 1 → `ESTIMATED`. Damit gelten alte Ausstiege bei Liquiditätsabzug ohne nachweisbares Jupiter-Angebot als `ESTIMATED_RUG_EXIT` – lieber einen gültigen Trade verlieren als aus einem Scheinergebnis lernen. Records, deren Trade nicht mehr im Journal steht, gelten als Modell 1 mit Quelle `ESTIMATED`.
 3. **Qualität bestimmen** (`recordQuality`) für alle Records.
 4. **Abgeleitetes neu aufbauen:** Muster und Fehlsignal-Liste nur aus sauberen Records; Lektionen, Verlustmodell, Kalibrierung und Drift werden geleert und im nächsten Lernlauf neu berechnet.
 5. **Forschung neu starten:** Alle Hypothesen außer `SHADOW` und `PROMOTED` gehen zurück auf `IDEA` mit dem Ergebnis `RETEST` („Datenbasis bereinigt (2.12.0) – wird mit sauberen Trades neu getestet“). Bisherige Experimente erhalten den Vermerk `invalidated`, die Warteschlange wird geleert.
@@ -132,5 +132,5 @@ Gleich bleiben auf dem PC: offene Near-Misses (40), Modellversionen (30), Wartes
 - **`FEATURE_VERSION` beachten:** Merkmale verschiedener Versionen (`entry.v`) sind nicht direkt vergleichbar. Bei einer neuen Version getrennt trainieren oder ausdrücklich umrechnen. `legacy`-Records haben nur eingeschränkte Merkmale.
 - **Kein Look-Ahead:** Merkmale nur aus `entry` (Zeitpunkt des Einstiegs). `path`, `exit`, `outcome`, `followUp` und `labels` liegen danach und dürfen nur Zielgrößen sein. Aufteilung in Training und Test zeitlich, nicht zufällig.
 - **Rohdaten nie löschen oder überschreiben.** Abgeleitetes lässt sich aus den Records jederzeit neu berechnen; verlorene Records nicht.
-- **Exporte:** „Learning Records JSON“ (Browser: Lern-Ansicht → Export; PC: http://localhost:8787/api/export?kind=learning-json) und das Voll-Backup enthalten die vollständigen Records inklusive `quality`, `execModel` und `exitSource`. Der Lern-Report als CSV enthält diese Spalten in 2.12.0 nicht und eignet sich deshalb nicht als Trainingsgrundlage.
+- **Exporte:** „Learning Records JSON“ (Browser: Lern-Ansicht → Export; PC: http://localhost:8787/api/export?kind=learning-json) und das Voll-Backup enthalten die vollständigen Records inklusive `quality`, `execModel` und `exitSource`. Der Lern-Report als CSV hat seit 2.12.0 am Ende die Spalten `learnable` (ja/nein), `qualityFlags`, `execModel` und `exitSource`; für Training nur Zeilen mit `learnable = ja` verwenden.
 - Near-Miss-Ergebnisse sind simuliert und ohne Kosten gerechnet.

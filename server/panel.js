@@ -41,6 +41,7 @@ function statusOf(holder) {
     app: K.APP_VERSION, now, startedAt: holder.startedAt, dataDir: holder.dataDir, mock: holder.mock, lastBackup: holder.lastBackup ? path.basename(holder.lastBackup) : null,
     mode: st.mode,
     bot: { state: st.bot.state, desired: st.bot.desired, autoTrading: st.bot.autoTrading, emergency: st.bot.emergency, emergencyReason: st.bot.emergencyReason, safeMode: st.bot.safeMode, readiness: rd.state, reason: rd.reason },
+    reconcile: { required: !!st.reconciliation.required, issues: st.reconciliation.issues.slice(-40), at: st.reconciliation.at || null }, // Abgleich nach hartem Neustart: neue Käufe gesperrt bis zur Bestätigung
     scanner: { running: st.scanner.running, lastAt: st.scanner.lastAt || null, lastMs: st.scanner.lastDuration, scans: st.metrics.counters.scans, tokens: st.markets.size, health: core.systemHealth().score },
     portfolio: { start: st.portfolio.startCapital, equity: r2(eq.equity), cash: r2(st.portfolio.cash), exposure: r2(eq.exposure), exposurePct: r2(eq.exposurePct), realized: r2(st.portfolio.realized), fees: r2(st.portfolio.fees), drawdownPct: r2(core.drawdownPct()) },
     perf: { trades: perf.trades, winRate: r2(perf.winRate), profitFactor: perf.profitFactor === Infinity ? null : r2(perf.profitFactor), expectancy: r2(perf.expectancy), net: r2(perf.net) },
@@ -67,6 +68,7 @@ async function act(holder, body) {
   if (a === 'emergency') return core.emergencyStop('Not-Aus über die PC-Oberfläche');
   if (a === 'release') return core.releaseEmergency();
   if (a === 'fresh-start') return core.freshStart();
+  if (a === 'ack-reconcile') return core.ackReconciliation();
   if (a === 'learn-run') return { ok: true, result: core.learnRunNow() };
   if (a === 'sell') {
     const frac = body.frac === 'ALL' ? 'ALL' : Number(body.frac);

@@ -6,6 +6,7 @@ const { chromium, OUT } = require('./env.js');
 const { spawn } = require('child_process');
 const http = require('http');
 const net = require('net');
+const os = require('os');
 const fs = require('fs');
 const path = require('path');
 
@@ -196,6 +197,34 @@ setTimeout(() => { console.log('FAIL: Zeitlimit von 3 min überschritten – Abb
     const stop = st8 ? await req(bot2.port, { method: 'POST', path: '/api/shutdown', headers: { 'X-SmartLab': '1' }, body: '{}' }) : { status: 0 };
     const e2 = await waitExit(bot2, 15000);
     ok(stop.status === 200 && !!e2 && e2.code === 0 && !fs.existsSync(path.join(DATA, '.lock')), `POST /api/shutdown mit Kennung → Exit 0, Sperre frei (Exit ${e2 ? e2.code : 'keiner'})`);
+
+    // ---------- 9. Nach PC-Neustart: verwaiste Sperre + offener Abgleich (Bot war mitten im Trade hart beendet worden) ----------
+    // Sperre einer noch laufenden fremden Prozessnummer (dieser Testprozess), aber vor dem letzten Systemstart geschrieben → verwaist
+    fs.writeFileSync(path.join(DATA, '.lock'), String(process.pid));
+    const beforeBoot = (Date.now() - os.uptime() * 1000 - 10 * 60e3) / 1000; fs.utimesSync(path.join(DATA, '.lock'), beforeBoot, beforeBoot);
+    const rt = JSON.parse(fs.readFileSync(file('runtime'), 'utf8'));
+    rt.reconciliation = { required: true, issues: ['Position P-TEST (TEST): Kauf unklar – konservativ als nicht gefüllt gewertet'], at: Date.now() };
+    fs.writeFileSync(file('runtime'), JSON.stringify(rt));
+    const bot3 = startBot(await freePort());
+    const st9 = await waitReady(bot3);
+    ok(!!st9, 'Sperre von vor dem PC-Neustart gilt als verwaist – Bot startet trotz fremder laufender Prozessnummer');
+    ok(st9 && st9.reconcile.required === true && st9.reconcile.issues.length === 1, 'Status meldet offenen Abgleich nach hartem Neustart');
+    if (st9) {
+      browser = await chromium.launch(); page = await browser.newPage(); dialogs.length = 0; errors.length = 0;
+      page.on('dialog', d => { dialogs.push(d.message()); d.accept(); });
+      page.on('pageerror', e => errors.push('[pageerror] ' + e.message));
+      await page.goto(`http://localhost:${bot3.port}/`);
+      ok(await until(() => !document.getElementById('recon').hidden), 'Oberfläche zeigt „Abgleich nach Neustart erforderlich“');
+      ok(/P-TEST \(TEST\)/.test(await page.locator('#reconIssues').innerText()), 'Offene Punkte werden aufgelistet');
+      await page.click('button[data-act="ack-reconcile"]');
+      ok(await waitFor(async () => !(await status(bot3.port)).reconcile.required, 10000), 'Klick „Geprüft – bestätigen“ → Abgleich erledigt, neue Käufe wieder möglich');
+      ok(dialogs.some(d => /Abgleich bestätigen\?/.test(d)) && await until(() => document.getElementById('recon').hidden), 'Vorher Rückfrage, danach verschwindet der Hinweis');
+      ok(!errors.length, 'Keine JS-Fehler in der Oberfläche (' + errors.length + ')');
+      await browser.close(); browser = null;
+      await req(bot3.port, { method: 'POST', path: '/api/shutdown', headers: { 'X-SmartLab': '1' }, body: '{}' });
+    }
+    const e3 = await waitExit(bot3, 15000);
+    ok(!!e3 && e3.code === 0 && !fs.existsSync(path.join(DATA, '.lock')), `Dritter Bot endet sauber (Exit ${e3 ? e3.code : 'keiner'})`);
   } catch (e) {
     ok(false, 'Abbruch: ' + (e && e.stack || e));
     if (page) await page.screenshot({ path: OUT + '/pcbot-fehler.png', fullPage: true }).catch(() => {});

@@ -38,7 +38,7 @@ node server/selftest.js [Suchbegriff]               # Selbsttests unter Node.js 
 npm ci && npx playwright install chromium           # einmalig, nur für die Browser-Tests
 node tests/e2e/run-all.js [suite ...]               # Browser-Suiten (alle oder einzelne)
 npm test                                            # alles: Syntax, Selbsttests unter Node.js, Browser-Suiten
-node server/bot.js --mock --data <tmp> --port 8790  # PC-Bot mit Testdaten ohne Internet; <tmp> = eigener temporärer Ordner, nie data/
+node server/bot.js --mock --data <tmp> --port 8790  # PC-Bot mit Testdaten ohne Internet; ohne --data landet er in data-mock/, nie in data/
 ```
 
 ## Release-Checkliste
@@ -53,4 +53,5 @@ node server/bot.js --mock --data <tmp> --port 8790  # PC-Bot mit Testdaten ohne 
 
 - Lern-KI: nur aus `learnable` Records lernen; Rohdaten (Learning Records) nie löschen, Abgeleitetes lässt sich neu aufbauen (`docs/LERNDATEN.md`).
 - Backups aus einer neueren App-Version lassen sich nicht in eine ältere einspielen. Der Nutzer aktualisiert den PC-Bot per ZIP oder `git pull`; `data/` bleibt dabei erhalten.
-- Bekannte Lücken der PC-Oberfläche: kein Einstellungs-Editor, kein Knopf zum Bestätigen des Abgleichs nach einem harten Neustart (`docs/PC-BETRIEB.md`, Abschnitt 11).
+- Bekannte Lücken der PC-Oberfläche: kein Einstellungs-Editor, keine Modus-Umstellung, keine Teilverkäufe (`docs/PC-BETRIEB.md`, Abschnitt 11).
+- `JOURNAL_CAPS` (js/core.js) und `LEARN_CAPS` (js/learning.js) sind die Browser-Grenzen; `server/bot.js` hebt beide für den PC an. Das Datei-Backend setzt `noRotate` – auf dem PC wird nie gekürzt gespeichert.

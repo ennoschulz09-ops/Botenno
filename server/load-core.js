@@ -29,6 +29,7 @@ function loadCore({ withTests = false } = {}) {
     APP_VERSION: get('APP_VERSION'),
     STORAGE_KEYS: get('STORAGE_KEYS'),
     LEARN_CAPS: get('LEARN_CAPS'),
+    JOURNAL_CAPS: get('JOURNAL_CAPS'),
     perfStats: get('perfStats'),
     RECORD_FLAGS_DE: get('RECORD_FLAGS_DE'),
     runSelfTests: withTests ? get('runSelfTests') : null

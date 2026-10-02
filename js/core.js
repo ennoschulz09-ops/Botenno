@@ -21,6 +21,9 @@ const ORDER_TRANSITIONS = {
   COMPLETED: [], FAILED: [], CANCELLED: [], REJECTED: []
 };
 const TERMINAL = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'REJECTED']);
+/* Journal-Grenzen: im Speicher ab `max` Einträgen auf `keep` gekürzt (offene bleiben), gespeichert die neuesten `persist`.
+   Veränderbar wie LEARN_CAPS – der PC-Bot (server/bot.js) hebt sie an, im Browser begrenzt der 5-MB-Speicher. */
+const JOURNAL_CAPS = { max: 800, keep: 600, persist: 500 };
 /* Positions-Lebenszyklus: PLANNED → PENDING → OPEN → (CLOSING ↔ PARTIAL) → CLOSED → RECONCILED.
    UNKNOWN = Zustand unklar → Abgleich nötig (wird nie still als offen/geschlossen interpretiert). */
 const POSITION_TRANSITIONS = { PLANNED: ['PENDING', 'FAILED'], PENDING: ['OPEN', 'FAILED'], OPEN: ['CLOSING', 'UNKNOWN'], PARTIAL: ['CLOSING', 'UNKNOWN'], CLOSING: ['OPEN', 'PARTIAL', 'CLOSED', 'UNKNOWN'], CLOSED: ['RECONCILED', 'UNKNOWN'], RECONCILED: [], UNKNOWN: ['OPEN', 'PARTIAL', 'CLOSED'], FAILED: [] };
@@ -1041,14 +1044,15 @@ function createCore(opts) {
   }
   /* Trades laufen neben dem Scan (seit 2.12.0): Der Scan bewertet die Positionen sofort und stößt Verkäufe und Käufe an,
      wartet aber nicht auf deren Ausführung (Kursangebot, Wartezeit). Jede Aktion sperrt ihren Coin bzw. ihre Position
-     selbst, deshalb kann nichts doppelt ausgeführt werden. drainTrades() wartet auf alle laufenden Trades. */
+     selbst, deshalb kann nichts doppelt ausgeführt werden. drainTrades() wartet auf alle laufenden Trades – auch auf die, die ein
+     gerade laufender Scan noch anstößt. */
   const tradeLanes = new Set();
   function laneOf(p, what) {
     const q = Promise.resolve(p).catch(e => log.error('TRADE', `${what} fehlgeschlagen: ${e && e.message}`)).finally(() => tradeLanes.delete(q));
     tradeLanes.add(q);
     return q;
   }
-  const drainTrades = () => Promise.all([...tradeLanes]);
+  async function drainTrades() { await Promise.resolve(scanRun).catch(() => {}); while (tradeLanes.size) await Promise.all([...tradeLanes]); } // ein fehlgeschlagener Scan darf das Beenden nicht abbrechen
   /* Bewertet alle offenen Positionen (Kurs, PnL, Trailing, Exit-Entscheidung) ohne zu warten; gestartete Verkäufe
      laufen nebenher. Das zurückgegebene Promise ist erfüllt, wenn diese Verkäufe fertig sind. */
   function managePositions() {
@@ -1250,7 +1254,7 @@ function createCore(opts) {
       reason: o.reason || D.reason, sources: sourcesUsed(t), discovery: discoveryOf(t).primary, tags: [...A.tags], regime: [...(state.regime.tags || [])],
       decision: o.decision, paramVersion: state.activeParam, result: null, exitReason: null, mae2m: null, holdMs: null
     });
-    if (state.journal.length > 800) state.journal = state.journal.filter((j, i) => i < 600 || j.status === 'OPEN');
+    if (state.journal.length > JOURNAL_CAPS.max) state.journal = state.journal.filter((j, i) => i < JOURNAL_CAPS.keep || j.status === 'OPEN');
   }
   function journalUpdate(pos) {
     const j = state.journal.find(x => x.id === pos.id); if (!j) return;
@@ -1277,7 +1281,7 @@ function createCore(opts) {
     queueBusy = true;
     try {
       while (state.queue.length) {
-        if (state.bot.emergency) { state.queue = []; break; }
+        if (state.bot.emergency || halted) { state.queue = []; break; }
         if (state.orders.filter(o => !TERMINAL.has(o.state)).length >= S().maxActiveOrders) break;
         const q = state.queue.shift();
         const t = state.markets.get(q.tokenId); if (!t) continue;
@@ -1287,7 +1291,7 @@ function createCore(opts) {
     } finally { queueBusy = false; }
   }
   async function maybeAutoTrade() {
-    if (globalBlockers({ auto: true }).length) return;
+    if (halted || globalBlockers({ auto: true }).length) return;
     const cands = [...state.markets.values()].filter(t => t.D && t.D.decision === 'APPROVED').sort((a, b) => b.A.finalScore - a.A.finalScore);
     for (const t of cands) enqueue(t.id, t.D.strategy);
     if (state.queue.length) await processQueue();
@@ -1451,10 +1455,11 @@ function createCore(opts) {
       persist(); emit('scan', { scanId });
     }
   }
+  let scanRun = null, halted = false; // laufender Scan der Schleife (für drainTrades) · haltTrading() aktiv
   function loop() {
     if (!state.scanner.running) return;
     const started = env.now();
-    scanOnce({ awaitTrades: false }).finally(() => {
+    scanRun = scanOnce({ awaitTrades: false }).finally(() => {
       if (!state.scanner.running) return;
       const base = S().scanIntervalMs;
       const delay = http.status('dexPairs') === 'OFFLINE' ? Math.min(base * 5, 15000) : Math.max(base - (env.now() - started), 100);
@@ -1479,6 +1484,14 @@ function createCore(opts) {
     clearT('scan'); clearT('sec');
     http.abortAll();
     log.info('SCANNER', 'Scanner gestoppt – Timer gelöscht, Requests abgebrochen');
+    return true;
+  }
+  /* Beenden ohne Abbruch (PC-Bot: Beenden, Wiederherstellen): keine neuen Scans und Käufe mehr, laufende Anfragen und Trades
+     aber nicht abbrechen (anders als stopScanner). Danach drainTrades() abwarten und erst dann http.abortAll() für den Rest. */
+  function haltTrading() {
+    halted = true; state.queue = [];
+    if (state.scanner.running) { state.scanner.running = false; clearT('scan'); clearT('sec'); }
+    log.info('SCANNER', 'Scanner angehalten – keine neuen Scans und Käufe, laufende Trades werden abgeschlossen');
     return true;
   }
 
@@ -2335,9 +2348,11 @@ function createCore(opts) {
       if (j) {
         const en = arr(j.entries), ex = arr(j.exits), last = ex[ex.length - 1];
         if (!isNum(x.buys)) x.buys = en.length;
-        if (x.execModel === undefined) x.execModel = en.some(e => e.source) ? 2 : 1;
-        // Vor 2.12.0 wurde die Quelle des Verkaufs nicht gespeichert: mit echten Angeboten (Modell 2) war es Jupiter, vorher geschätzt
-        if (x.exitSource === undefined) x.exitSource = last ? last.source || (last.reason === 'NO_SELL_ROUTE' ? 'WRITE_OFF' : x.execModel === 2 ? 'JUPITER' : 'ESTIMATED') : null;
+        if (x.execModel === undefined) x.execModel = en.some(e => e.source === 'JUPITER') ? 2 : 1; // 2 = echtes Jupiter-Angebot + Wartezeit (AMM-Schätzung zählt nicht)
+        /* Vor 2.12.0 wurde die Quelle des Verkaufs nicht gespeichert. Auch in Modell 2 kann ein Verkauf auf die AMM-Schätzung
+           zurückgefallen sein → UNKNOWN statt JUPITER; recordQuality schließt Rug-Ausstiege mit unbekannter Quelle dann aus
+           (lieber einen gültigen Trade verlieren als aus einem Scheinergebnis lernen). */
+        if (x.exitSource === undefined) x.exitSource = last ? last.source || (last.reason === 'NO_SELL_ROUTE' ? 'WRITE_OFF' : x.execModel === 2 ? 'UNKNOWN' : 'ESTIMATED') : null;
         if (x.maxDevPct === undefined) { const devs = en.map(e => (isNum(e.price) && isNum(e.refPrice) && e.refPrice > 0 ? (e.price / e.refPrice - 1) * 100 : null)).filter(isNum); x.maxDevPct = devs.length ? lr2(devs.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a))) : null; }
         x.slippageUsd = lr2(slippageOf(en, ex));
       } else {
@@ -2447,7 +2462,7 @@ function createCore(opts) {
     return {
       settings: { settings: state.settings, strategies: state.strategies, watchlist: state.watchlist, ui: state.ui },
       positions: { tradeSeq: seq, portfolio: state.portfolio, positions: state.positions, orders: state.orders.slice(0, 150), usedKeys: [...state.usedKeys.entries()].filter(([, v]) => v !== 'pending').slice(-600) },
-      trades: { tradeSeq: seq, journal: state.journal.slice(0, 500) },
+      trades: { tradeSeq: seq, journal: state.journal.slice(0, JOURNAL_CAPS.persist) },
       runtime: { tradeSeq: seq, savedAt: now, app: APP_VERSION, mode: state.mode, bot: { desired: state.bot.desired, autoTrading: state.bot.autoTrading, safeMode: state.bot.safeMode, emergency: state.bot.emergency, emergencyReason: state.bot.emergencyReason }, risk: state.risk, session: state.session, seen, alertMarks: marks, reconciliation: state.reconciliation },
       logs: { logs: log.entries.slice(-200), auditLog: state.auditLog.slice(0, 300), configLog: state.configLog.slice(0, 100), feed: state.feed.slice(0, 80) },
       stats: { hist: state.hist, stratStats: state.stratStats, falseSignals: state.falseSignals.slice(0, 50), paramVersions: state.paramVersions, activeParam: state.activeParam, sessions: state.sessions.slice(0, 50), btRuns: state.btRuns.slice(0, 20) },
@@ -2604,8 +2619,9 @@ function createCore(opts) {
     }
     if (kind === 'backup-json') return { name: `smartlab-backup-${ts}.json`, mime: 'application/json', data: JSON.stringify(exportBackup()) };
     if (kind === 'learning-report-csv') {
-      const cols = ['tradeId', 'symbol', 'strategy', 'openedAt', 'closedAt', 'pnlUsd', 'pnlPct', 'win', 'lossFamily', 'secondary', 'evidence', 'avoidable', 'dataCompleteness', 'dataQuality', 'signalQuality', 'exitQuality', 'executionQuality', 'regimeFit', 'score', 'regime', 'mae2m', 'mfe2m', 'maxRunupPct', 'followUpMaxPct', 'exitReason', 'legacy', 'errorClass', 'lossVerdict', 'plannedStopPct', 'discovery'];
-      const rows = state.learn.records.map(r => { const l = r.labels || {}; return [r.tradeId, r.symbol, r.strategy || 'manuell', isoTime(r.openedAt), isoTime(r.closedAt), r.outcome.pnlUsd, r.outcome.pnlPct, r.outcome.win, l.lossFamily || '', arr(l.secondary).join('|'), l.lossFamily ? (l.evidence || {})[l.lossFamily] : '', l.avoidable, l.dataCompleteness, l.dataQuality, l.signalQuality, l.exitQuality, l.executionQuality, l.regimeFit, r.entry ? r.entry.finalScore : '', arr(r.regimeTags).join('|'), r.path.mae2m, r.path.mfe2m, r.path.maxRunupPct, r.followUp ? r.followUp.maxAfterPct : '', r.exit.reason, !!r.legacy, l.errorClass || '', l.lossVerdict || '', l.expectedLoss && isNum(l.expectedLoss.plannedPct) ? l.expectedLoss.plannedPct : '', (r.entry && r.entry.disc) || '']; });
+      const cols = ['tradeId', 'symbol', 'strategy', 'openedAt', 'closedAt', 'pnlUsd', 'pnlPct', 'win', 'lossFamily', 'secondary', 'evidence', 'avoidable', 'dataCompleteness', 'dataQuality', 'signalQuality', 'exitQuality', 'executionQuality', 'regimeFit', 'score', 'regime', 'mae2m', 'mfe2m', 'maxRunupPct', 'followUpMaxPct', 'exitReason', 'legacy', 'errorClass', 'lossVerdict', 'plannedStopPct', 'discovery', 'learnable', 'qualityFlags', 'execModel', 'exitSource'];
+      const rows = state.learn.records.map(r => { const l = r.labels || {}, x = r.execution || {}; return [r.tradeId, r.symbol, r.strategy || 'manuell', isoTime(r.openedAt), isoTime(r.closedAt), r.outcome.pnlUsd, r.outcome.pnlPct, r.outcome.win, l.lossFamily || '', arr(l.secondary).join('|'), l.lossFamily ? (l.evidence || {})[l.lossFamily] : '', l.avoidable, l.dataCompleteness, l.dataQuality, l.signalQuality, l.exitQuality, l.executionQuality, l.regimeFit, r.entry ? r.entry.finalScore : '', arr(r.regimeTags).join('|'), r.path.mae2m, r.path.mfe2m, r.path.maxRunupPct, r.followUp ? r.followUp.maxAfterPct : '', r.exit.reason, !!r.legacy, l.errorClass || '', l.lossVerdict || '', l.expectedLoss && isNum(l.expectedLoss.plannedPct) ? l.expectedLoss.plannedPct : '', (r.entry && r.entry.disc) || '',
+        learnable(r) ? 'ja' : 'nein', arr(r.quality && r.quality.flags).join('|'), isNum(x.execModel) ? x.execModel : '', x.exitSource || '']; }); // ab 2.12.0: Datenqualität (Trainingsdaten nur mit learnable = ja)
       return { name: `smartlab-learning-report-${ts}.csv`, mime: 'text/csv', data: [cols, ...rows].map(r => r.map(csvCell).join(',')).join('\n') };
     }
     const payloads = {
@@ -2622,7 +2638,8 @@ function createCore(opts) {
     return { name: `smartlab-${kind.replace('-json', '')}-${ts}.json`, mime: 'application/json', data: JSON.stringify({ app: APP_VERSION, exportedAt: isoTime(env.now()), kind, ...payloads[kind]() }, null, 2) };
   }
   /* Voll-Backup: alle Speicherbereiche (smartlab.v3.*) in einer Datei – z. B. zur Sicherung oder zum Übertragen auf ein anderes Gerät.
-     Enthält keine Passwörter oder Keys; nur selbst eingetragene RPC-URLs stehen in den Einstellungen. */
+     Enthält keine Passwörter und keine Wallet-Schlüssel; die Einstellungen enthalten aber selbst eingetragene RPC-URLs und einen
+     eingetragenen Jupiter-API-Key – Datei nicht weitergeben (der Einstellungs-Export „settings-json“ lässt den Key weg). */
   function exportBackup() {
     persistNow();
     const storage = {};
@@ -2736,7 +2753,7 @@ function createCore(opts) {
     updateSettings, updateStrategies, rollbackTo, addWatch, removeWatch, updateWatch, select, exportData, importSettings, resetSettings, resetPortfolio, freshStart,
     learnView, learnQuality, learnDecision, learnPromote, learnReject, learnRollback, activeParams, monitorMetrics, exportBackup, validateBackup, restoreBackup, recordBacktest, learnRunNow: () => { const r = learnRun(true); persistNow(); return r; },
     newSession, factoryReset, persistNow, enqueueSecurity, clearFeed: () => { state.feed = []; persist(); },
-    drainTrades,
+    drainTrades, haltTrading,
     _t: { touch, posTransition, runProviderSteps, liveProvider, simProvider, updatePriorityFee, writeOffPosition, scanOnce, updateSolPrice, applySnapshot, applyAlt, fetchChunk, reconcile, analyzeAll, startScanner, stopScanner, timers, managePositions, closePosition, processQueue, enqueue, checkSecurity, ensureToken, maybeAutoTrade, setBotState, learnRun, learnOnClose, learnFollowUps, finishFollowUp, createChallenger, shadowEval, liveEval, addRecord, nearMissTick, maybeTune, updateSettings, monitorTick }
   };
 }

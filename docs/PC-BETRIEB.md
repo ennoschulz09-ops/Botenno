@@ -74,6 +74,7 @@ Das Schließen des Fensters über das X speichert in der Regel auch, ist aber ni
 
 | Bereich | Inhalt und Knöpfe |
 |---|---|
+| Hinweis „Abgleich nach Neustart erforderlich“ | erscheint nur nach einem harten Abbruch mitten im Trade: listet die unklaren Punkte, Knopf „Geprüft – bestätigen“ (siehe „Häufige Fehler“) |
 | Kopfzeile | Zustand des Bots, Auto-Trading AN/aus, „▶ Start“, „⏸ Pause“, „Auto-Trading an“, „Auto-Trading aus“, „⛔ Not-Aus“, „Not-Aus freigeben“ |
 | Überblick | Kapital, Cash, im Markt, realisiert, Drawdown, Trades, Trefferquote, Ø je Trade, Profit Factor, letzter Scan, Laufzeit |
 | Offene Positionen | je Position Einsatz, Wert, PnL, Stop, Anzahl Käufe, Knopf „Verkaufen“ (ganze Position) |
@@ -91,7 +92,7 @@ Das Schließen des Fensters über das X speichert in der Regel auch, ist aber ni
 | `--data D:\SmartLabDaten` | anderer Datenordner (Standard `data` im Programmordner) |
 | `--no-open` | Browser beim Start nicht automatisch öffnen |
 | `--no-autostart` | Scanner nicht automatisch starten (dann „▶ Start“ in der Oberfläche) |
-| `--mock` | Testdaten ohne Internet, nur für Tests – immer mit eigenem `--data`-Ordner, sonst landen Test-Trades in den echten Daten |
+| `--mock` | Testdaten ohne Internet, nur für Tests; ohne `--data` landen sie im eigenen Ordner `data-mock`, nie in den echten Daten |
 
 ## 4. Daten aus dem Browser übernehmen
 
@@ -166,12 +167,13 @@ Alles liegt im Ordner `data` im Programmordner (oder im Ordner aus `--data`):
 |---|---|
 | `smartlab.v3.settings.json` … `smartlab.v3.patterns.json` | je Speicherbereich eine Datei (10 Stück: Einstellungen, Laufzeit, Positionen, Trades, Logs, Statistik, Lerndaten, Experimente, Modelle, Muster) – gleiche Bereiche und gleiches Format wie im Browser |
 | `.lock` | Sperrdatei, solange der Bot läuft (verhindert einen zweiten Bot mit denselben Daten) |
-| `logs\bot-JJJJ-MM-TT.log` | ein Protokoll je Tag, alle Meldungen außer DEBUG |
+| `logs\bot-JJJJ-MM-TT.log` | ein Protokoll je Tag, alle Meldungen außer DEBUG; Dateien älter als 30 Tage löscht der Bot |
 | `backups\smartlab-backup-JJJJ-MM-TT.json` | tägliche Vollsicherung |
 
 - Gespeichert wird über eine temporäre Datei und anschließendes Umbenennen. Ein Absturz mitten im Schreiben hinterlässt deshalb keine halbe Datei.
 - Die erste Tagessicherung entsteht etwa 1 Minute nach dem Start, danach alle 6 Stunden; innerhalb eines Tages wird die Datei überschrieben. Die 14 neuesten Dateien bleiben erhalten, ältere löscht der Bot.
-- Die Protokolle werden nicht automatisch gelöscht. Alte Dateien in `logs` dürfen von Hand gelöscht werden.
+- Protokolle älter als 30 Tage löscht der Bot beim Start und einmal am Tag.
+- Schlägt das Speichern einer Datei fehl (z. B. Virenscanner hält sie fest), meldet der Bot einen Speicherfehler und versucht es beim nächsten Speichern vollständig erneut. Anders als im Browser kürzt er dabei nie Daten.
 - Datum im Dateinamen und Zeitstempel in den Protokollen sind in UTC (deutsche Zeit minus 1 bzw. 2 Stunden). Im Fenster steht die Ortszeit.
 - Eine Tagessicherung wird wie jedes Backup über „Voll-Backup einspielen“ zurückgespielt.
 
@@ -184,14 +186,14 @@ Alles liegt im Ordner `data` im Programmordner (oder im Ordner aus `--data`):
 | „Node.js ist nicht installiert …“ (im Bot-Fenster) oder „Der Befehl "node" ist entweder falsch geschrieben oder konnte nicht gefunden werden“ | Node.js fehlt, oder das Fenster wurde vor der Installation geöffnet | Abschnitt 1 wiederholen; danach ein **neues** Fenster öffnen bzw. `start-bot.bat` neu starten. Hilft das nicht: PC neu starten oder Node.js neu installieren |
 | „Node.js … ist zu alt“ | Version unter 20 | Node.js 24 LTS installieren (Abschnitt 1) |
 | „Port 8787 ist belegt – läuft der Bot schon? Sonst mit --port 8788 starten.“ | Ein anderes Programm (oder ein zweiter Bot mit anderem Datenordner) nutzt den Port | Zuerst prüfen, ob der Bot schon in einem anderen Fenster läuft. Sonst mit anderem Port starten: in der Autostart-Verknüpfung „Ziel“ auf `C:\SmartLab\start-bot.bat --port 8788` setzen, oder in `start-bot.bat` (Rechtsklick → „Bearbeiten“) die Zeile `node server\bot.js %*` in `node server\bot.js --port 8788 %*` ändern (wird bei Updates überschrieben). Oberfläche dann unter http://localhost:8788 |
-| „Es läuft bereits ein Bot mit diesem Datenordner (Prozess …)“ | Sperrdatei `data\.lock`: ein Bot mit denselben Daten läuft schon | Das andere Fenster suchen und nutzen. Ist sicher kein Bot offen (im Task-Manager kein Eintrag „Node.js“ bzw. `node.exe`), kann nach einem Absturz ein fremder Prozess die alte Prozessnummer übernommen haben: dann `data\.lock` löschen und neu starten |
+| „Es läuft bereits ein Bot mit diesem Datenordner (Prozess …)“ | Sperrdatei `data\.lock`: ein Bot mit denselben Daten läuft schon | Das andere Fenster suchen und nutzen. Eine Sperre von vor dem letzten PC-Neustart erkennt der Bot selbst als verwaist. Nur wenn sicher kein Bot offen ist (im Task-Manager kein Eintrag „Node.js“ bzw. `node.exe`) und die Meldung trotzdem bleibt: `data\.lock` löschen und neu starten |
 | Oberfläche zeigt „Bot nicht erreichbar – läuft das Fenster noch?“ | Bot-Fenster geschlossen oder Bot abgestürzt | `start-bot.bat` neu starten. Steht im Fenster eine Fehlermeldung, die letzte Datei in `data\logs` ansehen |
 | „Sicherung stammt aus der neueren Version …“ | Backup aus einer neueren App-Version als der PC-Bot | PC-Bot aktualisieren (Abschnitt 7) |
 | „Auto-Trading nur im SIMULATION-Modus (aktuell …)“ beim Klick auf „Auto-Trading an“ | Das Backup stammt aus der Browser-App in einem anderen Modus; die PC-Oberfläche kann den Modus nicht umstellen | In der Browser-App den Modus auf SIMULATION stellen, neues Voll-Backup erstellen und einspielen (Abschnitt 4) |
 | „Der Computer wurde durch Windows geschützt“ beim Doppelklick | Windows SmartScreen bei Dateien aus dem Internet | „Weitere Informationen“ → „Trotzdem ausführen“, oder vor dem Entpacken die ZIP-Datei freigeben (Abschnitt 2) |
-| Virenscanner meldet `start-bot.bat` oder blockiert Dateien in `data`; im Protokoll „Speicher knapp – … rotiert“ oder Speicherfehler | Der Scanner hält Dateien beim Speichern fest | Den Ordner `C:\SmartLab` im Virenscanner als Ausnahme eintragen. Kurze Sperren wiederholt der Bot selbst; auf dem PC deutet „Speicher knapp“ auf so eine Sperre oder eine volle Festplatte hin |
+| Virenscanner meldet `start-bot.bat` oder blockiert Dateien in `data`; im Protokoll Speicherfehler | Der Scanner hält Dateien beim Speichern fest, oder die Festplatte ist voll | Den Ordner `C:\SmartLab` im Virenscanner als Ausnahme eintragen. Kurze Sperren wiederholt der Bot selbst; Daten werden dabei nie gekürzt |
 | Bot scheint zu hängen, im Fenster passiert nichts | Textauswahl im Konsolenfenster aktiv („Auswählen“ in der Titelleiste) | Esc drücken |
-| Status „BLOCKED“, im Überblick steht „Abgleich nach Neustart erforderlich – bitte prüfen & bestätigen“, es wird nichts mehr gekauft | Der Bot wurde mitten in einem Trade hart beendet (Stromausfall, Update-Neustart, Fenster geschlossen). Zur Sicherheit sperrt er neue Käufe, bis der Abgleich bestätigt ist | Offene Positionen werden weiter verwaltet und verkauft. Die PC-Oberfläche hat in 2.12.0 noch keinen Knopf zum Bestätigen (siehe Abschnitt 11). „Frischer Start“ hebt die Sperre zwar auf, verwirft aber offene Positionen und setzt das Kapital zurück – nur nutzen, wenn das gewollt ist. Vorbeugen: immer über „Bot beenden“ oder Strg+C beenden |
+| Status „BLOCKED“, im Überblick steht „Abgleich nach Neustart erforderlich – bitte prüfen & bestätigen“, es wird nichts mehr gekauft | Der Bot wurde mitten in einem Trade hart beendet (Stromausfall, Update-Neustart, Fenster geschlossen). Zur Sicherheit sperrt er neue Käufe, bis der Abgleich bestätigt ist | Offene Positionen werden weiter verwaltet und verkauft. Oben in der Oberfläche erscheint „Abgleich nach Neustart erforderlich“ mit den unklaren Punkten: Positionen und Kapital kurz prüfen, dann „Geprüft – bestätigen“. Danach kauft der Bot wieder, alle anderen Regeln gelten weiter. Vorbeugen: immer über „Bot beenden“ oder Strg+C beenden – dann lässt der Bot laufende Trades noch fertig werden (bis 10 s) und speichert |
 
 ## 10. Sicherheit
 
@@ -205,7 +207,6 @@ Alles liegt im Ordner `data` im Programmordner (oder im Ordner aus `--data`):
 Die PC-Oberfläche deckt den Betrieb ab, ist aber bewusst einfach gehalten. Noch nicht enthalten:
 
 - ein Einstellungs-Editor (Einstellungen nur per Datei-Import, Abschnitt 6),
-- ein Knopf zum Bestätigen des Abgleichs nach einem harten Abbruch,
 - eine Umstellung des Modus (der Modus kommt aus dem eingespielten Backup),
 - Teilverkäufe (der Knopf „Verkaufen“ verkauft die ganze Position),
 - die Analyse-Ansichten der Browser-App (Scanner, Charts, Backtest, Lern-Details). Für Auswertungen die Exporte nutzen. Ein Backup des PC-Bots nicht nebenher in die Browser-App einspielen: Diese würde sofort selbst weiterhandeln bzw. offene Positionen verkaufen.

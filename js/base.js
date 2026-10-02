@@ -542,7 +542,9 @@ function createStorage(backend, log) {
       try { str0 = JSON.stringify({ v: STORAGE_VERSION, ...sections[k] }); } catch (e) { ok = false; lastError = 'Serialisierung fehlgeschlagen (' + k + ')'; continue; }
       if (lastWritten[k] === str0) continue;
       let w = backend.set(STORAGE_KEYS[k], str0);
-      if (!w && ['logs', 'stats', 'trades', 'learning', 'experiments', 'patterns'].includes(k)) {
+      // Kürzen nur bei vollem Browser-Speicher. Datei-Speicher (PC, backend.noRotate): ein Schreibfehler ist vorübergehend
+      // (Virenscanner, Platte) – nie gekürzte Daten schreiben; der nächste Speichervorgang versucht es vollständig erneut.
+      if (!w && !backend.noRotate && ['logs', 'stats', 'trades', 'learning', 'experiments', 'patterns'].includes(k)) {
         const L = sections.learning && sections.learning.learn;
         const slim = k === 'logs' ? { ...sections.logs, logs: [], auditLog: arr(sections.logs.auditLog).slice(0, 80), feed: arr(sections.logs.feed).slice(0, 30), configLog: arr(sections.logs.configLog).slice(0, 30) }
           : k === 'stats' ? { ...sections.stats, hist: {} }
@@ -554,7 +556,7 @@ function createStorage(backend, log) {
         w = backend.set(STORAGE_KEYS[k], str0);
         if (w) log && log.warn('STORAGE', `Speicher knapp – ${k} rotiert`);
       }
-      if (w) lastWritten[k] = str0; else { ok = false; lastError = 'localStorage nicht verfügbar oder voll'; }
+      if (w) lastWritten[k] = str0; else { ok = false; const be = typeof backend.lastError === 'function' ? backend.lastError() : null; lastError = be ? `${k}: ${be}` : 'localStorage nicht verfügbar oder voll'; }
     }
     if (ok && backend.get(STORAGE_KEY_V2) != null) backend.remove(STORAGE_KEY_V2);
     lastOk = ok; if (ok) lastSaveAt = Date.now();
