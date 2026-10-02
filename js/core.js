@@ -1037,8 +1037,20 @@ function createCore(opts) {
     if (p <= pos.stop * 1.03) alert('SELL_CANDIDATE', t, `${pos.symbol} nahe am Stop (${pxMcTxt(A, p)} / Stop ${pxMcTxt(A, pos.stop)})`, 'WARNING', { key: 'nearstop' });
     return null;
   }
-  async function managePositions() {
-    const now = env.now(), s = S();
+  /* Trades laufen neben dem Scan (seit 2.12.0): Der Scan bewertet die Positionen sofort und stößt Verkäufe und Käufe an,
+     wartet aber nicht auf deren Ausführung (Kursangebot, Wartezeit). Jede Aktion sperrt ihren Coin bzw. ihre Position
+     selbst, deshalb kann nichts doppelt ausgeführt werden. drainTrades() wartet auf alle laufenden Trades. */
+  const tradeLanes = new Set();
+  function laneOf(p, what) {
+    const q = Promise.resolve(p).catch(e => log.error('TRADE', `${what} fehlgeschlagen: ${e && e.message}`)).finally(() => tradeLanes.delete(q));
+    tradeLanes.add(q);
+    return q;
+  }
+  const drainTrades = () => Promise.all([...tradeLanes]);
+  /* Bewertet alle offenen Positionen (Kurs, PnL, Trailing, Exit-Entscheidung) ohne zu warten; gestartete Verkäufe
+     laufen nebenher. Das zurückgegebene Promise ist erfüllt, wenn diese Verkäufe fertig sind. */
+  function managePositions() {
+    const now = env.now(), s = S(), sells = [];
     for (const pos of [...state.positions]) {
       if (pos.status !== 'OPEN' || state.locks.has('pos:' + pos.id)) continue;
       const t = state.markets.get(pos.tokenId) || ensureToken(pos.mint, 'Position');
@@ -1062,8 +1074,9 @@ function createCore(opts) {
       if (pnlPct >= s.trailActivatePct && !pos.trailing) { pos.trailing = true; log.trade(`${pos.symbol}: Trailing Stop aktiviert (${fmtPct(pnlPct)})`); }
       if (pos.trailing) { const ts = pos.highest * (1 - s.trailPct / 100); if (ts > pos.stop) { pos.stop = ts; pos.stopType = 'TRAILING'; } }
       const ex = exitDecision(pos, t, p, pnlPct, liq, now);
-      if (ex && !(pos.sellRetryAt > now)) await executeSell(pos.id, ex.frac, ex.code, { auto: true, detail: ex.detail });
+      if (ex && !(pos.sellRetryAt > now)) sells.push(laneOf(executeSell(pos.id, ex.frac, ex.code, { auto: true, detail: ex.detail }), `Verkauf ${pos.symbol}`));
     }
+    return Promise.all(sells);
   }
   async function executeSell(posId, frac, reasonCode, o = {}) {
     const { auto = false, emergency = false, detail = '' } = o;
@@ -1396,7 +1409,8 @@ function createCore(opts) {
   }
 
   /* ---------- Scanner (Lock, Scan IDs, kein paralleler Vollscan) ---------- */
-  async function scanOnce() {
+  /* o.awaitTrades = false (laufender Bot): nicht auf Käufe/Verkäufe warten. Standard (Tests, manuell): warten. */
+  async function scanOnce(o = {}) {
     const sc = state.scanner;
     if (sc.lock) { sc.skipped++; if (S().debugMode) log.debug('SCANNER', 'Scan übersprungen – vorheriger Scan läuft noch (Scanner Lock)'); return { skipped: true }; }
     sc.lock = true;
@@ -1410,11 +1424,12 @@ function createCore(opts) {
       rpcPing().catch(e => noteApiError('rpc', e));
       ohlcvForPositions();
       const ta = env.now(); analyzeAll(); state.metrics.perf.analysis = env.now() - ta;
-      await managePositions();
+      const exits = managePositions();
       try { learnFollowUps(); learnRun(false); } catch (e) { log.error('LEARNING', 'Lernlauf fehlgeschlagen: ' + e.message); }
       runAlerts();
       try { monitorTick(env.now()); } catch (e) { log.error('SYSTEM', 'Anomalie-Monitor: ' + e.message); }
-      await maybeAutoTrade();
+      const buys = laneOf(maybeAutoTrade(), 'Auto-Trading');
+      if (o.awaitTrades !== false) await Promise.all([exits, buys]);
       state.bot.errorStreak = 0;
       return { scanId };
     } catch (e) {
@@ -1437,7 +1452,7 @@ function createCore(opts) {
   function loop() {
     if (!state.scanner.running) return;
     const started = env.now();
-    scanOnce().finally(() => {
+    scanOnce({ awaitTrades: false }).finally(() => {
       if (!state.scanner.running) return;
       const base = S().scanIntervalMs;
       const delay = http.status('dexPairs') === 'OFFLINE' ? Math.min(base * 5, 15000) : Math.max(base - (env.now() - started), 100);
@@ -2642,6 +2657,7 @@ function createCore(opts) {
     updateSettings, updateStrategies, rollbackTo, addWatch, removeWatch, updateWatch, select, exportData, importSettings, resetSettings, resetPortfolio, freshStart,
     learnView, learnDecision, learnPromote, learnReject, learnRollback, activeParams, monitorMetrics, exportBackup, validateBackup, restoreBackup, recordBacktest, learnRunNow: () => { const r = learnRun(true); persistNow(); return r; },
     newSession, factoryReset, persistNow, enqueueSecurity, clearFeed: () => { state.feed = []; persist(); },
+    drainTrades,
     _t: { posTransition, runProviderSteps, liveProvider, simProvider, updatePriorityFee, writeOffPosition, scanOnce, updateSolPrice, applySnapshot, applyAlt, fetchChunk, reconcile, analyzeAll, startScanner, stopScanner, timers, managePositions, closePosition, processQueue, enqueue, checkSecurity, ensureToken, maybeAutoTrade, setBotState, learnRun, learnOnClose, learnFollowUps, finishFollowUp, createChallenger, shadowEval, liveEval, addRecord, nearMissTick, maybeTune, updateSettings, monitorTick }
   };
 }

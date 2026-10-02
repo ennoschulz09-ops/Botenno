@@ -504,6 +504,19 @@ const SELF_TESTS = [
     assert(!sq.ok && sq.code === 'QUOTE_FAILED', 'ungültige Quote nicht abgewiesen');
     return 'SIMULATION: Quote→Preflight→Sign→Send→Confirm · LIVE: NO_ROUTER / SIGNATURE_DISABLED · Codes PRE_TRADE_BLOCKED, QUOTE_FAILED';
   }],
+  ['Portfolio & Execution', 'Trades blockieren den Scan nicht: Verkauf läuft nebenher, kein Doppel-Verkauf', async () => {
+    const H = makeTestHarness(); const core = await testCore(H, { simLatencyMs: 300 }); const t = await prepToken(core, H, 1);
+    assert((await core.executeBuy(t.id, { sizeUsd: 20 })).ok, 'Kauf fehlgeschlagen');
+    const pos = core.state.positions[0];
+    H.market[t.mint] = H.pair(t.mint, { price: 0.0008 }); // −20 % → Stop-Loss
+    const t0 = Date.now(); await core._t.scanOnce({ awaitTrades: false }); const scanMs = Date.now() - t0;
+    assert(core.state.locks.has('pos:' + pos.id) && pos.lc === 'CLOSING' && scanMs < 250, `Scan hat auf den Verkauf gewartet (${scanMs} ms, ${pos.lc})`);
+    await core._t.scanOnce({ awaitTrades: false }); // zweiter Scan während des Verkaufs
+    await core.drainTrades();
+    const sells = core.state.orders.filter(o => o.side === 'SELL' && o.positionId === pos.id);
+    assert(!core.state.positions.length && sells.length === 1 && sells[0].state === 'COMPLETED', 'Verkauf nicht genau einmal ausgeführt: ' + sells.map(o => o.state).join(','));
+    return `Scan fertig nach ${scanMs} ms, Verkauf mit 300 ms Wartezeit lief nebenher · genau 1 Verkauf`;
+  }],
   ['Portfolio & Execution', 'Neustart während Verkauf → Abgleich statt stiller Annahme', async () => {
     const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1);
     assert((await core.executeBuy(t.id, { sizeUsd: 20 })).ok, 'Buy fehlgeschlagen');
