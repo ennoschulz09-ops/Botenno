@@ -1,6 +1,6 @@
 # Abschlussbericht – Master-Prompt „Ganzheitliche Optimierung“
 
-Stand: 2026-10-01 · App-Version 2.11.0 · Phasen 0–8 und Roadmap A1–A3 sowie B1–B3 abgeschlossen.
+Stand: 2026-10-02 · App-Version 2.12.0 · Phasen 0–8 und Roadmap A1–A3 sowie B1–B3 abgeschlossen, C1 als PC-Variante begonnen (`docs/PC-BETRIEB.md`).
 
 Der Bot ist ein stabiler, getesteter **Simulator mit Lern-KI**. Er handelt kein echtes Geld: LIVE-Handel und Signieren sind technisch gesperrt. Ob er nach realistischen Kosten profitabel wäre, ist **nicht nachgewiesen** (siehe „Verbleibende Einschränkungen“).
 
@@ -20,6 +20,7 @@ Der Bot ist ein stabiler, getesteter **Simulator mit Lern-KI**. Er handelt kein 
 | 7 / A2 Monitoring | 2.10.0 | Kennzahlen der letzten 60 min, Anomalie-Monitor (12 Reason Codes, Aktionen), Statusleiste |
 | 8 / A3 Hardening | 2.10.1 | Sicherheitsprüfung, Performance-Messung, Regression, Release-Checkliste, dieser Bericht; LIVE-Gate verlangt jetzt aktive Risiko-Limits (der Lernmodus kann nie live gehen) |
 | B1–B3 Ehrliche Simulation | 2.11.0 | echte Jupiter-Kursangebote (nur Abfrage) mit Honeypot- und Rundreise-Prüfung, Füllung nach Wartezeit, Slippage-Grenze, gescheiterte Transaktionen mit Gebühr, Priority Fee aus dem Netzwerk, Abschreibung ohne Verkaufsweg; Coin-Quelle als Lernmerkmal |
+| C1 PC-Variante (Beginn) | 2.12.0 | Code in Module unter `js/` aufgeteilt (ohne Build-Schritt), Trades laufen neben dem Scan, PC-Bot unter Node.js mit Datei-Speicher, Tagessicherung und Oberfläche auf 127.0.0.1; Lern-KI lernt nur aus sauberen Trades (verzerrte Trades gespeichert, aber ausgeschlossen, `docs/LERNDATEN.md`), Kauf-Blocker bei widersprüchlichen Kursquellen |
 
 ## 2. Dateien und Module
 
@@ -86,6 +87,7 @@ Neue Kern-Module in `index.html`: Datenvalidierung (`normDexPair`, `dqField`), B
 - Fehlerklasse für ältere Verluste ergänzt (2.7.0).
 - Loss-Cooldown und Pause aus Versionen vor 2.8.0 → 0 min, laufende Pause beendet (2.8.0).
 - Stufe B (2.11.0): keine Datenumstellung; neue Einstellungen erhalten Standardwerte, der Wechsel auf die ehrliche Simulation wird beim ersten Start im Log vermerkt. Trades von vorher haben keine Coin-Quelle („unbekannt“).
+- Datenbereinigung (2.12.0): Slippage mit begrenzter Formel neu berechnet (Ergebnisse unverändert); Learning Records um Ausführungsmodell, Verkaufsquelle und Kursabweichung ergänzt und auf Datenqualität geprüft; verzerrte Trades bleiben gespeichert, zählen aber nicht mehr fürs Lernen; Muster, Lektionen, Verlustmodell, Kalibrierung und Drift neu aus sauberen Trades; Hypothesen werden neu getestet. Läuft einmal je Datenbestand, im Browser wie auf dem PC.
 
 Jede Migration wird im Log bzw. Konfigurations-Protokoll vermerkt. Beschädigte Bereiche werden durch sichere Standardwerte ersetzt.
 
