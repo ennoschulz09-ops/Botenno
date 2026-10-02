@@ -1,0 +1,2 @@
+# Windows-Startdatei unverändert lassen (CRLF)
+*.bat -text

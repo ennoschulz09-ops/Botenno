@@ -1,10 +1,12 @@
 {
   "name": "smartlab-bot",
   "private": true,
-  "description": "Smart Lab Solana Bot – Tests (die App selbst ist die Einzeldatei index.html)",
+  "description": "Smart Lab Solana Bot – App im Browser (index.html + js/) oder als PC-Bot (server/bot.js)",
   "scripts": {
-    "test": "node tests/e2e/check-syntax.js && node tests/e2e/run-all.js",
+    "bot": "node server/bot.js",
+    "test": "node tests/e2e/check-syntax.js && node server/selftest.js && node tests/e2e/run-all.js",
     "test:syntax": "node tests/e2e/check-syntax.js",
+    "test:node": "node server/selftest.js",
     "perf": "node tests/e2e/perf.js"
   },
   "devDependencies": {
