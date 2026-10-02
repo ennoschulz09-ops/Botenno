@@ -1,6 +1,6 @@
 # Abschlussbericht – Master-Prompt „Ganzheitliche Optimierung“
 
-Stand: 2026-10-01 · App-Version 2.11.0 · Phasen 0–8 und Roadmap A1–A3 sowie B1–B3 abgeschlossen.
+Stand: 2026-10-02 · App-Version 2.12.0 · Phasen 0–8 und Roadmap A1–A3 sowie B1–B3 abgeschlossen, C1 als PC-Variante begonnen (`docs/PC-BETRIEB.md`).
 
 Der Bot ist ein stabiler, getesteter **Simulator mit Lern-KI**. Er handelt kein echtes Geld: LIVE-Handel und Signieren sind technisch gesperrt. Ob er nach realistischen Kosten profitabel wäre, ist **nicht nachgewiesen** (siehe „Verbleibende Einschränkungen“).
 
@@ -20,19 +20,25 @@ Der Bot ist ein stabiler, getesteter **Simulator mit Lern-KI**. Er handelt kein 
 | 7 / A2 Monitoring | 2.10.0 | Kennzahlen der letzten 60 min, Anomalie-Monitor (12 Reason Codes, Aktionen), Statusleiste |
 | 8 / A3 Hardening | 2.10.1 | Sicherheitsprüfung, Performance-Messung, Regression, Release-Checkliste, dieser Bericht; LIVE-Gate verlangt jetzt aktive Risiko-Limits (der Lernmodus kann nie live gehen) |
 | B1–B3 Ehrliche Simulation | 2.11.0 | echte Jupiter-Kursangebote (nur Abfrage) mit Honeypot- und Rundreise-Prüfung, Füllung nach Wartezeit, Slippage-Grenze, gescheiterte Transaktionen mit Gebühr, Priority Fee aus dem Netzwerk, Abschreibung ohne Verkaufsweg; Coin-Quelle als Lernmerkmal |
+| C1 PC-Variante (Beginn) | 2.12.0 | Code in Module unter `js/` aufgeteilt (ohne Build-Schritt), Trades laufen neben dem Scan, PC-Bot unter Node.js mit Datei-Speicher, Tagessicherung und Oberfläche auf 127.0.0.1; Lern-KI lernt nur aus sauberen Trades (verzerrte Trades gespeichert, aber ausgeschlossen, `docs/LERNDATEN.md`), Kauf-Blocker bei widersprüchlichen Kursquellen |
 
 ## 2. Dateien und Module
 
 | Datei | Inhalt |
 | --- | --- |
-| `index.html` | die ganze App (UI, Kern `createCore`, Lern-KI, 78 Selbsttests) |
+| `index.html` | HTML, CSS und Login; lädt die Module unter `js/` (bis 2.11.0 war hier die ganze App) |
+| `js/*.js` | die App in sechs Modulen ohne Build-Schritt: `base` (Grundlagen, Daten, Security), `engine` (Analyse, Entscheidung, Backtest), `learning` (Lern-KI), `core` (Kern `createCore`), `selftest` (81 Selbsttests), `ui` (Oberfläche, nur Browser) |
+| `server/` | PC-Bot unter Node.js (seit 2.12.0): Start `bot.js`, Kern-Lader, Datei-Speicher, Oberfläche auf 127.0.0.1, Selbsttests unter Node.js |
+| `start-bot.bat` | Start des PC-Bots unter Windows per Doppelklick |
 | `docs/ARCHITEKTUR.md` | Architektur, Bewertung je Bereich, Entscheidungen, Änderungsprotokoll |
 | `docs/ABSCHLUSSBERICHT.md` | dieser Bericht inkl. Release-Checkliste |
-| `tests/e2e/*.js` | Browser-Tests, Runner `run-all.js`, Syntax-Prüfung, Performance-Messung `perf.js` |
-| `.github/workflows/tests.yml` | CI: Syntax + alle Suiten bei jedem Push auf `main` und jedem PR |
-| `package.json`, `package-lock.json` | Test-Abhängigkeit Playwright 1.56.1 (die App selbst hat keine Abhängigkeiten) |
+| `docs/PC-BETRIEB.md`, `docs/LERNDATEN.md` | Anleitung für den PC-Bot unter Windows; Backup-Format und Datenqualität der Lern-KI |
+| `CLAUDE.md` | Übergabe für künftige Claude-Code-Sitzungen |
+| `tests/e2e/*.js` | E2E-Suiten (inkl. PC-Bot-Suite `pcbot.js`), Runner `run-all.js`, Syntax-Prüfung, Performance-Messung `perf.js` |
+| `.github/workflows/tests.yml` | CI: Syntax, Selbsttests unter Node.js, alle Suiten bei jedem Push auf `main` und jedem PR |
+| `package.json`, `package-lock.json` | Test-Abhängigkeit Playwright 1.56.1, npm-Skripte `test`, `test:node`, `bot` (App und PC-Bot selbst haben keine Abhängigkeiten) |
 
-Neue Kern-Module in `index.html`: Datenvalidierung (`normDexPair`, `dqField`), Backup (`exportBackup`, `validateBackup`, `restoreBackup`), Stufen-Scores und Security-Bericht (`stageScores`, `securityReport`), Signal-Analyse (`scoreAttribution`, `signalConflicts`, `mtfAlignment`), Lebenszyklus und Provider (`posTransition`, `simProvider`, `liveProvider`), Backtest-Forschung (`btRunMeta`, `btStress`, `mcDrawdown`, `btByRegime`), Adaptive KI (`errorClassify`, `nearMissTick`, `activeParams`), Monitoring (`monitorMetrics`, `monitorTick`), ehrliche Simulation (`jupQuote`, `jupBuyQuote`, `jupSellQuote`, `simConfirm`, `quoteBlockers`, `chargeFailedTx`, `writeOffPosition`, `updatePriorityFee`), Coin-Quelle (`discoveryOf`, `discoveryStats`).
+Neue Kern-Funktionen (bis 2.11.0 in `index.html`, seit 2.12.0 in `js/`): Datenvalidierung (`normDexPair`, `dqField`), Backup (`exportBackup`, `validateBackup`, `restoreBackup`), Stufen-Scores und Security-Bericht (`stageScores`, `securityReport`), Signal-Analyse (`scoreAttribution`, `signalConflicts`, `mtfAlignment`), Lebenszyklus und Provider (`posTransition`, `simProvider`, `liveProvider`), Backtest-Forschung (`btRunMeta`, `btStress`, `mcDrawdown`, `btByRegime`), Adaptive KI (`errorClassify`, `nearMissTick`, `activeParams`), Monitoring (`monitorMetrics`, `monitorTick`), ehrliche Simulation (`jupQuote`, `jupBuyQuote`, `jupSellQuote`, `simConfirm`, `quoteBlockers`, `chargeFailedTx`, `writeOffPosition`, `updatePriorityFee`), Coin-Quelle (`discoveryOf`, `discoveryStats`), Trades neben dem Scan (`laneOf`, `drainTrades`), Datenqualität der Lern-KI (`recordQuality`, `learnable`, `slippageOf`, `learnQualityMigrate`).
 
 ## 3. Sicherheitsbarrieren (aktiv)
 
@@ -72,9 +78,9 @@ Neue Kern-Module in `index.html`: Datenvalidierung (`normDexPair`, `dqField`), B
 
 | Prüfung | Ergebnis |
 | --- | --- |
-| Selbsttests in der App | 78 von 78 bestanden, 0 Konsolenfehler (Jupiter in Tests nachgebildet; die echte API ist aus der Cloud-Testumgebung nicht erreichbar) |
-| Browser-Suiten (`tests/e2e`) | 9 von 9 bestanden: Selbsttest, Login, UI inkl. Mobil, Lern-KI, Backup, Migration, Backtest, Lernmodus-Profil, XSS |
-| CI (GitHub Actions) | grün bei jedem PR seit A1, Laufzeit etwa 4 min |
+| Selbsttests | 81 Tests, in der App (System → Selbsttest) und seit 2.12.0 auch unter Node.js (`node server/selftest.js`): 81 von 81 bestanden unter Node.js (2.12.0). Bis 2.11.0 im Browser 78 von 78, 0 Konsolenfehler. Jupiter ist in Tests nachgebildet; die echte API ist aus der Cloud-Testumgebung nicht erreichbar |
+| E2E-Suiten (`tests/e2e`) | 10 Suiten: Selbsttest, Login, UI inkl. Mobil, Lern-KI, Backup, Migration, Backtest, Lernmodus-Profil, XSS und seit 2.12.0 PC-Bot (`pcbot`: Bot mit Testdaten starten, Oberfläche, Einstellungen-Import, Backup mit Neustart, API-Schutz, Sperre gegen zweiten Bot, Beenden speichert). Bis 2.11.0 9 von 9 bestanden; für 2.12.0 gilt das Ergebnis der CI im PR |
+| CI (GitHub Actions) | Syntax-Prüfung → Selbsttests unter Node.js → alle Suiten; grün bei jedem PR seit A1, Laufzeit bis 2.11.0 etwa 4 min |
 | Performance (400 Tokens, Chromium) | Scan 17–41 ms, Analyse 11–20 ms, Render 4–22 ms, etwa 1 Scan/s, JS-Heap 25 MB; unverändert gegenüber Phase 0 |
 | Sicherheitsprüfung | CSP, Escaping, Links, kein `eval`, keine Geheimnisse im Repo: ohne Befund. Ein Befund im LIVE-Gate: Limits mit 0 = aus galten als ok; behoben in 2.10.1, mit Test abgesichert |
 
@@ -86,6 +92,7 @@ Neue Kern-Module in `index.html`: Datenvalidierung (`normDexPair`, `dqField`), B
 - Fehlerklasse für ältere Verluste ergänzt (2.7.0).
 - Loss-Cooldown und Pause aus Versionen vor 2.8.0 → 0 min, laufende Pause beendet (2.8.0).
 - Stufe B (2.11.0): keine Datenumstellung; neue Einstellungen erhalten Standardwerte, der Wechsel auf die ehrliche Simulation wird beim ersten Start im Log vermerkt. Trades von vorher haben keine Coin-Quelle („unbekannt“).
+- Datenbereinigung (2.12.0): Slippage mit begrenzter Formel neu berechnet (Ergebnisse unverändert); Learning Records um Ausführungsmodell, Verkaufsquelle und Kursabweichung ergänzt und auf Datenqualität geprüft; verzerrte Trades bleiben gespeichert, zählen aber nicht mehr fürs Lernen; Muster, Lektionen, Verlustmodell, Kalibrierung und Drift neu aus sauberen Trades; Hypothesen werden neu getestet. Läuft einmal je Datenbestand, im Browser wie auf dem PC.
 
 Jede Migration wird im Log bzw. Konfigurations-Protokoll vermerkt. Beschädigte Bereiche werden durch sichere Standardwerte ersetzt.
 
@@ -121,9 +128,9 @@ Jede Migration wird im Log bzw. Konfigurations-Protokoll vermerkt. Beschädigte 
    - Der Anteil gescheiterter Transaktionen ist eine Annahme (Standard 5 %), keine Messung.
    - Ohne Jupiter-Verbindung (Kontingent, Netzwerk) wird wieder geschätzt. Der Anteil steht im Monitoring; ab 50 % geschätzter Füllungen warnt der Monitor.
 2. **Der Backtest prüft vereinfachte Kerzen-Strategien,** nicht die echte Entscheidungslogik.
-3. **Das Lern-Gedächtnis ist begrenzt** auf die letzten 200 Trades und 200 Near-Misses (Browser-Speicher).
+3. **Das Lern-Gedächtnis ist begrenzt:** im Browser auf die letzten 200 Trades und 200 Near-Misses, bei vollem 5-MB-Speicher weiter gekürzt; auf dem PC (seit 2.12.0) auf 5000 Trades und 2000 Near-Misses. Verzerrte Trades zählen seit 2.12.0 nicht fürs Lernen, die nutzbare Datenbasis ist daher kleiner als die Zahl der Trades (`docs/LERNDATEN.md`).
 4. **Die Datenquellen sind langsam und einseitig.** Discovery läuft über bezahlte DexScreener-Boosts/-Profile und GeckoTerminal, und Kerzendaten gibt es nur für offene Positionen. Seit 2.11.0 wird die Quelle je Coin gespeichert, sodass die Lern-KI schlechte Quellen erkennen kann.
-5. **Nur im Browser:** Der Bot stoppt, wenn der Tab geschlossen wird. Der Login schützt nicht auf einem Server.
+5. **Browser oder PC, noch kein Server:** Im Browser stoppt der Bot, wenn der Tab geschlossen wird. Der PC-Bot (seit 2.12.0) läuft ohne Browser, aber nur solange der PC an ist; seine Oberfläche ist eine Übergangslösung ohne Login, nur auf diesem PC erreichbar (`docs/PC-BETRIEB.md`). Der Login der Browser-App ist rein clientseitig und wäre auf einem Server kein Schutz.
 6. **Risiko-Limits sind abschaltbar:** Mit dem Profil „Lernmodus“ gibt es keine automatische Handelspause mehr. Das ist so gewollt, gilt aber nur für die Simulation.
 7. **Kein Gewinn-Nachweis:** Positive Simulationsergebnisse sind wegen Punkt 1 und 2 kein Beleg für echte Gewinne.
 8. **Jupiter-Zugang:** Der kostenlose Zugang (`lite-api.jup.ag`) hat ein Kontingent; die App begrenzt sich lokal auf 50 Abfragen pro Minute. Mit eigenem API-Key wird `api.jup.ag` genutzt. Ob ein Browser-Zugriff mit API-Key-Header (CORS) überall erlaubt ist, ließ sich aus der Testumgebung nicht prüfen; scheitert er, greift der markierte Rückfall.
@@ -140,9 +147,9 @@ Die Details stehen in der Roadmap (Dokument „Roadmap Smart Lab Bot“).
 
 Vor jedem Merge auf `main`:
 
-- [ ] CI grün (Syntax + 9 Browser-Suiten)
+- [ ] CI grün (Syntax, Selbsttests unter Node.js, 10 Suiten)
 - [ ] Selbsttests in der App: alle bestanden, 0 Konsolenfehler
-- [ ] `APP_VERSION` erhöht, Änderungsprotokoll in `docs/ARCHITEKTUR.md` ergänzt
+- [ ] `APP_VERSION` in `js/base.js` und `?v=` in `index.html` erhöht, Änderungsprotokoll in `docs/ARCHITEKTUR.md` ergänzt
 - [ ] Verhaltensänderungen im PR beschrieben (was handelt der Bot jetzt anders?)
 - [ ] Migration für gespeicherte Daten nötig? Falls ja: getestet und protokolliert
 - [ ] Keine Geheimnisse im Diff (Passwörter, Schlüssel, Seeds)

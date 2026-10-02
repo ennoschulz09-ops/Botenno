@@ -22,6 +22,9 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Syntax-Prüfung
         run: node tests/e2e/check-syntax.js
+      - name: Selbsttests unter Node.js
+        # Gleicher Kern wie im Browser, ohne Oberfläche – beweist, dass der PC-Bot (server/bot.js) ohne Browser läuft.
+        run: node server/selftest.js
       - name: Selbsttests und Browser-Tests
         # Ohne E2E_USER/E2E_PASS nutzen die Tests eine Testkopie mit Wegwerf-Passwort – keine Secrets nötig.
         run: node tests/e2e/run-all.js

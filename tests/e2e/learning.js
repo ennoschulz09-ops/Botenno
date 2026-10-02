@@ -92,6 +92,7 @@ function seedJournal(mints) {
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#v-learning [data-act="export"][data-kind="learning-report-csv"]')]);
   const csv = fs.readFileSync(await dl.path(), 'utf8').trim().split('\n');
   ok(/lossFamily/.test(csv[0]) && /errorClass,lossVerdict/.test(csv[0]) && csv.length === 31, `Lern-Report CSV: Kopf + ${csv.length - 1} Zeilen`);
+  ok(/,discovery,learnable,qualityFlags,execModel,exitSource$/.test(csv[0]) && csv.slice(1).every(l => /,(ja|nein),[^,]*,[12]?,[A-Z_]*$/.test(l)), 'Lern-Report CSV: Datenqualität am Ende (learnable ja/nein, Kennzeichen, execModel, exitSource)');
   const [dl2] = await Promise.all([page.waitForEvent('download'), page.click('#v-learning [data-act="export"][data-kind="model-registry-json"]')]);
   const reg = JSON.parse(fs.readFileSync(await dl2.path(), 'utf8'));
   ok(reg.models && reg.models.champion && reg.bounds && reg.bounds.minScore, 'Modell-Register JSON exportiert');

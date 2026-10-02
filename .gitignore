@@ -1,2 +1,5 @@
 node_modules/
 tests/e2e/out/
+.e2e-app-*.html
+data/
+data-mock/
