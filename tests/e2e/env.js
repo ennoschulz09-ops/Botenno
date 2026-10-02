@@ -4,7 +4,7 @@
 // 1. E2E_USER und E2E_PASS gesetzt → Tests laufen gegen die echte index.html.
 // 2. Nicht gesetzt (Standard, auch in CI) → es wird eine Testkopie der App in tests/e2e/out erzeugt, deren
 //    Login-Hash zu einem zufälligen Wegwerf-Passwort passt. Die echte index.html und ihr Passwort bleiben unverändert;
-//    die Testkopie liegt nur im (ignorierten) Ausgabeordner und wird nie veröffentlicht.
+//    die Testkopie (.e2e-app-<pid>.html neben index.html) ist per .gitignore ausgeschlossen und wird nach dem Test gelöscht.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -21,7 +21,8 @@ function testCopy() {
   if (!kdf || !who) { console.error('FEHLER: AUTH_KDF oder Benutzeranzeige in index.html nicht gefunden – Testkopie nicht möglich.'); process.exit(2); }
   const [, ctx, salt, iterations, hash] = kdf, user = who[1], pass = 'test-' + crypto.randomBytes(12).toString('hex');
   const testHash = crypto.pbkdf2Sync(Buffer.from(ctx + user + ':' + pass, 'utf8'), Buffer.from(salt, 'hex'), Number(iterations), 32, 'sha256').toString('hex');
-  const file = path.join(OUT, `app-test-${process.pid}.html`);
+  // Neben index.html ablegen, damit die Module unter js/ relativ gefunden werden (Datei ist per .gitignore ausgeschlossen).
+  const file = path.join(path.dirname(APP_FILE), `.e2e-app-${process.pid}.html`);
   fs.writeFileSync(file, html.replace(`hash: '${hash}'`, `hash: '${testHash}'`));
   process.on('exit', () => { try { fs.unlinkSync(file); } catch (e) { /* schon entfernt */ } });
   return { file, user, pass };
