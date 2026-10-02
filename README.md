@@ -15,7 +15,7 @@ Kein Build-Schritt. Die Dateien unter `js/` sind klassische Skripte mit gemeinsa
 | `server/` | PC-Bot unter Node.js: `bot.js` (Start), `load-core.js` (lädt den Kern aus `js/`), `store.js` (Datei-Speicher), `panel.js` + `panel/` (Oberfläche), `selftest.js` |
 | `start-bot.bat` | Start des PC-Bots unter Windows per Doppelklick |
 | `tests/e2e/` | Syntax-Prüfung, Browser-Tests, Test-Runner |
-| `docs/` | [Architektur](docs/ARCHITEKTUR.md), [Abschlussbericht](docs/ABSCHLUSSBERICHT.md), [PC-Betrieb](docs/PC-BETRIEB.md), [Lerndaten](docs/LERNDATEN.md) |
+| `docs/` | [Architektur](docs/ARCHITEKTUR.md), [Abschlussbericht](docs/ABSCHLUSSBERICHT.md), [PC-Betrieb](docs/PC-BETRIEB.md), [Lerndaten](docs/LERNDATEN.md), [Strategie](docs/STRATEGIE.md) |
 
 ## Betrieb auf dem PC
 

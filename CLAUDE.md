@@ -4,6 +4,16 @@
 
 Smart Lab: Solana-Memecoin-Scanner mit Analyse, Security-Prüfung, simuliertem Handel und Lern-KI. Läuft im Browser (GitHub Pages aus `main`) und seit 2.12.0 als PC-Bot unter Node.js (`server/`). Der Handel ist ausschließlich simuliert (SIMULATION/PAPER) – mit echten Marktdaten und echten Jupiter-Kursangeboten, die nur abgefragt (`GET /quote`), nie ausgeführt werden. Der Nutzer ist kein Entwickler und betreibt den Bot auf seinem Windows-PC (`docs/PC-BETRIEB.md`).
 
+## Ziele & Leitplanken
+
+Endziel: ein Bot, der nach allen Kosten dauerhaft profitabel ist – belegt durch Messung –, danach vorsichtig Richtung Echtgeld.
+Zielarchitektur: **Datensammler speist die Daten, KI speist die Strategien** an viele Sub-Bots (virtuelle Portfolios auf
+denselben Daten, Kontrollgruppe), Ergebnisse fließen als Feedback zurück an die KI. Vorrang haben jetzt Datenrate/-qualität
+und der Nachweis eines Vorteils. Jede Code-Änderung gegen die Leitplanken in `docs/STRATEGIE.md` (Abschnitt 8) prüfen:
+messbar (Zeitstempel, Quelle, Datenalter, `FEATURE_VERSION`), wiederholbar (Kern deterministisch, nur über `env`), Schichten
+getrennt (Sammeln · Entscheiden · Ausführen), Strategien austauschbar und mehrere Portfolios möglich, Kosten überall
+eingerechnet, nur `learnable` Daten, keine Verbesserung ohne Messung gegen Kontrollgruppe/Holdout.
+
 ## Feste Regeln
 
 - Mit dem Nutzer auf Deutsch sprechen, verständlich, ohne unnötigen Fachjargon.
@@ -27,7 +37,7 @@ Smart Lab: Solana-Memecoin-Scanner mit Analyse, Security-Prüfung, simuliertem H
 - `base.js` bis `core.js` laufen auch unter Node.js und müssen DOM-frei bleiben; Seiteneffekte nur über `env` (Uhr, `fetch`, Timer, Zufall) und das Speicher-Backend.
 - `server/`: PC-Bot, nur Node-Bordmittel – `bot.js` (Start, Optionen, `PC_LEARN_CAPS`), `load-core.js` (lädt `js/` per `vm`; neue Kern-Funktionen für den Server dort im `api`-Objekt oder über das Rückgabeobjekt von `createCore` freigeben), `store.js` (Datei-Speicher, Sperre, Tagessicherung), `panel.js` + `panel/` (Oberfläche auf 127.0.0.1), `selftest.js`.
 - `tests/e2e/`: `check-syntax.js`, `run-all.js` (Liste der Suiten), einzelne Suiten, `mock.js` (Mock-Netz, auch für `--mock`), `env.js`.
-- `docs/`: `ARCHITEKTUR.md` (Architektur, Änderungsprotokoll), `ABSCHLUSSBERICHT.md` (Bericht, Release-Checkliste), `PC-BETRIEB.md` (Anleitung für den Nutzer), `LERNDATEN.md` (Backup-Format, Datenqualität, Hinweise für Modelle).
+- `docs/`: `STRATEGIE.md` (Ziel, Bewertung, Weg, Leitplanken), `ARCHITEKTUR.md` (Architektur, Änderungsprotokoll), `ABSCHLUSSBERICHT.md` (Bericht, Release-Checkliste), `PC-BETRIEB.md` (Anleitung für den Nutzer), `LERNDATEN.md` (Backup-Format, Datenqualität, Hinweise für Modelle).
 - `start-bot.bat`: Windows-Start; Zeilenenden CRLF beibehalten (`.gitattributes`).
 
 ## Befehle

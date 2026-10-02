@@ -1,6 +1,6 @@
 # Smart Lab – Architektur & technischer Audit
 
-Stand: App-Version 2.12.0 – Roadmap-Stufe C1 in Arbeit (PC-Variante: Bot unter Node.js ohne Browser); Stufe B „Ehrliche Simulation“ abgeschlossen (2.11.0). Abschlussbericht: `docs/ABSCHLUSSBERICHT.md`, PC-Betrieb: `docs/PC-BETRIEB.md`, Lerndaten: `docs/LERNDATEN.md`.
+Stand: App-Version 2.12.0 – Roadmap-Stufe C1 in Arbeit (PC-Variante: Bot unter Node.js ohne Browser); Stufe B „Ehrliche Simulation“ abgeschlossen (2.11.0). Abschlussbericht: `docs/ABSCHLUSSBERICHT.md`, PC-Betrieb: `docs/PC-BETRIEB.md`, Lerndaten: `docs/LERNDATEN.md`, Ziele und Leitplanken: `docs/STRATEGIE.md`.
 Dieses Dokument wird in jeder Phase fortgeschrieben (siehe „Änderungsprotokoll“ am Ende).
 
 ## 1. Überblick
