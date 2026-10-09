@@ -1,8 +1,8 @@
 /* Smart Lab – base.js
    Grundlagen: Konstanten · Utils · Logger · Settings · Storage · HTTP/Data Layer · Normalisierung & Security · Blocker
    Klassisches Skript ohne Build-Schritt: alle Dateien teilen sich den globalen Gültigkeitsbereich und werden in fester
-   Reihenfolge geladen (index.html bzw. server/load-core.js): base → engine → learning → core → selftest → ui.
-   base, engine, learning, core und selftest laufen auch ohne Browser (Node.js); nur ui.js braucht das DOM. */
+   Reihenfolge geladen (index.html bzw. server/load-core.js): base → engine → learning → dataset → core → selftest → ui.
+   base, engine, learning, dataset, core und selftest laufen auch ohne Browser (Node.js); nur ui.js braucht das DOM. */
 'use strict';
 
 /* =====================================================================

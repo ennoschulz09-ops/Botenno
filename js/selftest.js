@@ -1,8 +1,8 @@
 /* Smart Lab – selftest.js
    Selbsttests: Test-Harness (Mock-Netzwerk, Speicher im Arbeitsspeicher) und alle Selbsttests
    Klassisches Skript ohne Build-Schritt: alle Dateien teilen sich den globalen Gültigkeitsbereich und werden in fester
-   Reihenfolge geladen (index.html bzw. server/load-core.js): base → engine → learning → core → selftest → ui.
-   base, engine, learning, core und selftest laufen auch ohne Browser (Node.js); nur ui.js braucht das DOM. */
+   Reihenfolge geladen (index.html bzw. server/load-core.js): base → engine → learning → dataset → core → selftest → ui.
+   base, engine, learning, dataset, core und selftest laufen auch ohne Browser (Node.js); nur ui.js braucht das DOM. */
 'use strict';
 
 /* ============================== TESTING SYSTEM (Selbsttest & Chaos-Tests) ==============================
@@ -75,8 +75,8 @@ function makeTestHarness() {
   });
   return H;
 }
-async function testCore(H, settings) {
-  const core = createCore({ env: H.env, backend: H.backend || (H.backend = createMemoryBackend()) });
+async function testCore(H, settings, extra) { // extra: weitere Kern-Optionen, z. B. { candidates: { open: 1000 } } (Datensammler)
+  const core = createCore({ env: H.env, backend: H.backend || (H.backend = createMemoryBackend()), ...(extra || {}) });
   core.init({ autoStart: false });
   core.updateSettings({ minPairAgeMin: 0, simLatencyMs: 0, ...(settings || {}) }, 'TEST'); // Wartezeit nur in eigenen Tests (Laufzeit)
   await core._t.updateSolPrice(true);
@@ -121,6 +121,17 @@ async function learnTrade(H, core, n, exitPrice) {
 /* Backtest-Testdaten: deterministische Kerzen mit periodischen Volumen-/Preisschüben */
 function btTestCandles() { const c = []; let p = 1; for (let i = 0; i < 300; i++) { const o = p; p = p * (1 + Math.sin(i / 7) * 0.02 + (i % 50 === 25 ? 0.12 : 0)); c.push({ t: i * MIN, o, h: Math.max(o, p) * 1.01, l: Math.min(o, p) * 0.99, c: p, v: 1000 + (i % 50 === 25 ? 9000 : 0) }); } return c; }
 const btTestCfg = () => ({ strategy: 'volume', capital: 1000, sizePct: 10, feePct: 0.3, slipPct: 0.5, tpPct: 10, slPct: 8, trailActPct: 8, trailPct: 5, timeBars: 30 });
+
+/* Datensammler-Testdaten: Kosten-Eingaben (50 $, 100 k$ Liquidität, SOL 150 $), echter Analyse-Snapshot eines Test-Tokens und
+   synthetische Kurse relativ zum Einstieg – [s, pct, liqPct, pair?, ext?] mit s in Sekunden nach t0. */
+const candTestCost = (o = {}) => { const c = { model: 1, refUsd: 50, liq0: 100000, impactInPct: null, dexFeePct: 0.25, txFeeUsd: m6((BASE_FEE_LAMPORTS + 100000) / 1e9 * 150), prioLamports: 100000, solUsd: 150, roundTripPct: null, ...o }; c.roundTripPct = -candNet(0, c, c.liq0); return c; };
+const candEvery = (from, to, step, f) => { const out = []; for (let s = from; s <= to; s += step) out.push(f(s)); return out; };
+function candWalk(c, pts) { for (const [s, pct, lq, pair, ext] of pts) candObserve(c, { at: c.t0 + s * SEC, price: c._.p0 * (1 + pct / 100), liq: lq == null ? null : c._.liq0 * (1 + lq / 100), pair: pair || c.pair, ext: !!ext }); }
+async function candFixture() {
+  const H = makeTestHarness(), core = await testCore(H), t = await prepToken(core, H, 1); core._t.analyzeAll();
+  const ctx = { now: H.env.now(), why: 'FIRST', regimeTags: ['TEST'], mode: 'SIMULATION', paramVersion: 1, modelVersion: 'M-1', settingsHash: 'abc', solUsd: 150, prioLamports: 100000, dexFeePct: 0.25, seen: null, quoteCheck: null, app: APP_VERSION, refUsd: 50 };
+  return { H, core, t, mk: (x = {}) => candOpen(t, t.A, t.D, { ...ctx, ...x }) };
+}
 
 const SELF_TESTS = [
   ['Grundlagen', 'Token-Identität: solana:<mint>, nie nur Symbol', async () => {
@@ -1207,6 +1218,182 @@ const SELF_TESTS = [
     assert(firstTrades.every((t, i) => cut.trades[i] && cut.trades[i].entryT === t.entryT && Math.abs(cut.trades[i].pnl - t.pnl) < 1e-9), 'Ergebnisse hängen von zukünftigen Kerzen ab');
     assert(full.trades.every(t => t.entryT > 0), 'Einstieg auf Signalkerze');
     return `${full.trades.length} Trades, identisch bei abgeschnittener Zukunft`;
+  }],
+  ['Datensammler', 'Labels nach Kosten: TP/SL/RUG/TIME/NO_DATA, Durchrutschen, netto < brutto, Kosten bei 0 %, deterministisch', async () => {
+    const cost = candTestCost(), L = (s, o) => candLabel(s, CAND_LABEL, cost, o), tpS = [[0, 0, 0], [60, 12, 0], [120, 31, 0], [300, -20, 0], [1750, 5, 0]];
+    const tp = L(tpS);
+    assert(tp.y === 'TP' && tp.tHitSec === 120 && tp.hitPct === 31 && tp.grossPct === 31 && tp.mfePct === 31 && tp.maePct === -20 && tp.tMaeSec === 300 && tp.endPct === 5, 'TP falsch (volles Fenster für MFE/MAE): ' + JSON.stringify(tp));
+    assert(tp.netPct < tp.grossPct && tp.win === true, 'netto nicht unter brutto: ' + tp.netPct);
+    const sl = L([[0, 0, 0], [60, -16, -5], [120, 40, 0], [1700, 0, 0]]);
+    assert(sl.y === 'SL' && sl.hitPct === -16 && sl.mfePct === 40 && sl.win === false, 'SL falsch: ' + JSON.stringify(sl));
+    const rug = L([[0, 0, 0], [90, -20, -60], [1790, -90, -95]]);
+    assert(rug.y === 'RUG' && rug.tHitSec === 90 && rug.minLiqPct === -95 && rug.netPct < rug.grossPct, 'RUG (zugleich SL) falsch: ' + JSON.stringify(rug));
+    const gap = L([[0, 0, 0], [30, -5, 0], [60, -40, -10]]);
+    assert(gap.y === 'SL' && gap.hitPct === -40 && gap.grossPct === -40, 'Durchrutschen nicht sichtbar: ' + gap.hitPct);
+    const time = L([[0, 0, 0], [600, 5, 0], [1690, 9, 0], [1785, 7, 2]]);
+    assert(time.y === 'TIME' && time.endPct === 7 && time.grossPct === 7 && time.tHitSec == null && time.netPct < 7, 'TIME falsch: ' + JSON.stringify(time));
+    const nd = [L([[0, 0, 0]]), L([[0, 0, 0], [600, 5, 0], [1600, 4, 0]]), L([[0, 0, 0], [1785, 7, 0]], { vanished: true })];
+    assert(nd.every(x => x.y === 'NO_DATA' && x.grossPct == null && x.netPct == null && x.win == null), 'NO_DATA falsch: ' + nd.map(x => x.y).join());
+    assert(L([[0, 0, 0], [60, -16, 0]], { vanished: true }).y === 'SL', 'beobachteter Stop vor dem Verschwinden verworfen');
+    const n0 = candNet(0, cost, cost.liq0), big = candTestCost({ refUsd: 500 });
+    assert(n0 < 0 && n0 === -cost.roundTripPct && cost.roundTripPct > 0.5 && cost.roundTripPct < 1, 'Kosten bei 0 % Bewegung falsch: ' + n0);
+    assert(big.roundTripPct > cost.roundTripPct, 'größere Referenz kostet nicht mehr: ' + big.roundTripPct);
+    assert(candNet(0, cost, 1) < -95 && candNet(-100, cost, cost.liq0) === -100 && candNet(10, { ...cost, txFeeUsd: null }, 1e5) == null, 'Liquiditätsabzug / fehlende Kosten falsch');
+    assert(JSON.stringify(L(tpS)) === JSON.stringify(tp), 'nicht deterministisch');
+    return `TP +31 → netto ${fmtPct(tp.netPct)} · SL −40 durchgerutscht · RUG vor SL · Rundreise ${cost.roundTripPct} % (500 $: ${big.roundTripPct} %) · Abzug → ${fmtPct(candNet(0, cost, 1))}`;
+  }],
+  ['Datensammler', 'Qualitätsflags: GAPS, FEW_SAMPLES, TRUNCATED, VANISHED, POOL_SWITCH, NO_COST – sauber → ok', async () => {
+    const { mk } = await candFixture(), HZ = CAND_LABEL.horizonMin * MIN, flags = r => r.quality.flags.join();
+    const run = (pts, o = {}) => { const c = mk(o.ctx); candWalk(c, pts); if (o.misses) c._.misses = o.misses; return candFinish(c, c.t0 + (o.at != null ? o.at * SEC : HZ + SEC), o.at != null ? 'SHUTDOWN' : 'HORIZON'); };
+    const clean = run(candEvery(10, 1800, 10, s => [s, 1, 0]));
+    assert(clean.quality.ok && !clean.quality.flags.length && clean.label.y === 'TIME' && clean.path.n === 181 && !('_' in clean), 'sauberer Datensatz nicht ok: ' + flags(clean));
+    const gaps = run([...candEvery(10, 600, 10, s => [s, 1, 0]), ...candEvery(900, 1800, 10, s => [s, 1, 0])]);
+    assert(flags(gaps) === 'GAPS' && gaps.path.maxGapSec === 300, 'GAPS: ' + flags(gaps));
+    const few = run([[60, 1, 0], [120, 2, 0]]);
+    assert(few.quality.flags.includes('FEW_SAMPLES') && few.quality.flags.includes('GAPS') && few.label.y === 'NO_DATA', 'FEW_SAMPLES: ' + flags(few));
+    const trunc = run(candEvery(10, 600, 10, s => [s, 1, 0]), { at: 605 });
+    assert(flags(trunc) === 'TRUNCATED' && trunc.end === 'SHUTDOWN' && trunc.label.y === 'NO_DATA', 'TRUNCATED: ' + flags(trunc));
+    const van = run(candEvery(10, 900, 10, s => [s, -5, 0]), { misses: 3 });
+    assert(van.quality.flags.includes('VANISHED') && van.label.y === 'NO_DATA', 'VANISHED: ' + flags(van));
+    const sw = run(candEvery(10, 1800, 10, s => [s, 1, s > 900 ? -50 : 0, s > 900 ? 'OTHERPOOL' : null]));
+    assert(flags(sw) === 'POOL_SWITCH' && sw.label.y === 'TIME' && sw.label.minLiqPct === 0, 'POOL_SWITCH (fremde Liquidität darf keinen Rug auslösen): ' + flags(sw) + ' ' + sw.label.y);
+    const nc = run(candEvery(10, 1800, 10, s => [s, 1, 0]), { ctx: { solUsd: null } });
+    assert(flags(nc) === 'NO_COST' && nc.cost.refUsd === 50 && nc.cost.roundTripPct == null && nc.cost.txFeeUsd == null && nc.label.y === 'TIME' && nc.label.netPct == null, 'NO_COST: ' + flags(nc));
+    return 'sauber → ok · Lücke 300 s → GAPS · 3 Kurse → FEW_SAMPLES · vorzeitig → TRUNCATED · 3× kein Pool → VANISHED/NO_DATA · anderer Pool → POOL_SWITCH · ohne SOL-Preis → NO_COST';
+  }],
+  ['Datensammler', 'Proben: 15 s / 30 s, Barriere-Kurs immer gespeichert, Label aus path.s = Online-Label', async () => {
+    const { mk } = await candFixture(), c = mk(), hits = [405, 1005, 1505];
+    const pct = s => (s === 405 ? 35 : s === 1005 ? -16 : Math.round(Math.sin(s / 50) * 800) / 100);
+    candWalk(c, candEvery(5, 1800, 5, s => [s, pct(s), s === 1505 ? -45 : -1]));
+    const r = candFinish(c, c.t0 + 30 * MIN + SEC, 'HORIZON'), ts = r.path.s.map(x => x[0]);
+    const early = ts.filter(t => t <= 300), late = ts.filter(t => t > 300 && !hits.includes(t));
+    assert(early.join() === candEvery(0, 300, 15, s => s).join(), '15-s-Takt falsch: ' + early.join());
+    assert(late.length === 50 && late.every((t, i) => t === 330 + i * 30), '30-s-Takt falsch: ' + late.join());
+    assert(hits.every(t => ts.includes(t)) && r.path.s.length === 74 && r.path.n === 361 && r.path.tEndSec === 1800, 'Barriere-Kurse/Probenzahl: ' + r.path.s.length);
+    const re = candLabel(r.path.s, r.label.cfg, r.cost);
+    assert(JSON.stringify(re) === JSON.stringify(r.label), 'Label nicht aus path.s reproduzierbar: ' + JSON.stringify([re, r.label]));
+    assert(r.label.y === 'TP' && r.label.tHitSec === 405 && r.label.mfePct === 35 && r.label.maePct === -16 && r.label.minLiqPct === -45, 'Label falsch: ' + JSON.stringify(r.label));
+    return `${r.path.n} Kurse → ${r.path.s.length} Proben (15 s / 30 s + 3 Barrieren) · ${JSON.stringify(r).length} Bytes · Label identisch aus path.s`;
+  }],
+  ['Datensammler', 'Kern: jeder Kandidat ein Datensatz (Merkmale, Entscheidung, feste Kosten), keine Duplikate, ein Batch nach 30 min, Lern-KI unberührt', async () => {
+    const H = makeTestHarness(); const core = await testCore(H, {}, { candidates: { open: 1000 } }), st = core.state;
+    const toks = [await prepToken(core, H, 1), await prepToken(core, H, 2), await prepToken(core, H, 3)], [up, dn, flat] = toks;
+    st.portfolio.cash = 7; // Kosten-Referenz hängt nicht vom Portfolio ab
+    const got = []; core.on('candidates', r => got.push(r));
+    core._t.analyzeAll(); core._t.analyzeAll();
+    const C = core._t.candState();
+    assert(C.open.length === 3 && core.candidateView().opened === 3, 'nicht genau 3 Datensätze (Duplikate?): ' + C.open.length);
+    for (const t of toks) {
+      const c = C.open.find(x => x.tokenId === t.id);
+      assert(c && c.why === 'FIRST' && c.entry.v === FEATURE_VERSION && c.decision.decision === t.D.decision && c.decision.analysisCodes.join() === t.D.analysisBlockers.map(b => b.code).join() && c.decision.execCodes.join() === t.D.execBlockers.map(b => b.code).join(), 'Entscheidung/Merkmale passen nicht zu t.D');
+      assert(c.cost.refUsd === 50 && c.cost.solUsd === 150 && c.cost.impactInPct === lr2(50 / (t.snap.liquidityUsd / 2 + 50) * 100) && c.t0 === t.snap.fetchedAt && c.pair === t.snap.pairAddress, 'Kosten/Einstieg falsch: ' + JSON.stringify(c.cost));
+    }
+    for (let i = 1; i <= 30; i++) {
+      H.env.advance(MIN);
+      H.market[up.mint] = H.pair(up.mint, { price: i >= 5 ? 0.00135 : 0.001 * (1 + i / 100) });
+      H.market[dn.mint] = H.pair(dn.mint, { price: i >= 5 ? 0.0008 : 0.001 });
+      H.market[flat.mint] = H.pair(flat.mint, { price: 0.001 * (1 + (i % 3) / 200) });
+      await core._t.fetchChunk(toks.map(t => t.mint), true);
+      if (i < 30) core._t.analyzeAll();
+    }
+    assert(!got.length, 'vor dem Horizont abgeschlossen');
+    const snap = () => JSON.stringify([st.learn, st.models, st.settings, st.configLog, toks.map(t => t.D)]), before = snap();
+    core._t.candidateTick(H.env.now());
+    assert(snap() === before, 'Datensammler verändert Lern-KI, Modelle, Einstellungen oder Entscheidungen');
+    assert(got.length === 1 && got[0].length === 3, 'nicht genau ein Batch mit 3 Datensätzen: ' + got.map(b => b.length).join());
+    const by = t => got[0].find(r => r.tokenId === t.id), ys = [by(up), by(dn), by(flat)].map(r => r.label.y).join();
+    assert(ys === 'TP,SL,TIME', 'Labels falsch: ' + ys);
+    const keys = 'v,id,app,why,ts,t0,tokenId,mint,symbol,pair,dex,source,mode,entry,decision,context,cost,label,path,quality,trade,end';
+    assert(got[0].every(r => Object.keys(r).join() === keys && r.v === CAND_VERSION && r.end === 'HORIZON' && r.quality.ok && r.path.s.length > 20 && JSON.stringify(r).length < 6000), 'Datensatz unvollständig/zu groß: ' + JSON.stringify(got[0].map(r => [r.quality.flags, JSON.stringify(r).length])));
+    const v = core.candidateView();
+    assert(v.written === 3 && v.byLabel.TP === 1 && v.byLabel.SL === 1 && v.byLabel.TIME === 1 && v.okPct === 100, 'Übersicht falsch: ' + JSON.stringify(v));
+    return `3 Datensätze (${Math.max(...got[0].map(r => JSON.stringify(r).length))} Bytes max.) · TP/SL/TIME · ein Batch · Lern-KI, Modelle, Einstellungen unverändert`;
+  }],
+  ['Datensammler', 'TRIGGER: Coin wird kaufwürdig → zusätzlicher Datensatz (höchstens einer offen)', async () => {
+    const H = makeTestHarness(); const core = await testCore(H, { minScore: 99 }, { candidates: { open: 1000 } });
+    const t = await prepToken(core, H, 1); core._t.analyzeAll();
+    const C = core._t.candState(), first = C.open[0];
+    assert(C.open.length === 1 && first.why === 'FIRST' && !first.decision.wouldBuy && first.decision.analysisCodes.includes('SCORE_TOO_LOW'), 'FIRST ohne Kaufwürdigkeit fehlt');
+    H.env.advance(5 * MIN); await core._t.fetchChunk([t.mint], true);
+    core.updateSettings({ minScore: defaultSettings().minScore }, 'TEST'); core._t.analyzeAll(); core._t.analyzeAll();
+    const trig = C.open.find(c => c.why === 'TRIGGER');
+    assert(C.open.length === 2 && trig && trig.decision.wouldBuy && /T$/.test(trig.id) && trig.decision.settingsHash !== first.decision.settingsHash, 'TRIGGER fehlt/doppelt: ' + C.open.map(c => c.why).join());
+    H.env.advance(SEC); await core._t.fetchChunk([t.mint], true); core._t.analyzeAll();
+    assert(C.open.length === 2 && core.candidateView().byWhy.TRIGGER === 1, 'zweiter TRIGGER trotz offenem');
+    return 'abgelehnt → FIRST · kaufwürdig → TRIGGER (eigene Kennung, anderer Einstellungs-Fingerabdruck) · kein zweiter offener TRIGGER';
+  }],
+  ['Datensammler', 'Verfolger: verdrängter Coin wird weiter beobachtet, ohne in den Scanner zurückzukehren; Reserve und Fehlzähler', async () => {
+    const H = makeTestHarness(); const core = await testCore(H, {}, { candidates: { open: 1000 } });
+    const t = await prepToken(core, H, 1); core._t.analyzeAll();
+    const c = core._t.candState().open[0];
+    core.state.markets.delete(t.id); H.env.advance(30 * SEC); H.market[t.mint] = H.pair(t.mint, { price: 0.0009 });
+    const n0 = H.calls.length, applied = await core._t.candidateRefresh(), calls = H.calls.slice(n0);
+    assert(applied === 1 && calls.length === 1 && calls[0] === DEX_API + '/tokens/v1/solana/' + t.mint, 'keine Verfolger-Anfrage: ' + calls.join());
+    assert(!core.state.markets.has(t.id) && c._.n === 2 && c._.nExt === 1 && c._.last[1] === -10, 'Kurs nicht übernommen oder Coin wieder im Scanner');
+    assert(await core._t.candidateRefresh() === 0 && H.calls.length === n0 + 1, 'Abstand / 25-s-Regel nicht eingehalten');
+    delete H.market[t.mint];
+    for (let i = 0; i < 4; i++) { H.env.advance(30 * SEC); await core._t.candidateRefresh(); }
+    const F = core.candidateView().follower;
+    assert(c._.misses === 3 && F.empty === 3 && F.requests === 4, 'Fehlzähler / Stopp nach 3× leer: ' + JSON.stringify(F));
+    const got = []; core.on('candidates', r => got.push(...r)); core.candidatesFlush('SHUTDOWN');
+    assert(got[0].quality.flags.includes('VANISHED') && got[0].label.y === 'NO_DATA' && got[0].path.nExt === 1, 'VANISHED: ' + JSON.stringify([got[0].quality, got[0].label.y]));
+    const H2 = makeTestHarness(); const core2 = await testCore(H2, {}, { candidates: { open: 1000, reserve: 1000 } });
+    const t2 = await prepToken(core2, H2, 1); core2._t.analyzeAll(); core2.state.markets.delete(t2.id); H2.env.advance(30 * SEC);
+    const m0 = H2.calls.length;
+    assert(await core2._t.candidateRefresh() === 0 && H2.calls.length === m0 && core2.candidateView().follower.requests === 0, 'Reserve für den Scanner missachtet');
+    return 'Kurs vom Verfolger (−10 %), Coin bleibt aus dem Scanner · 2 s / 25 s Abstand · 3× leer → VANISHED, keine weiteren Anfragen · Reserve greift';
+  }],
+  ['Datensammler', 'Beenden/Wiederherstellen: offene Datensätze als TRUNCATED abschließen, ein Batch, zweiter Aufruf 0', async () => {
+    const H = makeTestHarness(); const core = await testCore(H, {}, { candidates: { open: 1000 } });
+    const a = await prepToken(core, H, 1), b = await prepToken(core, H, 2); core._t.analyzeAll();
+    for (let i = 0; i < 5; i++) { H.env.advance(20 * SEC); await core._t.fetchChunk([a.mint, b.mint], true); core._t.analyzeAll(); }
+    const got = []; core.on('candidates', r => got.push(r));
+    assert(core.candidatesFlush('SHUTDOWN') === 2 && got.length === 1 && got[0].length === 2, 'Flush liefert keinen Batch mit 2 Datensätzen');
+    assert(got[0].every(r => r.end === 'SHUTDOWN' && r.quality.flags.includes('TRUNCATED') && !r.quality.ok && r.path.n === 6), 'TRUNCATED fehlt: ' + JSON.stringify(got[0].map(r => [r.end, r.quality.flags, r.path.n])));
+    const v = core.candidateView();
+    assert(core.candidatesFlush('SHUTDOWN') === 0 && got.length === 1 && v.open === 0 && v.written === 2, 'zweiter Aufruf nicht 0');
+    await prepToken(core, H, 3); core._t.analyzeAll();
+    assert(core.candidatesFlush('RELOAD') === 1 && got[1][0].end === 'RELOAD', 'RELOAD fehlt');
+    return 'SHUTDOWN: 2 Datensätze in einem Batch, TRUNCATED · zweiter Aufruf 0 · RELOAD markiert';
+  }],
+  ['Datensammler', 'Trade-Markierung: Kauf verknüpft offene Datensätze des Coins (tradeId = Position)', async () => {
+    const H = makeTestHarness(); const core = await testCore(H, {}, { candidates: { open: 1000 } });
+    const t = await prepToken(core, H, 1), o = await prepToken(core, H, 2); core._t.analyzeAll();
+    const b = await core.executeBuy(t.id, { sizeUsd: 20 }); assert(b.ok, 'Kauf fehlgeschlagen: ' + codes(b).join(','));
+    const pos = core.state.positions.find(p => p.tokenId === t.id), C = core._t.candState();
+    const c = C.open.find(x => x.tokenId === t.id), co = C.open.find(x => x.tokenId === o.id);
+    assert(c.trade && c.trade.tradeId === pos.id && c.trade.orderId === b.order.id && isNum(c.trade.at) && co.trade === null, 'Trade nicht (nur) am richtigen Datensatz: ' + JSON.stringify([c.trade, co.trade]));
+    const got = []; core.on('candidates', r => got.push(...r)); core.candidatesFlush('SHUTDOWN');
+    assert(got.find(r => r.tokenId === t.id).trade.tradeId === pos.id && got.find(r => r.tokenId === o.id).trade === null, 'Trade im fertigen Datensatz verloren');
+    return `Datensatz → Trade ${pos.id} (Order ${b.order.id}) · anderer Coin ohne Trade`;
+  }],
+  ['Datensammler', 'Offen-Grenze: Vorrang TRIGGER > FIRST > RESAMPLE, übersprungene Anlässe gezählt', async () => {
+    const H = makeTestHarness(); const core = await testCore(H, {}, { candidates: { open: 2 } });
+    for (let i = 1; i <= 3; i++) await prepToken(core, H, i);
+    core._t.analyzeAll(); core._t.analyzeAll();
+    const v = core.candidateView();
+    assert(v.open === 2 && v.opened === 2 && v.skipped.cap === 1, 'Grenze 2 bei 3 Coins: ' + JSON.stringify(v));
+    const H2 = makeTestHarness(); const core2 = await testCore(H2, { minScore: 99 }, { candidates: { open: 2 } }), C = core2._t.candState();
+    const a = await prepToken(core2, H2, 1, { liq: 1000 }); core2._t.analyzeAll(); // A: immer abgelehnt (Liquidität)
+    H2.env.advance(31 * MIN); await core2._t.fetchChunk([a.mint], true); core2._t.analyzeAll();
+    assert(C.open.length === 0, 'A nach 30 min nicht abgeschlossen');
+    H2.env.advance(14 * MIN); const c = await prepToken(core2, H2, 2); core2._t.analyzeAll(); // C: abgelehnt (Score) → FIRST
+    H2.env.advance(16 * MIN); await core2._t.fetchChunk([a.mint, c.mint], true);
+    core2.updateSettings({ minScore: defaultSettings().minScore }, 'TEST'); core2._t.analyzeAll(); // A: RESAMPLE fällig · C: kaufwürdig → TRIGGER · 1 Platz frei
+    const v2 = core2.candidateView(), whys = C.open.map(x => x.tokenId === c.id ? x.why : 'A:' + x.why).join();
+    assert(C.open.length === 2 && whys === 'FIRST,TRIGGER' && v2.skipped.resample === 1 && v2.byWhy.RESAMPLE === 0, 'TRIGGER schlägt RESAMPLE nicht: ' + whys + ' ' + JSON.stringify(v2.skipped));
+    return 'Grenze 2: 2 offen, 1 übersprungen · ein freier Platz: TRIGGER vor RESAMPLE';
+  }],
+  ['Datensammler', 'Ohne Option aus: keine Datensätze, keine Verfolger-Anfragen, kein Ereignis', async () => {
+    const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1);
+    const got = []; core.on('candidates', r => got.push(r));
+    core._t.analyzeAll(); core.state.markets.delete(t.id); H.env.advance(31 * MIN);
+    const n0 = H.calls.length;
+    assert(await core._t.candidateRefresh() === 0 && core._t.candidateTick(H.env.now()) === 0 && H.calls.length === n0, 'Verfolger ohne Option aktiv');
+    await prepToken(core, H, 2); core._t.analyzeAll();
+    const v = core.candidateView();
+    assert(!v.enabled && v.open === 0 && v.written === 0 && core._t.candState() === null && core.candidatesFlush('SHUTDOWN') === 0 && !got.length, 'Datensammler ohne Option aktiv: ' + JSON.stringify(v));
+    return 'ohne Option: kein Zustand, keine Anfragen, kein Ereignis';
   }]
 ];
 async function runSelfTests(onProgress) {

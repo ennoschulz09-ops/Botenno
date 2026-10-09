@@ -7,7 +7,7 @@ const path = require('path');
 const vm = require('vm');
 
 const ROOT = path.resolve(__dirname, '..');
-const CORE_FILES = ['js/base.js', 'js/engine.js', 'js/learning.js', 'js/core.js'];
+const CORE_FILES = ['js/base.js', 'js/engine.js', 'js/learning.js', 'js/dataset.js', 'js/core.js'];
 let loaded = null;
 
 function loadCore({ withTests = false } = {}) {
@@ -32,6 +32,8 @@ function loadCore({ withTests = false } = {}) {
     JOURNAL_CAPS: get('JOURNAL_CAPS'),
     perfStats: get('perfStats'),
     RECORD_FLAGS_DE: get('RECORD_FLAGS_DE'),
+    CAND_VERSION: get('CAND_VERSION'),
+    CAND_LABEL: get('CAND_LABEL'),
     runSelfTests: withTests ? get('runSelfTests') : null
   };
   loaded = { api, tests: withTests };
