@@ -27,8 +27,9 @@ th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line
 th { color: var(--dim); font-weight: 500; } td.r, th.r { text-align: right; }
 .tw { overflow-x: auto; }
 .up { color: var(--green); } .dn { color: var(--red); } .mut { color: var(--dim); }
+.days { max-height: 230px; overflow-y: auto; }
 .logs { max-height: 360px; overflow-y: auto; font: 12px/1.4 ui-monospace, Consolas, monospace; }
-.logs div { padding: 2px 0; border-bottom: 1px solid #1f252d; } .lv-WARN { color: var(--yellow); } .lv-ERROR, .lv-CRITICAL { color: var(--red); } .lv-SUCCESS { color: var(--green); }
+.logs div { padding: 2px 0; border-bottom: 1px solid #1f252d; } .lv-WARNING { color: var(--yellow); } .lv-ERROR, .lv-CRITICAL { color: var(--red); } .lv-SUCCESS { color: var(--green); }
 .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
 #msg { margin-left: auto; color: var(--dim); }
 .note { color: var(--dim); font-size: 12px; margin: 6px 0 0; }
@@ -59,6 +60,9 @@ input[type=file] { color: var(--dim); max-width: 100%; }
   <section class="wide"><h2>Letzte Trades</h2><div class="tw" id="trades"></div></section>
   <section><h2>Lern-KI</h2><div id="learn"></div>
     <div class="row"><button data-act="learn-run">▶ Lernlauf jetzt</button></div></section>
+  <section><h2>Kandidaten-Daten (für die KI)</h2><div id="cand"></div>
+    <p class="note">Jeder gescannte Coin wird 30 min verfolgt und nach Kosten bewertet – Trainingsdaten für die spätere KI. Handel und Lern-KI ändern sich dadurch nicht.</p>
+    <div class="tw days" id="candDays"></div></section>
   <section><h2>Überwachung</h2><div id="monitor"></div><div class="tw" id="apis"></div></section>
   <section><h2>Daten & Einstellungen</h2>
     <div class="row"><a class="btn" href="/api/backup">⬇ Voll-Backup herunterladen</a>

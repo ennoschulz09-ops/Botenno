@@ -5,6 +5,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { pipeline } = require('stream');
 
 const STATIC = {
   '/': ['panel/index.html', 'text/html; charset=utf-8'],
@@ -14,8 +15,9 @@ const CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inl
 const MAX_BODY = 64 * 1024 * 1024; // Vollsicherungen können mit großem Lern-Gedächtnis einige MB groß werden
 const EXPORT_KINDS = new Set(['journal-json', 'journal-csv', 'learning-report-csv', 'learning-json', 'experiments-json', 'patterns-json', 'model-registry-json', 'analytics-json', 'logs-json', 'settings-json']);
 
+const HDR = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': CSP };
 function send(res, code, body, type = 'application/json; charset=utf-8', extra = {}) {
-  res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': CSP, ...extra });
+  res.writeHead(code, { 'Content-Type': type, ...HDR, ...extra });
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
 }
 function readBody(req) {
@@ -28,6 +30,39 @@ function readBody(req) {
 }
 const num = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const r2 = v => (num(v) == null ? null : Math.round(v * 100) / 100);
+
+/* ---------- Kandidaten-Daten des Datensammlers (data/candidates/cand-JJJJ-MM-TT.jsonl, schreibt server/bot.js) ---------- */
+const CAND_FILE = /^cand-(\d{4}-\d{2}-\d{2})\.jsonl$/;
+const validDay = d => { if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false; const x = new Date(d + 'T00:00:00Z'); return !isNaN(x) && x.toISOString().slice(0, 10) === d; };
+function candDays(dataDir) { // [{ day, bytes }], neueste zuerst
+  const dir = path.join(dataDir, 'candidates'), out = [];
+  let files; try { files = fs.readdirSync(dir); } catch (e) { return out; } // noch nichts geschrieben
+  for (const f of files) {
+    const m = CAND_FILE.exec(f); if (!m || !validDay(m[1])) continue;
+    try { const st = fs.statSync(path.join(dir, f)); if (st.isFile()) out.push({ day: m[1], bytes: st.size }); } catch (e) { /* gerade entfernt */ }
+  }
+  return out.sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0));
+}
+let candDisk = null; // Plattenplatz für den Status höchstens einmal je Minute neu zählen (Status kommt alle 2 s)
+function candDiskInfo(dataDir, now) {
+  if (candDisk && candDisk.dir === dataDir && now - candDisk.at < 60e3) return candDisk.v;
+  const days = candDays(dataDir), today = days.find(d => d.day === new Date(now).toISOString().slice(0, 10));
+  const total = days.reduce((a, d) => a + d.bytes, 0);
+  const v = { days: days.length, todayBytes: today ? today.bytes : 0, diskBytes: total, diskMB: r2(total / 1048576) };
+  candDisk = { at: now, dir: dataDir, v };
+  return v;
+}
+/* Tagesdatei als Download – nur der Stand beim Abruf (Länge vorab gemessen; der Bot hängt nur ganze Zeilen an). */
+function sendCandFile(res, holder, day) {
+  const file = path.join(holder.dataDir, 'candidates', `cand-${day}.jsonl`);
+  let size = -1; try { const st = fs.statSync(file); if (st.isFile()) size = st.size; } catch (e) { /* fehlt */ }
+  if (size < 0) return send(res, 404, { ok: false, error: 'Keine Kandidaten-Daten für diesen Tag' });
+  res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', ...HDR, 'Content-Length': size, 'Content-Disposition': `attachment; filename="cand-${day}.jsonl"` });
+  if (!size) return res.end();
+  pipeline(fs.createReadStream(file, { start: 0, end: size - 1 }), res, e => {
+    if (e && e.code !== 'ERR_STREAM_PREMATURE_CLOSE') { try { holder.core.log.error('SYSTEM', 'Oberfläche: Kandidaten-Download ' + e.message); } catch (x) { /* egal */ } }
+  });
+}
 
 /* Alles, was die Oberfläche anzeigt, in einer Antwort (Abfrage alle 2 s). */
 function statusOf(holder) {
@@ -52,6 +87,7 @@ function statusOf(holder) {
       champion: lv.champion ? lv.champion.id : null, rules: lv.rulesText, hypotheses: hyp, drift: st.learn.drift ? st.learn.drift.status : 'NOT_ENOUGH_DATA', lastRunAt: st.learn.lastRunAt || null,
       lessons: st.learn.lessons.filter(l => l.status !== 'EXPIRED').slice(0, 6).map(l => ({ kind: l.kind, text: l.text, status: l.status }))
     },
+    candidates: { ...core.candidateView(), ...candDiskInfo(holder.dataDir, now), pending: holder.candPending ? holder.candPending() : 0, cfg: K.CAND_LABEL }, // Datensammler: Zähler seit Start, Plattenplatz, Schreibpuffer, feste Schwellen
     monitor: Object.values(st.monitor.active).map(a => ({ code: a.code, sev: a.sev, msg: a.msg })),
     apis,
     settings: { simCapitalUsd: s.simCapitalUsd, minScore: s.minScore, stopLossPct: s.stopLossPct, maxPositionPct: s.maxPositionPct, maxExposurePct: s.maxExposurePct, maxOpenPositions: s.maxOpenPositions, maxBuysPerCoin: s.maxBuysPerCoin, addOnlyInProfit: s.addOnlyInProfit, realQuotes: s.realQuotes, simLatencyMs: s.simLatencyMs },
@@ -99,6 +135,12 @@ function startPanel(holder, { port, shutdown }) {
         if (!EXPORT_KINDS.has(kind)) return send(res, 400, { ok: false, error: 'Unbekannter Export' });
         const x = holder.core.exportData(kind);
         return send(res, 200, x.data, `${x.mime}; charset=utf-8`, { 'Content-Disposition': `attachment; filename="${x.name}"` });
+      }
+      if (req.method === 'GET' && url.pathname === '/api/candidates') {
+        if (!url.searchParams.has('day')) return send(res, 200, { ok: true, days: candDays(holder.dataDir) });
+        const day = url.searchParams.get('day');
+        if (!validDay(day)) return send(res, 400, { ok: false, error: 'Ungültiger Tag (Format JJJJ-MM-TT)' });
+        return sendCandFile(res, holder, day);
       }
       if (req.method !== 'POST') return send(res, 404, { ok: false, error: 'Nicht gefunden' });
       if (req.headers['x-smartlab'] !== '1') return send(res, 403, { ok: false, error: 'Anfrage ohne Kennung abgelehnt' });
