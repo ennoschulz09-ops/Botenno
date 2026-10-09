@@ -1,8 +1,8 @@
 # Smart Lab – Betrieb auf dem PC (Windows)
 
-Stand: App-Version 2.12.0 (Roadmap C1, PC-Variante). Technischer Hintergrund: `docs/ARCHITEKTUR.md`, Lerndaten: `docs/LERNDATEN.md`.
+Stand: App-Version 2.13.0 (Roadmap C1, PC-Variante; seit 2.13.0 mit Datensammler). Technischer Hintergrund: `docs/ARCHITEKTUR.md`, Lerndaten: `docs/LERNDATEN.md`.
 
-Der PC-Bot ist dieselbe App wie im Browser, nur ohne Browser-Tab: Er läuft rund um die Uhr, solange der PC an ist, und speichert seine Daten als Dateien statt im 5-MB-Speicher des Browsers. Dadurch hat er ein deutlich größeres Lern-Gedächtnis. Bedient wird er über eine einfache Oberfläche im Browser, die nur auf diesem PC erreichbar ist.
+Der PC-Bot ist dieselbe App wie im Browser, nur ohne Browser-Tab: Er läuft rund um die Uhr, solange der PC an ist, und speichert seine Daten als Dateien statt im 5-MB-Speicher des Browsers. Dadurch hat er ein deutlich größeres Lern-Gedächtnis. Seit 2.13.0 sammelt er außerdem für jeden gescannten Coin einen Kandidaten-Datensatz – Trainingsdaten für ein späteres Modell (Abschnitt 8). Bedient wird er über eine einfache Oberfläche im Browser, die nur auf diesem PC erreichbar ist.
 
 Der Handel bleibt **ausschließlich simuliert**. LIVE-Handel und Signieren sind gesperrt wie im Browser, auf dem PC gibt es keine Wallet und keine Schlüssel.
 
@@ -51,7 +51,7 @@ git clone https://github.com/ennoschulz09-ops/Botenno.git C:\SmartLab
 **Starten:** `C:\SmartLab\start-bot.bat` doppelklicken. Es öffnet sich ein schwarzes Fenster, kurz danach der Browser mit der Oberfläche **http://localhost:8787**. Im Fenster steht unter anderem:
 
 ```
-Smart Lab 2.12.0 läuft (echte Marktdaten, simulierter Handel)
+Smart Lab 2.13.0 läuft (echte Marktdaten, simulierter Handel)
 Oberfläche: http://localhost:8787   ·   Daten: C:\SmartLab\data
 Beenden mit Strg+C (speichert vorher alles).
 ```
@@ -81,6 +81,7 @@ Das Schließen des Fensters über das X speichert in der Regel auch, ist aber ni
 | Letzte Trades | die letzten 40 geschlossenen Trades mit Ergebnis, Grund und Coin-Quelle |
 | Lern-KI | gespeicherte Trades, davon gelernt, „Ausgeschlossen (verzerrt)“ mit Gründen, Modell, Drift, aktive Regeln, Hypothesen, „▶ Lernlauf jetzt“ |
 | Überwachung | aktive Anomalien und Zustand der Datenquellen |
+| Kandidaten-Daten (für die KI) | seit 2.13.0: „Offen / Grenze“ (gerade verfolgte Coins, höchstens 1000), „Geschrieben seit Start“, „Qualität ok“ (Anteil mit sauberen Daten), „Verfolger-Abfragen“, Plattenplatz heute und gesamt; Ergebnisse seit Start (TP, SL, RUG, TIME, NO_DATA), übersprungene Coins; darunter je Tag (UTC) eine Datei mit Knopf „⬇ JSONL“ (Abschnitt 8) |
 | Daten & Einstellungen | „⬇ Voll-Backup herunterladen“, „⬇ Lern-Report (CSV)“, „⬇ Journal (JSON)“, „Einstellungen importieren (JSON)“, „Voll-Backup einspielen“, „Frischer Start“, „Bot beenden“ |
 | Protokoll | die letzten 80 Meldungen |
 
@@ -169,6 +170,7 @@ Alles liegt im Ordner `data` im Programmordner (oder im Ordner aus `--data`):
 | `.lock` | Sperrdatei, solange der Bot läuft (verhindert einen zweiten Bot mit denselben Daten) |
 | `logs\bot-JJJJ-MM-TT.log` | ein Protokoll je Tag, alle Meldungen außer DEBUG; Dateien älter als 30 Tage löscht der Bot |
 | `backups\smartlab-backup-JJJJ-MM-TT.json` | tägliche Vollsicherung |
+| `candidates\cand-JJJJ-MM-TT.jsonl` | seit 2.13.0: Kandidaten-Daten, eine Datei je Tag (UTC), wird nie gelöscht und ist nicht im Voll-Backup (siehe unten) |
 
 - Gespeichert wird über eine temporäre Datei und anschließendes Umbenennen. Ein Absturz mitten im Schreiben hinterlässt deshalb keine halbe Datei.
 - Die erste Tagessicherung entsteht etwa 1 Minute nach dem Start, danach alle 6 Stunden; innerhalb eines Tages wird die Datei überschrieben. Die 14 neuesten Dateien bleiben erhalten, ältere löscht der Bot.
@@ -177,7 +179,20 @@ Alles liegt im Ordner `data` im Programmordner (oder im Ordner aus `--data`):
 - Datum im Dateinamen und Zeitstempel in den Protokollen sind in UTC (deutsche Zeit minus 1 bzw. 2 Stunden). Im Fenster steht die Ortszeit.
 - Eine Tagessicherung wird wie jedes Backup über „Voll-Backup einspielen“ zurückgespielt.
 
-**Umzug auf einen anderen PC oder später auf einen Server:** „⬇ Voll-Backup herunterladen“ in der PC-Oberfläche erzeugt dieselbe Art Datei wie „⬇ Voll-Backup (alle Daten)“ im Browser. Sie lässt sich auf einem anderen PC einspielen, im Browser über ⚙ Einstellungen → „Export / Import / Reset“ → „⬆ Backup wiederherstellen“, und ist auch das Übergabeformat für einen späteren Server. Zurück im Browser gilt dessen kleineres Lern-Gedächtnis; ältere Trades fallen dann weg (siehe `docs/LERNDATEN.md`). Den alten Bot nach dem Umzug nicht weiterlaufen lassen.
+**Umzug auf einen anderen PC oder später auf einen Server:** „⬇ Voll-Backup herunterladen“ in der PC-Oberfläche erzeugt dieselbe Art Datei wie „⬇ Voll-Backup (alle Daten)“ im Browser. Sie lässt sich auf einem anderen PC einspielen, im Browser über ⚙ Einstellungen → „Export / Import / Reset“ → „⬆ Backup wiederherstellen“, und ist auch das Übergabeformat für einen späteren Server. Zurück im Browser gilt dessen kleineres Lern-Gedächtnis; ältere Trades fallen dann weg (siehe `docs/LERNDATEN.md`). Die Kandidaten-Daten sind im Voll-Backup nicht enthalten – den Ordner `data\candidates` zusätzlich kopieren (siehe unten). Den alten Bot nach dem Umzug nicht weiterlaufen lassen.
+
+### Kandidaten-Daten (seit 2.13.0)
+
+Der Bot hält jeden Coin, den er scannt, zum Zeitpunkt seiner Entscheidung fest (Kennzahlen, Entscheidung, Kosten), verfolgt den Kurs 30 Minuten lang und notiert danach, wie ein Kauf nach Kosten ausgegangen wäre: Gewinnziel +30 % erreicht (TP), Stop −15 % (SL), Liquidität abgezogen (RUG), nach 30 Minuten ohne Treffer (TIME) oder keine verlässlichen Daten (NO_DATA). Das ist reine Messung: Am Handel, an den Risiko-Limits und an der Lern-KI ändert sich dadurch nichts. Die Daten sind für ein späteres Modell gedacht, das außerhalb der App trainiert wird. Format und Regeln: `docs/LERNDATEN.md`, Abschnitt 9.
+
+- **Ort:** `C:\SmartLab\data\candidates`, eine Datei `cand-JJJJ-MM-TT.jsonl` je Tag (Datum in UTC), eine Textzeile je Coin-Datensatz. Neue Zeilen werden immer nur angehängt.
+- **Größe:** etwa 3–5 KB je Datensatz, grob 15–25 MB am Tag, also etwa 0,5–0,75 GB im Monat. Den aktuellen Plattenplatz zeigt die Oberfläche im Bereich „Kandidaten-Daten (für die KI)“.
+- **Nie automatisch gelöscht:** Anders als bei Protokollen und Tagessicherungen löscht der Bot hier nichts. Wird der Platz knapp, ältere Tage (nicht heute und gestern) auf eine externe Festplatte verschieben – am sichersten bei beendetem Bot. Verschobene Tage verschwinden aus der Liste in der Oberfläche.
+- **Herunterladen:** in der Oberfläche im Bereich „Kandidaten-Daten (für die KI)“ je Tag der Knopf „⬇ JSONL“ (oder http://localhost:8787/api/candidates?day=JJJJ-MM-TT). Die ersten Zeilen entstehen 30 Minuten nach dem Start (oder beim Beenden).
+- **Nicht im Voll-Backup** und nicht in der Tagessicherung, weil die Daten dafür zu groß sind. Für einen Umzug auf einen anderen PC oder Server den ganzen Ordner `data\candidates` kopieren und dort an dieselbe Stelle legen.
+- **Nach einem Neustart:** Beim Beenden („Bot beenden“, Strg+C) und beim Einspielen eines Backups schreibt der Bot die gerade verfolgten Coins vorzeitig weg. Diese Zeilen tragen das Kennzeichen TRUNCATED („abgeschnitten“) und meist das Ergebnis NO_DATA, weil die 30 Minuten nicht voll wurden. Das ist normal und kein Fehler; fürs Training zählen solche Zeilen nicht. Nach dem Start beginnt die Verfolgung neu. Bei einem harten Abbruch (Stromausfall, Fenster über das X geschlossen) gehen die Coins der letzten 30 Minuten verloren. Deshalb gilt auch hier: möglichst selten und immer sauber beenden.
+- **Zusätzliche Abfragen:** Für Coins, die der Scanner aus seiner Liste verdrängt hat, fragt der Bot die Kurse selbst bei DexScreener nach. Er lässt dabei immer mindestens 60 Abfragen pro Minute für den Scanner frei.
+- Die Kandidaten-Daten enthalten nur Marktdaten und Entscheidungen des Bots, keine Einstellungen, RPC-Adressen oder Schlüssel.
 
 ## 9. Häufige Fehler
 
@@ -202,11 +217,12 @@ Alles liegt im Ordner `data` im Programmordner (oder im Ordner aus `--data`):
 - Der Handel ist **nur simuliert**. LIVE-Handel und Signieren sind gesperrt; auf dem PC gibt es keine Wallet, keine Seed-Phrase und keine privaten Schlüssel.
 - Der Ordner `data` und alle Backups enthalten die Einstellungen inklusive selbst eingetragener RPC-Adressen und eines eventuell eingetragenen Jupiter-API-Keys. Nicht weitergeben und nicht öffentlich hochladen. Der Ordner `data` ist von Git ausgeschlossen.
 
-## 11. Grenzen der Übergangs-Oberfläche (2.12.0)
+## 11. Grenzen der Übergangs-Oberfläche (2.13.0)
 
 Die PC-Oberfläche deckt den Betrieb ab, ist aber bewusst einfach gehalten. Noch nicht enthalten:
 
 - ein Einstellungs-Editor (Einstellungen nur per Datei-Import, Abschnitt 6),
 - eine Umstellung des Modus (der Modus kommt aus dem eingespielten Backup),
 - Teilverkäufe (der Knopf „Verkaufen“ verkauft die ganze Position),
+- eine Auswertung der Kandidaten-Daten (die Oberfläche zählt sie nur und bietet sie zum Download an),
 - die Analyse-Ansichten der Browser-App (Scanner, Charts, Backtest, Lern-Details). Für Auswertungen die Exporte nutzen. Ein Backup des PC-Bots nicht nebenher in die Browser-App einspielen: Diese würde sofort selbst weiterhandeln bzw. offene Positionen verkaufen.
