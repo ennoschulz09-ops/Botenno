@@ -1,6 +1,7 @@
 # Strategie: Ziel, Stand, Weg
 
-Stand: 2026-10-02 · App-Version 2.12.0. Dieses Dokument ist der Kontext für jede Weiterentwicklung. Wer Code schreibt, prüft
+Stand: 2026-10-09 · App-Version 2.13.0 (Phase 1 „Daten“, Schritt 1 umgesetzt: Kandidaten-Labels, Abschnitt 7).
+Dieses Dokument ist der Kontext für jede Weiterentwicklung. Wer Code schreibt, prüft
 die Änderung gegen die Leitplanken in Abschnitt 8. Technische Details: `docs/ARCHITEKTUR.md`, Lerndaten: `docs/LERNDATEN.md`.
 
 ## 1. Endziel
@@ -37,14 +38,14 @@ Signieren technisch gesperrt.
 
 Das deckt sich mit der Roadmap: C2 (Datensammler), C3 (Replay-Backtest), C4 (Varianten), C5 (zentrale Lern-KI), D1–D6.
 
-## 2. Bewertung des Stands (2.12.0)
+## 2. Bewertung des Stands (2.12.0, ergänzt 2.13.0)
 
 | Bereich | Bewertung | Begründung |
 |---|---|---|
-| Sicherheit & Fundament | stark | LIVE gesperrt, 81 Selbsttests, 10 E2E-Suiten, CI bei jedem PR, Backups, PC-Betrieb |
+| Sicherheit & Fundament | stark | LIVE gesperrt, 91 Selbsttests (2.13.0), 10 E2E-Suiten, CI bei jedem PR, Backups, PC-Betrieb |
 | Ehrliche Messung | gut | echte Jupiter-Angebote, Wartezeit, gescheiterte Transaktionen, Gebühren (2.11.0); verzerrte Trades fürs Lernen ausgeschlossen (2.12.0) |
 | Lern-Logik | solide, noch keine „KI“ | Statistik mit Schutz vor Überanpassung (Train/Validation/Test, Walk-Forward, Shadow, nur verschärfend, Rollback); für die Datenmenge angemessen |
-| Datenmenge | schwach | 35 saubere von 100 gespeicherten Trades; belastbare Aussagen brauchen Hunderte bis Tausende |
+| Datenmenge | schwach | 35 saubere von 100 gespeicherten Trades; belastbare Aussagen brauchen Hunderte bis Tausende. Seit 2.13.0 schreibt der PC-Bot für jeden gescannten Coin einen Kandidaten-Datensatz mit Label nach Kosten – die Menge wächst, eine Auswertung steht noch aus |
 | Datenquellen | schwach | Polling; DexScreener-Boosts sind bezahlte Werbung (Negativauslese); Grenzen je Minute: DexScreener Discovery 50, Pairs 240, GeckoTerminal 25, RugCheck 20, Jupiter 50, öffentliches RPC 60 (`js/core.js`); keine Echtzeit, keine Wallet-/Halter-Analyse, Kerzen nur für offene Positionen |
 | Nachweis von Gewinn | keiner | in früheren Daten fiel das Sim-Kapital von 1.000 $ auf rund 220 $ (teils durch verzerrte Trades); Stops endeten im Median bei −20 % statt der geplanten −15 % |
 
@@ -70,9 +71,11 @@ finden. Ab jetzt haben Daten und Nachweis Vorrang vor Oberfläche und Komfort.
 
 **Mehr Lerndaten ohne mehr Trades (wichtigster Punkt)**
 - Jeden gescannten Kandidaten labeln: Was wäre nach Kosten passiert, z. B. „+30 % vor −15 % innerhalb von 30 min“
-  (Triple-Barrier-Labeling). Aus Dutzenden Trades werden Zehntausende Beispiele. Das Near-Miss-Tracking ist der Anfang.
+  (Triple-Barrier-Labeling). Aus Dutzenden Trades werden Zehntausende Beispiele. Das Near-Miss-Tracking war der Anfang;
+  seit 2.13.0 umgesetzt als Datensammler auf dem PC (`js/dataset.js`, Format und Regeln in `docs/LERNDATEN.md`, Abschnitt 9).
 
-**Speicher:** SQLite oder Parquet, sobald Aufzeichnungen dazukommen (JSON-Dateien reichen dafür nicht).
+**Speicher:** seit 2.13.0 als Zwischenlösung eine JSONL-Datei je Tag (`data/candidates/`, nicht im Voll-Backup); SQLite oder
+Parquet, sobald die Datenmenge wächst bzw. Momentaufnahmen für das Replay dazukommen.
 
 ## 4. KI-Ansatz
 
@@ -131,6 +134,18 @@ lohnt sich trotzdem (Können, Infrastruktur), und die Quote lässt sich erhöhen
 **Phasen:** Daten (Echtzeit, Blockchain-Merkmale, Aufzeichnung, Kandidaten-Labels, SQLite) → Messen (Replay der echten Logik,
 Kontrollgruppe) → Modell (Meta-Labeling, Python-Training, strikte Validierung) → Varianten, Bandit, Feedback-Loop →
 Mini-Echtgeld nach den Gates der Stufe E.
+
+**Stand der Phasen (2.13.0):** Phase 1 „Daten“, Schritt 1 ist umgesetzt: Kandidaten-Labels. Der PC-Bot hält jeden
+gescannten Coin zum Entscheidungszeitpunkt fest, verfolgt ihn 30 Minuten (auch nach Verdrängung aus dem Scanner) und labelt
+ihn nach Kosten (+30 % / −15 % / Liquidität −40 % / Zeit, feste Referenzgröße 50 $), mit Qualitätskennzeichen und offline
+nachrechenbar. Handel, Risiko-Limits und Lern-KI sind unverändert. Nächste Schritte:
+
+1. Erste Auswertung der Labels, bevor ein Modell entsteht: Basisrate nach Kosten, Anteil NO_DATA/VANISHED, Vergleich
+   kaufwürdiger und aussortierter Coins (Hinweise in `docs/LERNDATEN.md`, Abschnitt 9.8).
+2. Mehr Datenquellen und Blockchain-Merkmale im Rahmen kostenloser Kontingente (Halter-Verteilung, Dev-Wallet, LP-Status,
+   Käufer/Verkäufer je Minute), mit Zeitstempel, Quelle und Datenalter.
+3. SQLite oder Parquet, sobald die Datenmenge wächst.
+4. Replay der echten Entscheidungslogik auf aufgezeichneten Daten (C3) als Grundlage für Kontrollgruppe und Sub-Bots.
 
 ## 8. Leitplanken für jeden Code
 

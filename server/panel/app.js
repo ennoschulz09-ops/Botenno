@@ -11,9 +11,10 @@ const cls = v => (isNum(v) ? (v >= 0 ? 'up' : 'dn') : '');
 const time = ts => (ts ? new Date(ts).toLocaleTimeString('de-DE') : '—');
 const dt = ts => (ts ? new Date(ts).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
 const age = ms => (!isNum(ms) ? '—' : ms < 60e3 ? Math.round(ms / 1e3) + ' s' : ms < 3600e3 ? Math.round(ms / 60e3) + ' min' : (ms / 3600e3).toFixed(1) + ' h');
+const size = v => (!isNum(v) ? '—' : v < 1048576 ? Math.round(v / 1024).toLocaleString('de-DE') + ' KB' : (v / 1048576).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' MB');
 const kpi = (k, v, c = '') => `<div class="kpi"><small>${esc(k)}</small><b class="${c}">${v}</b></div>`;
 const table = (head, rows) => (rows.length ? `<table><thead><tr>${head.map(h => `<th class="${h.r ? 'r' : ''}">${esc(h.t || h)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>` : '<p class="mut">keine</p>');
-let last = null, busy = false;
+let last = null, busy = false, daysAt = 0, daysN = -1;
 
 function msg(text, bad) { const m = $('msg'); m.textContent = text; m.style.color = bad ? '#ffb4b4' : ''; }
 async function post(url, body, type = 'application/json') {
@@ -59,10 +60,31 @@ function render(s) {
     ${L.excluded ? `<p class="note">Nicht gelernt: ${Object.entries(L.byFlag).map(([k, n]) => `${n}× ${esc(k)}`).join(' · ')}</p>` : ''}
     <p class="note">Aktive gelernte Regeln: ${L.rules.length ? L.rules.map(esc).join(' · ') : 'keine'} · Hypothesen: ${hyp} · letzter Lernlauf ${time(L.lastRunAt)}</p>
     ${L.lessons.length ? `<ul class="note">${L.lessons.map(l => `<li>${esc(l.kind === 'AVOID' ? 'Meiden' : 'Gut')}: ${esc(l.text)} (${esc(l.status)})</li>`).join('')}</ul>` : ''}`;
+  renderCand(s.candidates);
+  if (s.candidates && (s.candidates.days !== daysN || Date.now() - daysAt > 60e3)) { daysN = s.candidates.days; loadDays(); }
   $('monitor').innerHTML = s.monitor.length ? s.monitor.map(a => `<p><span class="chip ${a.sev === 'WARN' ? 'warn' : 'bad'}">${esc(a.sev)}</span> <b>${esc(a.code)}</b> – ${esc(a.msg)}</p>`).join('') : '<p class="mut">Keine Auffälligkeiten.</p>';
   $('apis').innerHTML = table(['Quelle', 'Status', { t: 'Latenz', r: 1 }, 'Letzter Fehler'], s.apis.map(a => `<tr><td>${esc(a.name)}</td><td><span class="chip ${a.status === 'ONLINE' ? 'ok' : a.status === 'OFFLINE' ? 'bad' : 'warn'}">${esc(a.status)}</span></td><td class="r">${isNum(a.latency) ? a.latency + ' ms' : '—'}</td><td class="mut">${esc(a.lastError)}</td></tr>`));
   $('logs').innerHTML = s.logs.map(e => `<div class="lv-${esc(e.level)}">${time(e.ts)} ${esc(e.level)} ${esc(e.category)} – ${esc(e.message)}</div>`).join('');
   $('datainfo').textContent = `Daten: ${s.dataDir} · tägliche Sicherung: ${s.lastBackup || 'noch keine (erste nach 1 min)'} · Version ${s.app}`;
+}
+
+/* Datensammler: Zähler seit dem Start des Bots; die Tagesdateien liegen in data/candidates (eine JSON-Zeile je Kandidat). */
+function renderCand(C) {
+  if (!C || !C.enabled) { $('cand').innerHTML = '<p class="mut">Datensammler ist aus.</p>'; return; }
+  const by = C.byLabel || {}, sk = C.skipped || {}, F = C.follower || {}, g = C.cfg || {};
+  $('cand').innerHTML = `<div class="kpis">${kpi('Offen / Grenze', `${esc(C.open)} / ${esc(C.cap)}`)}${kpi('Geschrieben seit Start', esc(C.written) + (C.pending ? ` <span class="chip warn">${esc(C.pending)} warten</span>` : ''))}${kpi('Qualität ok', isNum(C.okPct) ? esc(Math.round(C.okPct)) + ' %' : '—')}${kpi('Verfolger-Abfragen', esc(F.requests || 0))}${kpi('Festplatte heute', esc(size(C.todayBytes)))}${kpi(`Festplatte gesamt (${C.days} Tag${C.days === 1 ? '' : 'e'})`, esc(size(C.diskBytes)))}</div>
+    ${C.pending ? `<p class="note">${esc(C.pending)} Zeile(n) konnten noch nicht gespeichert werden (Datei gesperrt oder Festplatte voll) – nächster Versuch beim nächsten Schreiben, siehe Protokoll.</p>` : ''}
+    <p class="note">Ergebnisse seit Start: ${['TP', 'SL', 'RUG', 'TIME', 'NO_DATA'].map(y => `${esc(y)} ${esc(by[y] || 0)}`).join(' · ')}</p>
+    <p class="note mut">TP = zuerst +${esc(g.tpPct)} % · SL = zuerst −${esc(g.slPct)} % · RUG = Liquidität −${esc(Math.abs(g.rugLiqPct))} % · TIME = keine Schwelle in ${esc(g.horizonMin)} min · NO_DATA = zu wenige Kurse</p>
+    <p class="note">Übersprungen: Daten ${esc(sk.data || 0)} · Grenze ${esc(sk.cap || 0)} · Resample ${esc(sk.resample || 0)} · Verfolger: ${esc(F.mints || 0)} Coins abgefragt, ${esc(F.empty || 0)} ohne Pool, ${esc(F.errors || 0)} Fehler</p>`;
+}
+async function loadDays() { // Tagesliste mit Downloads (höchstens einmal je Minute oder wenn ein neuer Tag dazukommt)
+  daysAt = Date.now();
+  try {
+    const d = (await (await fetch('/api/candidates', { cache: 'no-store' })).json()).days || [];
+    $('candDays').innerHTML = d.length ? table(['Tag (UTC)', { t: 'Größe', r: 1 }, ''], d.map(x => `<tr><td>${esc(x.day)}</td><td class="r">${esc(size(x.bytes))}</td><td><a class="btn" href="/api/candidates?day=${esc(encodeURIComponent(x.day))}">⬇ JSONL</a></td></tr>`))
+      : '<p class="note">Noch keine Tagesdatei – die ersten Datensätze entstehen nach 30 min (oder beim Beenden des Bots).</p>';
+  } catch (e) { /* nächster Versuch mit dem nächsten Status */ }
 }
 
 async function refresh() {

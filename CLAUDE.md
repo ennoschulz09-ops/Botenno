@@ -27,17 +27,18 @@ eingerechnet, nur `learnable` Daten, keine Verbesserung ohne Messung gegen Kontr
 ## Struktur
 
 - `index.html`: HTML, CSS, Login-Gate (inline); lädt die Module in fester Reihenfolge, jeweils mit `?v=APP_VERSION`.
-- `js/`: klassische Skripte ohne Build-Schritt mit gemeinsamem globalem Gültigkeitsbereich, Reihenfolge `base.js` → `engine.js` → `learning.js` → `core.js` → `selftest.js` → `ui.js`. Kein `import`/`export`; neue globale Namen müssen über alle Dateien eindeutig sein.
+- `js/`: klassische Skripte ohne Build-Schritt mit gemeinsamem globalem Gültigkeitsbereich, Reihenfolge `base.js` → `engine.js` → `learning.js` → `dataset.js` → `core.js` → `selftest.js` → `ui.js`. Kein `import`/`export`; neue globale Namen müssen über alle Dateien eindeutig sein.
   - `base.js`: Konstanten (`APP_VERSION`), Utils, Logger, Settings (`SETTINGS_SCHEMA`), Storage, HTTP, Normalisierung, Security, Blocker
   - `engine.js`: Analyse, Strategien, Decision Engine, Regime, Analytics, Backtest
   - `learning.js`: Lern-KI als reine Funktionen, Datenqualität (`recordQuality`, `learnable`), `LEARN_CAPS`
+  - `dataset.js`: Datensammler (Schicht „Sammeln“) als reine Funktionen: Kandidaten-Datensätze, Label nach Kosten, Datenqualität (`cand*`, `CAND_VERSION`, `CAND_LABEL`)
   - `core.js`: `createCore` – Scanner, Ausführung, Trade-Lanes, Positionen, Risiko, Lern-Orchestrierung, Migrationen, Persistenz, Backup
   - `selftest.js`: Mock-Harness und Selbsttests (`SELF_TESTS`)
   - `ui.js`: Oberfläche – die einzige Datei, die das DOM benutzen darf
-- `base.js` bis `core.js` laufen auch unter Node.js und müssen DOM-frei bleiben; Seiteneffekte nur über `env` (Uhr, `fetch`, Timer, Zufall) und das Speicher-Backend.
-- `server/`: PC-Bot, nur Node-Bordmittel – `bot.js` (Start, Optionen, `PC_LEARN_CAPS`), `load-core.js` (lädt `js/` per `vm`; neue Kern-Funktionen für den Server dort im `api`-Objekt oder über das Rückgabeobjekt von `createCore` freigeben), `store.js` (Datei-Speicher, Sperre, Tagessicherung), `panel.js` + `panel/` (Oberfläche auf 127.0.0.1), `selftest.js`.
+- `base.js` bis `core.js` (inkl. `dataset.js`) laufen auch unter Node.js und müssen DOM-frei bleiben; Seiteneffekte nur über `env` (Uhr, `fetch`, Timer, Zufall) und das Speicher-Backend.
+- `server/`: PC-Bot, nur Node-Bordmittel – `bot.js` (Start, Optionen, `PC_LEARN_CAPS`, `PC_CANDIDATES` + JSONL nach `data/candidates/`), `load-core.js` (lädt `js/` per `vm`; neue Kern-Funktionen für den Server dort im `api`-Objekt oder über das Rückgabeobjekt von `createCore` freigeben), `store.js` (Datei-Speicher, Sperre, Tagessicherung), `panel.js` + `panel/` (Oberfläche auf 127.0.0.1), `selftest.js`.
 - `tests/e2e/`: `check-syntax.js`, `run-all.js` (Liste der Suiten), einzelne Suiten, `mock.js` (Mock-Netz, auch für `--mock`), `env.js`.
-- `docs/`: `STRATEGIE.md` (Ziel, Bewertung, Weg, Leitplanken), `ARCHITEKTUR.md` (Architektur, Änderungsprotokoll), `ABSCHLUSSBERICHT.md` (Bericht, Release-Checkliste), `PC-BETRIEB.md` (Anleitung für den Nutzer), `LERNDATEN.md` (Backup-Format, Datenqualität, Hinweise für Modelle).
+- `docs/`: `STRATEGIE.md` (Ziel, Bewertung, Weg, Leitplanken), `ARCHITEKTUR.md` (Architektur, Änderungsprotokoll), `ABSCHLUSSBERICHT.md` (Bericht, Release-Checkliste), `PC-BETRIEB.md` (Anleitung für den Nutzer), `LERNDATEN.md` (Backup-Format, Datenqualität, Kandidaten-Datensätze, Hinweise für Modelle).
 - `start-bot.bat`: Windows-Start; Zeilenenden CRLF beibehalten (`.gitattributes`).
 
 ## Befehle
@@ -65,3 +66,5 @@ node server/bot.js --mock --data <tmp> --port 8790  # PC-Bot mit Testdaten ohne 
 - Backups aus einer neueren App-Version lassen sich nicht in eine ältere einspielen. Der Nutzer aktualisiert den PC-Bot per ZIP oder `git pull`; `data/` bleibt dabei erhalten.
 - Bekannte Lücken der PC-Oberfläche: kein Einstellungs-Editor, keine Modus-Umstellung, keine Teilverkäufe (`docs/PC-BETRIEB.md`, Abschnitt 11).
 - `JOURNAL_CAPS` (js/core.js) und `LEARN_CAPS` (js/learning.js) sind die Browser-Grenzen; `server/bot.js` hebt beide für den PC an. Das Datei-Backend setzt `noRotate` – auf dem PC wird nie gekürzt gespeichert.
+- Datensammler: Option je Kern-Instanz `createCore({ …, candidates: { open: 1000 } })`, nur der PC-Bot setzt sie; im Browser, in normalen Tests und im Prüfkern beim Wiederherstellen fehlt sie (dann ganz aus). Keine Einstellung, kein Einfluss auf Handel, Risiko oder Lern-KI. Label-Regeln (`CAND_LABEL`) und Kosten-Referenzgröße (50 $) sind fest; ein geändertes Zeilenformat braucht ein neues `CAND_VERSION`. Selbsttests: `node server/selftest.js Datensammler`.
+- Kandidaten-Datensätze (`data/candidates/*.jsonl`) sind Rohdaten: nie löschen oder kürzen, nicht im Voll-Backup. Tests, die JSONL schreiben, nie mit `data/` laufen lassen, sondern immer mit eigenem `--data`-Ordner. Format und Hinweise für Modelle: `docs/LERNDATEN.md`, Abschnitt 9.

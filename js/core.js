@@ -1,8 +1,8 @@
 /* Smart Lab – core.js
    Kern (createCore): Scanner · Ausführung · Positionen · Portfolio · Risiko · Lern-Orchestrierung · Persistenz
    Klassisches Skript ohne Build-Schritt: alle Dateien teilen sich den globalen Gültigkeitsbereich und werden in fester
-   Reihenfolge geladen (index.html bzw. server/load-core.js): base → engine → learning → core → selftest → ui.
-   base, engine, learning, core und selftest laufen auch ohne Browser (Node.js); nur ui.js braucht das DOM. */
+   Reihenfolge geladen (index.html bzw. server/load-core.js): base → engine → learning → dataset → core → selftest → ui.
+   base, engine, learning, dataset, core und selftest laufen auch ohne Browser (Node.js); nur ui.js braucht das DOM. */
 'use strict';
 
 /* ============================== CORE: Scanner · Execution · Positionen · Portfolio · Risk State ==============================
@@ -962,6 +962,7 @@ function createCore(opts) {
       if (ord.quote) { ord.quote.fillSource = fq.source; ord.quote.latencyApplied = run.latencyApplied; }
       const leadId = lead || D.strategy;
       applyBuyFill(t, ord, A, D, { price: fillPrice, refPrice: price, qty, size, fees, impact, lead: leadId, decimals: fq.decimals, source: fq.source });
+      if (coll) { try { candidateTrade(tokenId, ord.id); } catch (e) { log.error('SCANNER', 'Datensammler: ' + e.message); } }
       state.risk.buyCount[tokenId] = buyNo;
       state.risk.buyTimes = state.risk.buyTimes.filter(x => env.now() - x < DAY); state.risk.buyTimes.push(env.now());
       state.risk.dailyTrades++;
@@ -1327,6 +1328,7 @@ function createCore(opts) {
     state.regime = computeRegime(analyses, solT);
     try { shadowDecisions(now); } catch (e) { log.error('LEARNING', 'Shadow-Bewertung: ' + e.message); }
     try { nearMissTick(now); } catch (e) { log.error('LEARNING', 'Near-Miss-Tracking: ' + e.message); }
+    if (coll) { try { candidateTick(now); } catch (e) { log.error('SCANNER', 'Datensammler: ' + e.message); } } // nur mit Option candidates
   }
   function runAlerts() {
     const s = S();
@@ -1426,6 +1428,7 @@ function createCore(opts) {
       http.tick();
       await discovery();
       await Promise.all([fetchMarket(), updateSolPrice()]);
+      if (coll) candidateRefresh().catch(e => noteApiError('dexPairs', e)); // Datensammler-Verfolger: läuft nebenher, wartet nicht
       await crossCheck();
       rpcPing().catch(e => noteApiError('rpc', e));
       ohlcvForPositions();
@@ -2076,6 +2079,131 @@ function createCore(opts) {
       changed = true;
     }
     if (changed) touch('learning'); // Zwischenstände laufender Beobachtungen werden mit dem nächsten Speichern mitgenommen
+  }
+
+  /* ---------- DATENSAMMLER: alle Kandidaten labeln (js/dataset.js, nur mit Option candidates) ----------
+     Reine Messung: liest Analyse, Entscheidung und Kurse – verändert weder Handel, Risiko, Lern-KI noch Einstellungen und
+     wird nicht gespeichert (Persistenz macht der Aufrufer). Ohne Option (Browser, Tests, Prüfkern beim Wiederherstellen) ganz
+     aus: kein Zustand, keine Anfragen. Fertige Datensätze: ein Batch je Scan über emit('candidates', recs) (PC-Bot → JSONL).
+     Pro Scan ein Durchlauf: (1) offene Datensätze mit frischen Scanner-Kursen fortschreiben (2) nach 30 min abschließen
+     (3) neue öffnen – FIRST (erste Sichtung), RESAMPLE (je Coin alle 60 min), TRIGGER (Coin wird kaufwürdig). */
+  const collCfg = opts.candidates ? { ...CAND_DEFAULTS, ...Object.fromEntries(['open', 'reserve'].filter(k => isNum(opts.candidates[k]) && opts.candidates[k] >= 0).map(k => [k, opts.candidates[k]])) } : null;
+  const coll = collCfg && {
+    open: [], byToken: new Map(), busy: false, lastReq: 0, lastPrune: 0,
+    stats: { opened: 0, written: 0, ok: 0, byWhy: { FIRST: 0, RESAMPLE: 0, TRIGGER: 0 }, byLabel: Object.fromEntries(CAND_Y.map(y => [y, 0])), skipped: { data: 0, cap: 0, resample: 0 }, follower: { requests: 0, mints: 0, empty: 0, errors: 0, lastAt: 0 } }
+  };
+  function candDone(c, now, end) {
+    const rec = candFinish(c, now, end), st = coll.stats, b = coll.byToken.get(c.tokenId);
+    if (b && b.trig === c.id) b.trig = null;
+    st.written++; st.byLabel[rec.label.y] = (st.byLabel[rec.label.y] || 0) + 1; if (rec.quality.ok) st.ok++;
+    return rec;
+  }
+  function candidateTick(now) {
+    if (!coll) return 0;
+    const Hms = CAND_LABEL.horizonMin * MIN;
+    for (const c of coll.open) {
+      const t = state.markets.get(c.tokenId); if (!t) continue; // verdrängt → Verfolger (candidateRefresh)
+      if (t.noPair >= collCfg.vanishMisses) c._.misses = Math.max(c._.misses, t.noPair);
+      const sn = t.snap;
+      if (sn && sn.source === 'dexscreener') candObserve(c, { at: sn.fetchedAt, price: sn.priceUsd, liq: sn.liquidityUsd, pair: sn.pairAddress, ext: false });
+    }
+    const recs = [], keep = [];
+    for (const c of coll.open) if (now >= c.t0 + Hms) recs.push(candDone(c, now, 'HORIZON')); else keep.push(c);
+    if (recs.length) { coll.open = keep; emit('candidates', recs); }
+    candidateOpen(now);
+    if (now - coll.lastPrune >= 10 * MIN) { // Merkliste je Coin begrenzen: nach einem Tag ohne Datensatz vergessen
+      coll.lastPrune = now;
+      for (const [k, b] of coll.byToken) if (!b.trig && now - Math.max(b.at, b.lastBase || 0, b.lastTrig) > DAY) coll.byToken.delete(k);
+    }
+    return recs.length;
+  }
+  function candidateOpen(now) {
+    const s = S(), st = coll.stats, cap = collCfg.open, staleMs = s.staleAfterSec * SEC, want = [];
+    for (const t of state.markets.values()) {
+      const A = t.A, D = t.D; if (!A || !D) continue;
+      let b = coll.byToken.get(t.id);
+      const base = !b || b.lastBase == null ? 'FIRST' : now - b.lastBase >= collCfg.resampleMin * MIN ? 'RESAMPLE' : null;
+      const trig = !D.analysisBlockers.length && (!b || (!b.trig && now - b.lastTrig >= collCfg.triggerGapMin * MIN));
+      if (!base && !trig) continue;
+      if (!b) coll.byToken.set(t.id, b = { at: now, lastBase: null, lastTrig: 0, trig: null, skipData: false });
+      const sn = t.snap; // nur mit frischem DexScreener-Kurs öffnen (Einstiegskurs = Analysekurs dieses Abrufs)
+      if (!(sn && sn.source === 'dexscreener' && A.core.source === 'dexscreener' && A.core.fetchedAt === sn.fetchedAt && isNum(A.core.price) && A.core.price > 0 && now - sn.fetchedAt <= staleMs)) {
+        if (!b.skipData) { b.skipData = true; st.skipped.data++; } // einmal je Anlass zählen, nicht je Scan
+        continue;
+      }
+      want.push({ t, b, why: base || 'TRIGGER', trig, prio: trig ? 0 : base === 'FIRST' ? 1 : 2, h: hashStr(t.id + ':' + now) });
+    }
+    if (!want.length) return 0;
+    want.sort((x, y) => x.prio - y.prio || x.h - y.h); // Vorrang TRIGGER > FIRST > RESAMPLE, sonst gemischt (kein Vorteil für früh entdeckte Coins), deterministisch
+    const ctx = { now, regimeTags: state.regime.tags, mode: state.mode, paramVersion: state.activeParam, modelVersion: state.models.champion || null, app: APP_VERSION, refUsd: collCfg.refUsd,
+      settingsHash: hashStr(PARAM_TABLE_KEYS.map(k => k + '=' + JSON.stringify(s[k])).join('|')).toString(36), solUsd: state.sol ? state.sol.usd : null, prioLamports: prioLamportsNow(), dexFeePct: s.dexFeePct };
+    let opened = 0;
+    for (const w of want) {
+      const b = w.b;
+      if (coll.open.length >= cap || (w.prio === 2 && coll.open.length >= cap * 0.8)) { // kein Platz: Anlass gilt als übersprungen
+        st.skipped[w.prio === 2 ? 'resample' : 'cap']++;
+        if (w.why !== 'TRIGGER') b.lastBase = now;
+        if (w.trig) b.lastTrig = now;
+        continue;
+      }
+      const c = candOpen(w.t, w.t.A, w.t.D, { ...ctx, why: w.why, seen: state.seen[w.t.id] || null, quoteCheck: w.t.quoteCheck || null });
+      coll.open.push(c); st.opened++; st.byWhy[w.why]++; opened++;
+      if (w.why !== 'TRIGGER') b.lastBase = now;
+      if (w.trig) { b.lastTrig = now; b.trig = c.id; } // ein kaufwürdiger FIRST/RESAMPLE zählt zugleich als TRIGGER (kein Doppel)
+      b.skipData = false;
+    }
+    return opened;
+  }
+  /* Verfolger für verdrängte Coins (sonst fehlen gerade Dumps und Rugs): eigene Abfrage desselben DexScreener-Endpunkts, nie
+     applySnapshot/ensureToken (Coin kommt nicht zurück in den Scanner). Nur online, eine Anfrage gleichzeitig, ≥ 2 s Abstand,
+     ≥ 60 Anfragen/min Reserve für den Scanner. Kein Pool in der Antwort → Fehlzähler (3× → VANISHED). */
+  async function candidateRefresh() {
+    if (!coll || coll.busy) return 0;
+    const now = env.now(), cfg = collCfg, staleMs = S().staleAfterSec * SEC, src = http.sources.dexPairs;
+    if (now - coll.lastReq < cfg.followGapMs || http.status('dexPairs') === 'OFFLINE' || (src && now < src.backoffUntil) || http.remaining('dexPairs') < cfg.reserve) return 0;
+    const need = new Map();
+    for (const c of coll.open) {
+      if (c._.misses >= cfg.vanishMisses || now - c._.lastAt < cfg.followAfterSec * SEC) continue;
+      const t = state.markets.get(c.tokenId);
+      if (t && t.snap && now - t.snap.fetchedAt <= staleMs) continue; // Scanner liefert frische Kurse
+      const g = need.get(c.mint); if (g) { g.recs.push(c); g.at = Math.min(g.at, c._.lastAt); } else need.set(c.mint, { recs: [c], at: c._.lastAt });
+    }
+    if (!need.size) return 0;
+    const mints = [...need.entries()].sort((a, b) => a[1].at - b[1].at || (a[0] < b[0] ? -1 : 1)).slice(0, cfg.maxBatch).map(e => e[0]); // am längsten ohne Kurs zuerst
+    const F = coll.stats.follower; F.requests++; F.mints += mints.length; F.lastAt = now;
+    coll.busy = true; coll.lastReq = now;
+    try {
+      const r = await http.request('dexPairs', DEX_API + '/tokens/v1/solana/' + mints.join(','), { cacheMs: 0, validate: listValidator });
+      const snaps = arr(r.data).map(p => normDexPair(p, r.fetchedAt, null)).filter(Boolean);
+      let applied = 0;
+      for (const m of mints) {
+        const recs = need.get(m).recs.filter(c => !c._.done);
+        if (!snaps.some(sn => sn.mint === m && isNum(sn.priceUsd))) { F.empty++; for (const c of recs) c._.misses++; continue; }
+        for (const c of recs) { const pk = candPickPair(snaps, m, c.pair); if (pk && candObserve(c, { at: pk.snap.fetchedAt, price: pk.snap.priceUsd, liq: pk.snap.liquidityUsd, pair: pk.snap.pairAddress, ext: true })) applied++; }
+      }
+      return applied;
+    } catch (e) { F.errors++; noteApiError('dexPairs', e); return 0; }
+    finally { coll.busy = false; }
+  }
+  /* Kauf ausgeführt → offene Datensätze dieses Coins mit dem Trade verknüpfen (der erste Kauf zählt). */
+  function candidateTrade(tokenId, orderId) {
+    const pos = openPos(tokenId); if (!pos) return;
+    for (const c of coll.open) if (c.tokenId === tokenId && !c.trade) c.trade = { tradeId: pos.id, orderId, at: env.now() };
+  }
+  /* Beenden/Wiederherstellen: alle offenen Datensätze vorzeitig abschließen (end SHUTDOWN|RELOAD, TRUNCATED ohne vollen Horizont),
+     ein Batch – der Aufrufer schreibt ihn weg. Gibt die Anzahl zurück (zweiter Aufruf → 0). */
+  function candidatesFlush(reason) {
+    if (!coll || !coll.open.length) return 0;
+    const now = env.now(), end = reason === 'RELOAD' ? 'RELOAD' : 'SHUTDOWN';
+    const recs = coll.open.map(c => candDone(c, now, end)); coll.open = [];
+    emit('candidates', recs);
+    log.info('SCANNER', `Datensammler: ${recs.length} offene Kandidaten vorzeitig abgeschlossen (${end})`);
+    return recs.length;
+  }
+  function candidateView() {
+    if (!coll) return { enabled: false, open: 0, cap: 0, opened: 0, written: 0, byWhy: {}, byLabel: {}, okPct: null, skipped: {}, follower: {} };
+    const st = coll.stats;
+    return { enabled: true, open: coll.open.length, cap: collCfg.open, opened: st.opened, written: st.written, byWhy: { ...st.byWhy }, byLabel: { ...st.byLabel }, okPct: st.written ? lr2(st.ok / st.written * 100) : null, skipped: { ...st.skipped }, follower: { ...st.follower } };
   }
 
   /* ---- Periodischer Lernlauf ---- */
@@ -2753,7 +2881,7 @@ function createCore(opts) {
     updateSettings, updateStrategies, rollbackTo, addWatch, removeWatch, updateWatch, select, exportData, importSettings, resetSettings, resetPortfolio, freshStart,
     learnView, learnQuality, learnDecision, learnPromote, learnReject, learnRollback, activeParams, monitorMetrics, exportBackup, validateBackup, restoreBackup, recordBacktest, learnRunNow: () => { const r = learnRun(true); persistNow(); return r; },
     newSession, factoryReset, persistNow, enqueueSecurity, clearFeed: () => { state.feed = []; persist(); },
-    drainTrades, haltTrading,
-    _t: { touch, posTransition, runProviderSteps, liveProvider, simProvider, updatePriorityFee, writeOffPosition, scanOnce, updateSolPrice, applySnapshot, applyAlt, fetchChunk, reconcile, analyzeAll, startScanner, stopScanner, timers, managePositions, closePosition, processQueue, enqueue, checkSecurity, ensureToken, maybeAutoTrade, setBotState, learnRun, learnOnClose, learnFollowUps, finishFollowUp, createChallenger, shadowEval, liveEval, addRecord, nearMissTick, maybeTune, updateSettings, monitorTick }
+    drainTrades, haltTrading, candidatesFlush, candidateView,
+    _t: { candidateTick, candidateRefresh, candState: () => coll, touch, posTransition, runProviderSteps, liveProvider, simProvider, updatePriorityFee, writeOffPosition, scanOnce, updateSolPrice, applySnapshot, applyAlt, fetchChunk, reconcile, analyzeAll, startScanner, stopScanner, timers, managePositions, closePosition, processQueue, enqueue, checkSecurity, ensureToken, maybeAutoTrade, setBotState, learnRun, learnOnClose, learnFollowUps, finishFollowUp, createChallenger, shadowEval, liveEval, addRecord, nearMissTick, maybeTune, updateSettings, monitorTick }
   };
 }

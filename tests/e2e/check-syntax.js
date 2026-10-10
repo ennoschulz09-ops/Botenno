@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const ROOT = path.resolve(__dirname, '../..');
-const MODULES = ['js/base.js', 'js/engine.js', 'js/learning.js', 'js/core.js', 'js/selftest.js', 'js/ui.js'];
+const MODULES = ['js/base.js', 'js/engine.js', 'js/learning.js', 'js/dataset.js', 'js/core.js', 'js/selftest.js', 'js/ui.js'];
 const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 let bad = 0;
 const fail = msg => { bad++; console.error(msg); };

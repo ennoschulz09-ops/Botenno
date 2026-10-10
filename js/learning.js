@@ -1,8 +1,8 @@
 /* Smart Lab – learning.js
    Lern-KI (reine Funktionen): Features · Records · Ursachen · Muster · Hypothesen · Experimente · Drift · Modell
    Klassisches Skript ohne Build-Schritt: alle Dateien teilen sich den globalen Gültigkeitsbereich und werden in fester
-   Reihenfolge geladen (index.html bzw. server/load-core.js): base → engine → learning → core → selftest → ui.
-   base, engine, learning, core und selftest laufen auch ohne Browser (Node.js); nur ui.js braucht das DOM. */
+   Reihenfolge geladen (index.html bzw. server/load-core.js): base → engine → learning → dataset → core → selftest → ui.
+   base, engine, learning, dataset, core und selftest laufen auch ohne Browser (Node.js); nur ui.js braucht das DOM. */
 'use strict';
 
 /* ============================== ADAPTIVE LOSS INTELLIGENCE (reine Funktionen) ==============================
