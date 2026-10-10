@@ -1434,6 +1434,7 @@ function createCore(opts) {
       ohlcvForPositions();
       const ta = env.now(); analyzeAll(); state.metrics.perf.analysis = env.now() - ta;
       const exits = managePositions();
+      try { maybeAutoFreshStart(); } catch (e) { log.error('SYSTEM', 'Automatischer Frischer Start: ' + e.message); }
       try { learnFollowUps(); learnRun(false); } catch (e) { log.error('LEARNING', 'Lernlauf fehlgeschlagen: ' + e.message); }
       runAlerts();
       try { monitorTick(env.now()); } catch (e) { log.error('SYSTEM', 'Anomalie-Monitor: ' + e.message); }
@@ -2827,7 +2828,7 @@ function createCore(opts) {
   /* Frischer Start: Startkapital zurück, offene Positionen und Orders verworfen, Risiko-Zähler/Cooldowns
      frei. Journal, Statistiken, Lern-/Analysedaten, Logs, Alarme, Watchlist und Einstellungen bleiben erhalten;
      verworfene Positionen stehen im Journal als RESET und zählen nicht in die Performance-Statistik. */
-  function freshStart() {
+  function freshStart(o = {}) {
     if (state.locks.size) return { ok: false, error: 'Eine Order wird gerade ausgeführt – bitte kurz warten' };
     const now = env.now(), cap = S().simCapitalUsd;
     let cancelled = 0;
@@ -2846,12 +2847,26 @@ function createCore(opts) {
     state.portfolio = freshPortfolio(cap);
     Object.assign(state.risk, { buyCount: {}, coinCooldown: {}, stratCooldown: {}, lossCooldownUntil: 0, globalPauseUntil: 0, lossStreak: 0, dailyPnl: 0, dailyTrades: 0, dailyStartEquity: cap, dailyLimitHit: false, reviewRequired: false, buyTimes: [] });
     state.reconciliation = { required: false, issues: [], at: now };
-    if (state.session) state.sessions.unshift({ ...state.session, endedAt: now, note: 'Frischer Start' });
+    if (state.session) state.sessions.unshift({ ...state.session, endedAt: now, note: o.auto ? 'Automatischer Frischer Start (Kapital aufgebraucht)' : 'Frischer Start' });
     state.session = null; ensureSession();
-    audit('USER', 'FRESH_START', `Startkapital ${fmtUsd(cap)} · ${dropped} Position(en) verworfen · ${cancelled} Order(s) storniert · Analysedaten behalten`);
-    log.info('SYSTEM', `Frischer Start: Portfolio ${fmtUsd(cap)}, ${dropped} Position(en) verworfen – Journal, Statistiken und Lerndaten bleiben erhalten`);
+    audit(o.auto ? 'SYSTEM' : 'USER', o.auto ? 'AUTO_FRESH_START' : 'FRESH_START', `Startkapital ${fmtUsd(cap)} · ${dropped} Position(en) verworfen · ${cancelled} Order(s) storniert · Analysedaten behalten${o.detail ? ' · ' + o.detail : ''}`);
+    if (o.auto) {
+      log.warn('SYSTEM', `Automatischer Frischer Start: ${o.detail || 'Kapital aufgebraucht'} → Portfolio ${fmtUsd(cap)} – Journal, Statistiken und Lerndaten bleiben erhalten`);
+      alert('SYSTEM', null, `Kapital aufgebraucht – automatischer Frischer Start mit ${fmtUsd(cap)} (${o.detail || ''})`, 'WARNING', { key: 'autofresh', cooldownMs: 0 });
+    } else log.info('SYSTEM', `Frischer Start: Portfolio ${fmtUsd(cap)}, ${dropped} Position(en) verworfen – Journal, Statistiken und Lerndaten bleiben erhalten`);
     persistNow(); emit('trade', {}); emit('bot', {});
     return { ok: true, dropped, cancelled };
+  }
+  /* Automatischer Frischer Start (Einstellung autoFreshStart, Standard aus): nur in SIMULATION/PAPER, ohne offene Position, ohne
+     laufende Order und Sperre, und nur wenn keine Mindest-Order mehr möglich ist (größtmögliche Position oder Cash < Minimum).
+     Offene Positionen werden vorher normal zu Ende gehandelt – es wird nichts verworfen, die Lerndaten bleiben unverzerrt. */
+  function maybeAutoFreshStart() {
+    const s = S(); if (!s.autoFreshStart || !['SIMULATION', 'PAPER'].includes(state.mode)) return null;
+    if (state.positions.length || state.locks.size || state.queue.length || state.orders.some(o => !TERMINAL.has(o.state))) return null;
+    const eq = equityInfo().equity, cash = state.portfolio.cash, maxPos = isNum(eq) ? eq * s.maxPositionPct / 100 : 0;
+    if (maxPos >= MIN_ORDER_USD && cash >= MIN_ORDER_USD) return null;
+    const detail = `Kapital ${fmtUsd(eq)} · Cash ${fmtUsd(cash)} · größtmögliche Position ${fmtUsd(maxPos)} < Minimum ${fmtUsd(MIN_ORDER_USD)}`;
+    return freshStart({ auto: true, detail });
   }
   function newSession() {
     ensureSession(); state.sessions.unshift({ ...state.session, endedAt: env.now() });
@@ -2882,6 +2897,6 @@ function createCore(opts) {
     learnView, learnQuality, learnDecision, learnPromote, learnReject, learnRollback, activeParams, monitorMetrics, exportBackup, validateBackup, restoreBackup, recordBacktest, learnRunNow: () => { const r = learnRun(true); persistNow(); return r; },
     newSession, factoryReset, persistNow, enqueueSecurity, clearFeed: () => { state.feed = []; persist(); },
     drainTrades, haltTrading, candidatesFlush, candidateView,
-    _t: { candidateTick, candidateRefresh, candState: () => coll, touch, posTransition, runProviderSteps, liveProvider, simProvider, updatePriorityFee, writeOffPosition, scanOnce, updateSolPrice, applySnapshot, applyAlt, fetchChunk, reconcile, analyzeAll, startScanner, stopScanner, timers, managePositions, closePosition, processQueue, enqueue, checkSecurity, ensureToken, maybeAutoTrade, setBotState, learnRun, learnOnClose, learnFollowUps, finishFollowUp, createChallenger, shadowEval, liveEval, addRecord, nearMissTick, maybeTune, updateSettings, monitorTick }
+    _t: { candidateTick, candidateRefresh, candState: () => coll, maybeAutoFreshStart, touch, posTransition, runProviderSteps, liveProvider, simProvider, updatePriorityFee, writeOffPosition, scanOnce, updateSolPrice, applySnapshot, applyAlt, fetchChunk, reconcile, analyzeAll, startScanner, stopScanner, timers, managePositions, closePosition, processQueue, enqueue, checkSecurity, ensureToken, maybeAutoTrade, setBotState, learnRun, learnOnClose, learnFollowUps, finishFollowUp, createChallenger, shadowEval, liveEval, addRecord, nearMissTick, maybeTune, updateSettings, monitorTick }
   };
 }

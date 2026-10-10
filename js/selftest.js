@@ -318,6 +318,27 @@ const SELF_TESTS = [
     assert((await core.executeBuy(t2.id, { sizeUsd: 20 })).ok, 'Nach frischem Start kein Neukauf möglich');
     return `1 Position verworfen · Cash = Startkapital · ${closedBefore} Trade(s) & Statistik behalten · Neukauf ok`;
   }],
+  ['Trading', 'Automatischer Frischer Start nur bei aufgebrauchtem Kapital, ohne offene Positionen, nur mit Einstellung', async () => {
+    const H = makeTestHarness(); const core = await testCore(H), st = core.state, cap = core.S().simCapitalUsd;
+    const t1 = await prepToken(core, H, 1);
+    assert((await core.executeBuy(t1.id, { sizeUsd: 20 })).ok, 'Buy fehlgeschlagen');
+    const drain = () => { st.portfolio.cash = 3; st.portfolio.realized = -(cap - 3); };
+    drain(); // Kapital aufgebraucht, aber Einstellung aus → nichts
+    assert(core._t.maybeAutoFreshStart() === null && st.portfolio.cash === 3, 'Auto-Start trotz ausgeschalteter Einstellung');
+    core.updateSettings({ autoFreshStart: true }, 'TEST');
+    assert(core._t.maybeAutoFreshStart() === null && st.positions.length === 1 && st.portfolio.cash === 3, 'Auto-Start trotz offener Position (würde sie verwerfen)');
+    assert((await core.executeSell(st.positions[0].id, 'ALL', 'MANUAL')).ok, 'Sell fehlgeschlagen');
+    st.portfolio.cash = cap * 0.5; // genug Kapital für eine Mindest-Order → nichts
+    assert(core._t.maybeAutoFreshStart() === null && st.portfolio.cash === cap * 0.5, 'Auto-Start trotz ausreichendem Kapital');
+    drain();
+    const learnBefore = JSON.stringify([st.learn.records.length, st.journal.length, st.journal.filter(j => j.status === 'CLOSED').length]);
+    const r = core._t.maybeAutoFreshStart();
+    assert(r && r.ok && r.dropped === 0 && st.portfolio.cash === cap && st.portfolio.realized === 0, 'Kein automatischer Frischer Start: ' + JSON.stringify(r));
+    assert(JSON.stringify([st.learn.records.length, st.journal.length, st.journal.filter(j => j.status === 'CLOSED').length]) === learnBefore && !st.journal.some(j => j.status === 'RESET'), 'Journal/Lerndaten verändert');
+    assert(st.sessions[0].note === 'Automatischer Frischer Start (Kapital aufgebraucht)' && st.auditLog.some(a => a.what === 'AUTO_FRESH_START' && a.who === 'SYSTEM'), 'Notiz/Audit fehlt');
+    assert(core._t.maybeAutoFreshStart() === null, 'Zweiter Auto-Start ohne Grund');
+    return `aus → nichts · offene Position → wartet · genug Kapital → nichts · aufgebraucht → Startkapital ${fmtUsd(cap)}, Journal & Lerndaten unverändert, Audit SYSTEM`;
+  }],
   ['Trading', 'Duplicate Order Protection (Doppelklick, parallele Signale)', async () => {
     const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1);
     const rs = await Promise.all([1, 2, 3, 4, 5].map(() => core.executeBuy(t.id, { sizeUsd: 20 })));

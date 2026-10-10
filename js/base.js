@@ -11,7 +11,7 @@
    ===================================================================== */
 
 /* ============================== KONSTANTEN ============================== */
-const APP_VERSION = '2.13.0';
+const APP_VERSION = '2.14.0';
 /* true, wenn Version a älter als b ist (fehlende Version = sehr alt). */
 const verLt = (a, b) => { if (typeof a !== 'string') return true; const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const STRATEGY_VERSION = '1.0.0';
@@ -313,6 +313,7 @@ const SETTINGS_SCHEMA = [
   { k: 'ddStopPct', s: 'Risiko', l: 'Drawdown-Grenze: keine Auto-Käufe ab (0 = aus)', t: 'num', def: 20, min: 0, max: 100, u: '%' },
   { k: 'signalConflictBlock', s: 'Risiko', l: 'Auto-Kauf bei widersprüchlichen Signalen verhindern', t: 'bool', def: true },
   { k: 'strategyCooldowns', s: 'Risiko', l: 'Strategie-Cooldown je Coin anwenden (Dauer je Strategie einstellbar)', t: 'bool', def: true },
+  { k: 'autoFreshStart', s: 'Risiko', l: `Automatischer Frischer Start, wenn das Kapital für keine Mindest-Order (${MIN_ORDER_USD} $) mehr reicht (nur Simulation/Paper, ohne offene Positionen)`, t: 'bool', def: false },
   { k: 'lowQualityMarketBlock', s: 'Risiko', l: 'Marktweite Handelspause bei schlechter Datenlage', t: 'bool', def: true },
   { k: 'consensusMinWeight', s: 'Risiko', l: 'Min. Strategie-Konsens (Summe Gewichte)', t: 'num', def: 1.5, min: 0, max: 5, step: 0.1 },
   // Ausführung
