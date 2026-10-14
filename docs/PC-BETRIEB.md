@@ -1,6 +1,6 @@
 # Smart Lab – Betrieb auf dem PC (Windows)
 
-Stand: App-Version 2.14.0 (Roadmap C1, PC-Variante; seit 2.13.0 mit Datensammler). Technischer Hintergrund: `docs/ARCHITEKTUR.md`, Lerndaten: `docs/LERNDATEN.md`.
+Stand: App-Version 2.15.0 (Roadmap C1, PC-Variante; seit 2.13.0 mit Datensammler). Technischer Hintergrund: `docs/ARCHITEKTUR.md`, Lerndaten: `docs/LERNDATEN.md`.
 
 Der PC-Bot ist dieselbe App wie im Browser, nur ohne Browser-Tab: Er läuft rund um die Uhr, solange der PC an ist, und speichert seine Daten als Dateien statt im 5-MB-Speicher des Browsers. Dadurch hat er ein deutlich größeres Lern-Gedächtnis. Seit 2.13.0 sammelt er außerdem für jeden gescannten Coin einen Kandidaten-Datensatz – Trainingsdaten für ein späteres Modell (Abschnitt 8). Bedient wird er über eine einfache Oberfläche im Browser, die nur auf diesem PC erreichbar ist.
 
@@ -51,7 +51,7 @@ git clone https://github.com/ennoschulz09-ops/Botenno.git C:\SmartLab
 **Starten:** `C:\SmartLab\start-bot.bat` doppelklicken. Es öffnet sich ein schwarzes Fenster, kurz danach der Browser mit der Oberfläche **http://localhost:8787**. Im Fenster steht unter anderem:
 
 ```
-Smart Lab 2.14.0 läuft (echte Marktdaten, simulierter Handel)
+Smart Lab 2.15.0 läuft (echte Marktdaten, simulierter Handel)
 Oberfläche: http://localhost:8787   ·   Daten: C:\SmartLab\data
 Beenden mit Strg+C (speichert vorher alles).
 ```
@@ -151,6 +151,8 @@ Achtung: Der Import eines vollständigen Exports aus der Browser-App ersetzt all
 
 **Automatischer Frischer Start (seit 2.14.0):** Mit der Einstellung `autoFreshStart` setzt sich das Sim-Portfolio selbst auf das Startkapital zurück, sobald das Kapital für keine Mindest-Order (5 $) mehr reicht – bei 5 % Positionsgröße also unter etwa 100 $. Das passiert erst, wenn keine Position mehr offen ist; Journal, Statistiken und Lerndaten bleiben erhalten. Im Protokoll steht dann „Automatischer Frischer Start“. Standardmäßig ist die Option aus; sinnvoll ist sie, wenn Tagesverlust-Limit und Drawdown-Grenze ausgeschaltet sind.
 
+**Unbegrenzt nachkaufen mit Kapital-Grenze je Coin (seit 2.15.0):** Mit `maxBuysPerCoin` 0 gibt es keine feste Zahl an Käufen pro Coin mehr. Nachgekauft wird trotzdem nur, wenn der Kurs mindestens +10 % über dem durchschnittlichen Kaufpreis liegt (`addOnlyInProfit`), und nicht öfter als der Strategie-Cooldown erlaubt. `maxCoinExposurePct` (z. B. 15) begrenzt, wie viel Prozent des Kapitals insgesamt in einem Coin stecken dürfen; der letzte Nachkauf wird passend verkleinert. Gewinnmitnahmen (TP1/TP2/TP3, Trailing) laufen weiter – nach einem Teilverkauf pausiert der Coin für die Dauer des Coin-Cooldowns.
+
 ## 7. Updates
 
 1. Bot beenden („Bot beenden“ oder Strg+C).
@@ -221,7 +223,7 @@ Der Bot hält jeden Coin, den er scannt, zum Zeitpunkt seiner Entscheidung fest 
 - Der Handel ist **nur simuliert**. LIVE-Handel und Signieren sind gesperrt; auf dem PC gibt es keine Wallet, keine Seed-Phrase und keine privaten Schlüssel.
 - Der Ordner `data` und alle Backups enthalten die Einstellungen inklusive selbst eingetragener RPC-Adressen und eines eventuell eingetragenen Jupiter-API-Keys. Nicht weitergeben und nicht öffentlich hochladen. Der Ordner `data` ist von Git ausgeschlossen.
 
-## 11. Grenzen der Übergangs-Oberfläche (2.14.0)
+## 11. Grenzen der Übergangs-Oberfläche (2.15.0)
 
 Die PC-Oberfläche deckt den Betrieb ab, ist aber bewusst einfach gehalten. Noch nicht enthalten:
 

@@ -567,10 +567,12 @@ function createCore(opts) {
     if (!isNum(eq) || eq <= 0) return { size: 0, reason: 'Kein Kapital verfügbar' };
     if (!A) return { size: 0, reason: 'Keine Analyse vorhanden' };
     const maxPos = eq * s.maxPositionPct / 100;
+    const coinRoom = s.maxCoinExposurePct > 0 ? Math.max(0, eq * s.maxCoinExposurePct / 100 - ((openPos(t.id) || {}).costUsd || 0)) : null; // Restspielraum je Coin (alle Käufe zusammen)
     if (manualSize != null) {
       if (!isNum(manualSize) || manualSize <= 0) return { size: 0, reason: 'Ungültiger Betrag' };
       if (manualSize < MIN_ORDER_USD) return { size: 0, reason: `Betrag < Minimum ${fmtUsd(MIN_ORDER_USD)}` };
       if (manualSize > maxPos + 1e-9) return { size: 0, reason: `Betrag über max. Positionsgröße (${fmtUsd(maxPos)})` };
+      if (coinRoom != null && manualSize > coinRoom + 1e-9) return { size: 0, reason: `Betrag über dem Restspielraum je Coin (${fmtUsd(coinRoom)}, max. ${s.maxCoinExposurePct} % des Kapitals)` };
       return { size: m2(manualSize), manual: true, capBy: 'manuell', factors: {} };
     }
     if (A.confidence.total < s.minConfidence) return { size: 0, reason: `Datenqualität unzureichend (Confidence ${A.confidence.total}) → Position Size 0` };
@@ -593,7 +595,8 @@ function createCore(opts) {
       Liquidität: isNum(liq) && liq > 0 ? mi * (liq / 2) / (1 - mi) : 0,
       Exposure: Math.max(0, eq * s.maxExposurePct / 100 - eqi.exposure),
       'Max. Position': maxPos,
-      Cash: Math.max(0, state.portfolio.cash * 0.98)
+      Cash: Math.max(0, state.portfolio.cash * 0.98),
+      ...(coinRoom != null ? { 'Coin-Limit': coinRoom } : {})
     };
     const capBy = Object.entries(caps).sort((a, b) => a[1] - b[1])[0];
     const size = Math.max(0, capBy[1]);
@@ -651,6 +654,10 @@ function createCore(opts) {
     const maxBuys = s.maxBuysPerCoin; // 0 = unbegrenzt
     const bc = r.buyCount[t.id] || 0;
     if (maxBuys > 0 && bc >= maxBuys) add('BUY_LIMIT_REACHED', `Buy #${bc + 1} blockiert – max. ${maxBuys} Käufe pro Coin`);
+    if (pos && s.maxCoinExposurePct > 0) { // Nachkäufe sind begrenzt durch das Kapital je Coin, nicht durch die Anzahl
+      const capC = (equityInfo().equity || 0) * s.maxCoinExposurePct / 100;
+      if (capC - pos.costUsd < MIN_ORDER_USD) add('COIN_LIMIT', `${t.symbol} hält ${fmtUsd(pos.costUsd)} von max. ${fmtUsd(capC)} (${s.maxCoinExposurePct} % des Kapitals je Coin)`);
+    }
     if (!pos && s.maxOpenPositions > 0 && state.positions.length >= s.maxOpenPositions) add('MAX_POSITIONS', `${state.positions.length}/${s.maxOpenPositions} Positionen offen`);
     if (pos && s.addOnlyInProfit) {
       const pnl = isNum(pos.lastPrice) && isNum(pos.entryPrice) && pos.priceLabel !== 'STALE' ? (pos.lastPrice / pos.entryPrice - 1) * 100 : null;

@@ -1,6 +1,6 @@
 # Abschlussbericht – Master-Prompt „Ganzheitliche Optimierung“
 
-Stand: 2026-10-10 · App-Version 2.14.0 · Phasen 0–8 und Roadmap A1–A3 sowie B1–B3 abgeschlossen, C1 als PC-Variante begonnen (`docs/PC-BETRIEB.md`), Phase 1 „Daten“ mit dem Datensammler begonnen (`docs/STRATEGIE.md`).
+Stand: 2026-10-10 · App-Version 2.15.0 · Phasen 0–8 und Roadmap A1–A3 sowie B1–B3 abgeschlossen, C1 als PC-Variante begonnen (`docs/PC-BETRIEB.md`), Phase 1 „Daten“ mit dem Datensammler begonnen (`docs/STRATEGIE.md`).
 
 Der Bot ist ein stabiler, getesteter **Simulator mit Lern-KI**. Er handelt kein echtes Geld: LIVE-Handel und Signieren sind technisch gesperrt. Ob er nach realistischen Kosten profitabel wäre, ist **nicht nachgewiesen** (siehe „Verbleibende Einschränkungen“).
 
@@ -21,6 +21,7 @@ Der Bot ist ein stabiler, getesteter **Simulator mit Lern-KI**. Er handelt kein 
 | 8 / A3 Hardening | 2.10.1 | Sicherheitsprüfung, Performance-Messung, Regression, Release-Checkliste, dieser Bericht; LIVE-Gate verlangt jetzt aktive Risiko-Limits (der Lernmodus kann nie live gehen) |
 | B1–B3 Ehrliche Simulation | 2.11.0 | echte Jupiter-Kursangebote (nur Abfrage) mit Honeypot- und Rundreise-Prüfung, Füllung nach Wartezeit, Slippage-Grenze, gescheiterte Transaktionen mit Gebühr, Priority Fee aus dem Netzwerk, Abschreibung ohne Verkaufsweg; Coin-Quelle als Lernmerkmal |
 | C1 PC-Variante (Beginn) | 2.12.0 | Code in Module unter `js/` aufgeteilt (ohne Build-Schritt), Trades laufen neben dem Scan, PC-Bot unter Node.js mit Datei-Speicher, Tagessicherung und Oberfläche auf 127.0.0.1; Lern-KI lernt nur aus sauberen Trades (verzerrte Trades gespeichert, aber ausgeschlossen, `docs/LERNDATEN.md`), Kauf-Blocker bei widersprüchlichen Kursquellen |
+| Kapital-Grenze je Coin | 2.15.0 | neue Einstellung `maxCoinExposurePct` (Standard aus): begrenzt alle Käufe eines Coins zusammen auf einen Anteil des Kapitals; Nachkäufe werden auf den Restspielraum gedeckelt, danach `COIN_LIMIT` – Grundlage für unbegrenzte Nachkäufe bei wachsender Position |
 | Automatischer Frischer Start | 2.14.0 | neue Einstellung `autoFreshStart` (Standard aus): bei aufgebrauchtem Sim-Kapital ohne offene Positionen setzt sich das Portfolio selbst auf das Startkapital zurück; Journal, Statistiken und Lerndaten bleiben |
 | Daten, Schritt 1: Datensammler | 2.13.0 | jeder gescannte Coin als Kandidaten-Datensatz mit 30 min Kursverfolgung und Label nach Kosten (Triple Barrier, feste Referenzgröße 50 $, Qualitätskennzeichen), Verfolger für verdrängte Coins; auf dem PC als JSONL je Tag (nie gelöscht, nicht im Voll-Backup), Anzeige und Download in der Oberfläche; Handel, Risiko-Limits und Lern-KI unverändert (`docs/LERNDATEN.md`, Abschnitt 9) |
 
@@ -29,7 +30,7 @@ Der Bot ist ein stabiler, getesteter **Simulator mit Lern-KI**. Er handelt kein 
 | Datei | Inhalt |
 | --- | --- |
 | `index.html` | HTML, CSS und Login; lädt die Module unter `js/` (bis 2.11.0 war hier die ganze App) |
-| `js/*.js` | die App in sieben Modulen ohne Build-Schritt: `base` (Grundlagen, Daten, Security), `engine` (Analyse, Entscheidung, Backtest), `learning` (Lern-KI), `dataset` (Datensammler, seit 2.13.0), `core` (Kern `createCore`), `selftest` (92 Selbsttests), `ui` (Oberfläche, nur Browser) |
+| `js/*.js` | die App in sieben Modulen ohne Build-Schritt: `base` (Grundlagen, Daten, Security), `engine` (Analyse, Entscheidung, Backtest), `learning` (Lern-KI), `dataset` (Datensammler, seit 2.13.0), `core` (Kern `createCore`), `selftest` (93 Selbsttests), `ui` (Oberfläche, nur Browser) |
 | `server/` | PC-Bot unter Node.js (seit 2.12.0): Start `bot.js`, Kern-Lader, Datei-Speicher, Oberfläche auf 127.0.0.1, Selbsttests unter Node.js; seit 2.13.0 Kandidaten-Daten als JSONL (`data/candidates/`) |
 | `start-bot.bat` | Start des PC-Bots unter Windows per Doppelklick |
 | `docs/ARCHITEKTUR.md` | Architektur, Bewertung je Bereich, Entscheidungen, Änderungsprotokoll |
@@ -82,7 +83,7 @@ Neue Kern-Funktionen (bis 2.11.0 in `index.html`, seit 2.12.0 in `js/`): Datenva
 
 | Prüfung | Ergebnis |
 | --- | --- |
-| Selbsttests | 92 Tests, in der App (System → Selbsttest) und seit 2.12.0 auch unter Node.js (`node server/selftest.js`): 92 von 92 bestanden unter Node.js (2.14.0); 91 von 91 in 2.13.0 (davon 10 neue Tests „Datensammler“); 81 von 81 in 2.12.0. Bis 2.11.0 im Browser 78 von 78, 0 Konsolenfehler. Jupiter ist in Tests nachgebildet; die echte API ist aus der Cloud-Testumgebung nicht erreichbar |
+| Selbsttests | 93 Tests, in der App (System → Selbsttest) und seit 2.12.0 auch unter Node.js (`node server/selftest.js`): 93 von 93 bestanden unter Node.js (2.15.0); 92 von 92 in 2.14.0; 91 von 91 in 2.13.0 (davon 10 neue Tests „Datensammler“); 81 von 81 in 2.12.0. Bis 2.11.0 im Browser 78 von 78, 0 Konsolenfehler. Jupiter ist in Tests nachgebildet; die echte API ist aus der Cloud-Testumgebung nicht erreichbar |
 | E2E-Suiten (`tests/e2e`) | 10 Suiten: Selbsttest, Login, UI inkl. Mobil, Lern-KI, Backup, Migration, Backtest, Lernmodus-Profil, XSS und seit 2.12.0 PC-Bot (`pcbot`: Bot mit Testdaten starten, Oberfläche, Einstellungen-Import, Backup mit Neustart, API-Schutz, Sperre gegen zweiten Bot, Beenden speichert). Seit 2.13.0 prüft `pcbot` auch die Kandidaten-Daten (Datei, Format, Download, Schutz vor ungültigen Tagen, Anhängen nach Neustart). Bis 2.11.0 9 von 9 bestanden; für 2.12.0 und 2.13.0 gilt das Ergebnis der CI im PR |
 | CI (GitHub Actions) | Syntax-Prüfung → Selbsttests unter Node.js → alle Suiten; grün bei jedem PR seit A1, Laufzeit bis 2.11.0 etwa 4 min |
 | Performance (400 Tokens, Chromium) | Scan 17–41 ms, Analyse 11–20 ms, Render 4–22 ms, etwa 1 Scan/s, JS-Heap 25 MB; unverändert gegenüber Phase 0 |
@@ -97,6 +98,7 @@ Neue Kern-Funktionen (bis 2.11.0 in `index.html`, seit 2.12.0 in `js/`): Datenva
 - Loss-Cooldown und Pause aus Versionen vor 2.8.0 → 0 min, laufende Pause beendet (2.8.0).
 - Stufe B (2.11.0): keine Datenumstellung; neue Einstellungen erhalten Standardwerte, der Wechsel auf die ehrliche Simulation wird beim ersten Start im Log vermerkt. Trades von vorher haben keine Coin-Quelle („unbekannt“).
 - Datenbereinigung (2.12.0): Slippage mit begrenzter Formel neu berechnet (Ergebnisse unverändert); Learning Records um Ausführungsmodell, Verkaufsquelle und Kursabweichung ergänzt und auf Datenqualität geprüft; verzerrte Trades bleiben gespeichert, zählen aber nicht mehr fürs Lernen; Muster, Lektionen, Verlustmodell, Kalibrierung und Drift neu aus sauberen Trades; Hypothesen werden neu getestet. Läuft einmal je Datenbestand, im Browser wie auf dem PC.
+- Kapital-Grenze je Coin (2.15.0): keine Migration; die neue Einstellung startet ausgeschaltet.
 - Automatischer Frischer Start (2.14.0): keine Migration; die neue Einstellung startet ausgeschaltet.
 - Datensammler (2.13.0): keine Migration. Gespeicherte Daten und Backup-Format bleiben unverändert; die Kandidaten-Daten des PC-Bots liegen in eigenen Dateien (`data/candidates/`).
 

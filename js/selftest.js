@@ -219,6 +219,25 @@ const SELF_TESTS = [
     const r3 = await core.executeBuy(t.id, { sizeUsd: 20 }); assert(!r3.ok && codes(r3).includes('BUY_LIMIT_REACHED'), 'Buy #3 nicht blockiert: ' + codes(r3).join(','));
     return 'Buy #1 ✓ · Buy #2 ✓ · Buy #3 BUY_LIMIT_REACHED';
   }],
+  ['Trading', 'Unbegrenzte Nachkäufe nur auf der Treppe (+10 %) und bis zur Kapital-Grenze je Coin', async () => {
+    const H = makeTestHarness(); const core = await testCore(H, { maxBuysPerCoin: 0, addOnlyInProfit: true, maxCoinExposurePct: 15, sellCooldownMin: 0, tp1Pct: 500, tp2Pct: 1000, tp3Pct: 5000, trailActivatePct: 500 }); const t = await prepToken(core, H, 1); // ohne Gewinnmitnahmen im Test: die Position soll nur wachsen
+    const px = async p => { H.market[t.mint] = H.pair(t.mint, { price: p }); await core._t.fetchChunk([t.mint], true); await core._t.managePositions(); };
+    const pos = () => core.state.positions[0], room = () => core.equityInfo().equity * 0.15 - pos().costUsd;
+    assert((await core.executeBuy(t.id, { sizeUsd: 20 })).ok, 'Buy #1 fehlgeschlagen');
+    const flat = await core.executeBuy(t.id, { sizeUsd: 20 }); assert(codes(flat).includes('NO_AVERAGING_DOWN'), 'Nachkauf ohne Wachstum erlaubt: ' + codes(flat).join(','));
+    for (const p of [0.0013, 0.0016, 0.002]) { await px(p); const r = await core.executeBuy(t.id, { sizeUsd: 20 }); assert(r.ok, `Nachkauf bei ${p} blockiert: ` + codes(r).join(',')); }
+    assert(pos().entries.length === 4 && !codes(await core.executeBuy(t.id, { sizeUsd: 20 })).includes('BUY_LIMIT_REACHED'), 'Anzahl der Käufe begrenzt');
+    await px(0.0026);
+    const big = await core.executeBuy(t.id, { sizeUsd: m2(room() + 10) }); assert(!big.ok && codes(big).includes('SIZE_ZERO'), 'Nachkauf über die Coin-Grenze erlaubt: ' + codes(big).join(','));
+    const ec = core.execCheck(t, { auto: true }), cap = ec.sizing.factors && ec.sizing.factors.caps['Coin-Limit'];
+    assert(isNum(cap) && Math.abs(cap - room()) < 0.02 && !(ec.sizing.size > room() + 1e-6), 'Automatische Größe nicht auf den Restspielraum gedeckelt: ' + JSON.stringify(ec.sizing.factors && ec.sizing.factors.caps));
+    let p2 = 0.0026; // Auffüllen in Schritten (je Kauf höchstens max. Positionsgröße, jeder Nachkauf wieder ≥ +10 % über dem Durchschnitt)
+    for (let k = 0; k < 6 && room() >= MIN_ORDER_USD; k++) { p2 *= 1.3; await px(p2); const fill = Math.floor(Math.min(room(), core.equityInfo().equity * core.S().maxPositionPct / 100) * 100) / 100 - 0.01, rf = await core.executeBuy(t.id, { sizeUsd: fill }); assert(rf.ok, 'Auffüllen bis zur Grenze fehlgeschlagen: ' + fill + ' ' + codes(rf).join(',')); }
+    const full = await core.executeBuy(t.id, { sizeUsd: 10 }); assert(codes(full).includes('COIN_LIMIT') && pos().costUsd <= core.equityInfo().equity * 0.15 + 0.01, 'Coin-Grenze nicht durchgesetzt: ' + codes(full).join(','));
+    core.updateSettings({ maxCoinExposurePct: 0 }, 'TEST');
+    const off = core.execCheck(t, { auto: true }); assert(!off.blockers.some(b => b.code === 'COIN_LIMIT') && !('Coin-Limit' in (off.sizing.factors || { caps: {} }).caps), 'Grenze trotz 0 aktiv');
+    return `${pos().entries.length} Käufe ohne Anzahl-Grenze · ohne Wachstum NO_AVERAGING_DOWN · Größe gedeckelt · bei ${fmtUsd(pos().costUsd)} COIN_LIMIT (15 %) · 0 = aus`;
+  }],
   ['Trading', 'Coin-Cooldown 15 min nach Verkauf', async () => {
     const H = makeTestHarness(); const core = await testCore(H); const t = await prepToken(core, H, 1);
     assert((await core.executeBuy(t.id, { sizeUsd: 20 })).ok, 'Buy fehlgeschlagen');

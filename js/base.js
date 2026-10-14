@@ -11,7 +11,7 @@
    ===================================================================== */
 
 /* ============================== KONSTANTEN ============================== */
-const APP_VERSION = '2.14.0';
+const APP_VERSION = '2.15.0';
 /* true, wenn Version a älter als b ist (fehlende Version = sehr alt). */
 const verLt = (a, b) => { if (typeof a !== 'string') return true; const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const STRATEGY_VERSION = '1.0.0';
@@ -302,6 +302,7 @@ const SETTINGS_SCHEMA = [
   { k: 'minSystemHealth', s: 'Risiko', l: 'Min. System Health für Trading (0 = aus)', t: 'int', def: 60, min: 0, max: 100 },
   { k: 'requireVerifiedSecurity', s: 'Risiko', l: 'Nur VERIFIED Security (RPC + RugCheck)', t: 'bool', def: false },
   { k: 'maxBuysPerCoin', s: 'Risiko', l: 'Max. Käufe pro Coin (0 = unbegrenzt)', t: 'int', def: 2, min: 0, max: 100 },
+  { k: 'maxCoinExposurePct', s: 'Risiko', l: 'Max. Kapital je Coin – alle Käufe zusammen (0 = aus)', t: 'num', def: 0, min: 0, max: 100, u: '%' },
   { k: 'addOnlyInProfit', s: 'Risiko', l: `Nachkauf nur im Gewinn (ab +${PYRAMID_MIN_PNL_PCT} %, kein Nachkaufen im Verlust)`, t: 'bool', def: true },
   { k: 'sellCooldownMin', s: 'Risiko', l: 'Coin-Cooldown nach Verkauf (0 = aus)', t: 'int', def: 15, min: 0, max: 1440, u: 'min' },
   { k: 'lossCooldownMin', s: 'Risiko', l: 'Loss-Cooldown (global) nach Verlust (0 = aus)', t: 'int', def: 0, min: 0, max: 1440, u: 'min' },
@@ -935,6 +936,7 @@ const BLOCKER_DEFS = {
   CONCENTRATION: [4, 'PORTFOLIO', 'Konzentrationsrisiko'],
   MAX_POSITIONS: [5, 'LIMITS', 'Max. offene Positionen'],
   BUY_LIMIT_REACHED: [5, 'LIMITS', 'Buy-Limit pro Coin erreicht'],
+  COIN_LIMIT: [5, 'LIMITS', 'Max. Kapital je Coin erreicht'],
   NO_AVERAGING_DOWN: [5, 'LIMITS', 'Kein Nachkauf im Verlust'],
   COOLDOWN_ACTIVE: [6, 'COOLDOWN', 'Coin-Cooldown aktiv'],
   LOSS_COOLDOWN: [6, 'COOLDOWN', 'Loss-Cooldown aktiv'],
