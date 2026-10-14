@@ -42,7 +42,7 @@ Das deckt sich mit der Roadmap: C2 (Datensammler), C3 (Replay-Backtest), C4 (Var
 
 | Bereich | Bewertung | Begründung |
 |---|---|---|
-| Sicherheit & Fundament | stark | LIVE gesperrt, 92 Selbsttests (2.14.0), 10 E2E-Suiten, CI bei jedem PR, Backups, PC-Betrieb |
+| Sicherheit & Fundament | stark | LIVE gesperrt, 93 Selbsttests (2.15.0), 10 E2E-Suiten, CI bei jedem PR, Backups, PC-Betrieb |
 | Ehrliche Messung | gut | echte Jupiter-Angebote, Wartezeit, gescheiterte Transaktionen, Gebühren (2.11.0); verzerrte Trades fürs Lernen ausgeschlossen (2.12.0) |
 | Lern-Logik | solide, noch keine „KI“ | Statistik mit Schutz vor Überanpassung (Train/Validation/Test, Walk-Forward, Shadow, nur verschärfend, Rollback); für die Datenmenge angemessen |
 | Datenmenge | schwach | 35 saubere von 100 gespeicherten Trades; belastbare Aussagen brauchen Hunderte bis Tausende. Seit 2.13.0 schreibt der PC-Bot für jeden gescannten Coin einen Kandidaten-Datensatz mit Label nach Kosten – die Menge wächst, eine Auswertung steht noch aus |
